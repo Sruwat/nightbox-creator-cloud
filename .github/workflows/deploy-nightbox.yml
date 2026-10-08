@@ -1,0 +1,235 @@
+name: Deploy NightBox to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: nightbox-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build frontend
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm install --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run build
+
+      - name: Validate Telegram bot code and shared-key storage
+        run: |
+          python3 -m compileall -q appcode/nightbox/telegram-bots
+          node -e 'const apps=require("./appcode/nightbox/telegram-bots/ecosystem.config.cjs").apps; const expected=["nightbox-connection-bot","nightbox-terabox-bot","nightbox-diskwala-bot","nightbox-upload-bot"]; if (JSON.stringify(apps.map(a=>a.name).sort()) !== JSON.stringify(expected.sort())) process.exit(1); console.log("Telegram PM2 process list valid")'
+          python3 - <<'PY'
+          import os
+          import sys
+          import tempfile
+          from pathlib import Path
+          sys.path.insert(0, "appcode/nightbox/telegram-bots")
+          with tempfile.TemporaryDirectory() as directory:
+              os.environ["TELEGRAM_STATE_DIR"] = directory
+              import creator_keys
+              creator_keys.set_creator_key(123, "nb_live_test")
+              assert creator_keys.get_creator_key(123) == "nb_live_test"
+              creator_keys.remove_creator_key(123)
+              assert creator_keys.get_creator_key(123) == ""
+              assert Path(directory, "creator_keys.sqlite3").exists()
+          print("Shared creator-key storage checks passed")
+          PY
+
+      - name: Configure SSH
+        env:
+          VPS_HOST: ${{ secrets.NIGHTBOX_VPS_HOST }}
+          VPS_SSH_KEY: ${{ secrets.NIGHTBOX_VPS_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/nightbox_deploy
+          chmod 600 ~/.ssh/nightbox_deploy
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Validate Telegram bot secrets
+        env:
+          TELEGRAM_API_ID: ${{ secrets.NIGHTBOX_TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.NIGHTBOX_TELEGRAM_API_HASH }}
+          TELEGRAM_BOT_TOKEN_CONNECTION: ${{ secrets.NIGHTBOX_BOT_CONNECTION_TOKEN }}
+          TELEGRAM_BOT_TOKEN_DISKWALA: ${{ secrets.NIGHTBOX_BOT_DISKWALA_TOKEN }}
+          TELEGRAM_BOT_TOKEN_TERABOX: ${{ secrets.NIGHTBOX_BOT_TERABOX_TOKEN }}
+          TELEGRAM_BOT_TOKEN_UPLOAD: ${{ secrets.NIGHTBOX_BOT_UPLOAD_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          api_id = os.environ.get("TELEGRAM_API_ID", "")
+          api_hash = os.environ.get("TELEGRAM_API_HASH", "")
+          if not api_id.isdigit() or not api_hash:
+              raise SystemExit("Telegram API ID/hash secrets are missing or malformed")
+
+          for name in ("CONNECTION", "DISKWALA", "TERABOX", "UPLOAD"):
+              token = os.environ.get(f"TELEGRAM_BOT_TOKEN_{name}", "")
+              if not token:
+                  raise SystemExit(f"Telegram token secret for {name} is missing")
+              request = urllib.request.Request(
+                  f"https://api.telegram.org/bot{token}/getMe", method="GET"
+              )
+              try:
+                  with urllib.request.urlopen(request, timeout=15) as response:
+                      result = json.load(response)
+              except Exception as error:
+                  raise SystemExit(f"Telegram token validation failed for {name}") from error
+              if not result.get("ok"):
+                  raise SystemExit(f"Telegram rejected the configured {name} bot token")
+              print(f"Telegram bot token valid: {name} (@{result['result'].get('username', 'unknown')})")
+          PY
+
+      - name: Upload frontend and backend source
+        env:
+          VPS_HOST: ${{ secrets.NIGHTBOX_VPS_HOST }}
+          VPS_USER: ${{ secrets.NIGHTBOX_VPS_USER }}
+        run: |
+          rsync -az --delete -e "ssh -i ~/.ssh/nightbox_deploy" dist/ "$VPS_USER@$VPS_HOST:/var/www/nightbox/nightbox-p4/web/"
+          rsync -az --delete \
+            --exclude='.env' \
+            --exclude='data/' \
+            --exclude='temp/' \
+            --exclude='media/' \
+            --exclude='node_modules/' \
+            -e "ssh -i ~/.ssh/nightbox_deploy" \
+            appcode/nightbox/backend/ "$VPS_USER@$VPS_HOST:/var/www/nightbox/nightbox-p4/backend/"
+
+      - name: Rebuild isolated NightBox service
+        env:
+          VPS_HOST: ${{ secrets.NIGHTBOX_VPS_HOST }}
+          VPS_USER: ${{ secrets.NIGHTBOX_VPS_USER }}
+        run: |
+          ssh -i ~/.ssh/nightbox_deploy "$VPS_USER@$VPS_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          APP=/var/www/nightbox/nightbox-p4/backend
+          docker build -t nightbox-p4-backend:local-origin "$APP"
+          docker rm -f nightbox-p4-backend >/dev/null 2>&1 || true
+          docker run -d --name nightbox-p4-backend --restart unless-stopped \
+            -p 127.0.0.1:3010:3000 \
+            --env-file "$APP/.env" \
+            -v /var/lib/nightbox-p4/temp:/app/temp \
+            -v /var/lib/nightbox-p4/data:/app/data \
+            -v /var/lib/nightbox-p4/media:/app/media \
+            nightbox-p4-backend:local-origin >/dev/null
+          sleep 3
+          curl --fail --silent --show-error http://127.0.0.1:3010/health >/dev/null
+          REMOTE
+
+      - name: Configure main-domain watch links
+        env:
+          VPS_HOST: ${{ secrets.NIGHTBOX_VPS_HOST }}
+          VPS_USER: ${{ secrets.NIGHTBOX_VPS_USER }}
+        run: |
+          ssh -i ~/.ssh/nightbox_deploy "$VPS_USER@$VPS_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          SITE=/etc/nginx/sites-available/nightbox-main
+          if [ ! -d /etc/letsencrypt/live/nightbox.in ]; then
+            echo "Missing TLS certificate for nightbox.in; refusing to publish an HTTPS share URL" >&2
+            exit 1
+          fi
+          cat > "$SITE" <<'NGINX'
+          server {
+              listen 80;
+              server_name nightbox.in www.nightbox.in;
+              return 301 https://$host$request_uri;
+          }
+          server {
+              listen 443 ssl http2;
+              server_name nightbox.in www.nightbox.in;
+              ssl_certificate /etc/letsencrypt/live/nightbox.in/fullchain.pem;
+              ssl_certificate_key /etc/letsencrypt/live/nightbox.in/privkey.pem;
+              client_max_body_size 4G;
+              location /watch/ {
+                  proxy_pass http://127.0.0.1:3010;
+                  proxy_http_version 1.1;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto https;
+              }
+              location / {
+                  root /var/www/nightbox/nightbox-p4/web;
+                  try_files $uri $uri/ /index.html;
+              }
+          }
+          NGINX
+          ln -sfn "$SITE" /etc/nginx/sites-enabled/nightbox-main
+          nginx -t
+          systemctl reload nginx
+          REMOTE
+
+      - name: Deploy and restart NightBox Telegram bots
+        env:
+          VPS_HOST: ${{ secrets.NIGHTBOX_VPS_HOST }}
+          VPS_USER: ${{ secrets.NIGHTBOX_VPS_USER }}
+          TELEGRAM_API_ID: ${{ secrets.NIGHTBOX_TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.NIGHTBOX_TELEGRAM_API_HASH }}
+          TELEGRAM_BOT_TOKEN_CONNECTION: ${{ secrets.NIGHTBOX_BOT_CONNECTION_TOKEN }}
+          TELEGRAM_BOT_TOKEN_DISKWALA: ${{ secrets.NIGHTBOX_BOT_DISKWALA_TOKEN }}
+          TELEGRAM_BOT_TOKEN_TERABOX: ${{ secrets.NIGHTBOX_BOT_TERABOX_TOKEN }}
+          TELEGRAM_BOT_TOKEN_UPLOAD: ${{ secrets.NIGHTBOX_BOT_UPLOAD_TOKEN }}
+        run: |
+          set -euo pipefail
+          BOT_DIR=/var/www/nightbox/nightbox-p4/telegram-bots
+          ENV_FILE="$(mktemp)"
+          trap 'rm -f "$ENV_FILE"' EXIT
+          umask 077
+          printf 'TELEGRAM_API_ID=%s\n' "$TELEGRAM_API_ID" > "$ENV_FILE"
+          printf 'TELEGRAM_API_HASH=%s\n' "$TELEGRAM_API_HASH" >> "$ENV_FILE"
+          printf 'TELEGRAM_BOT_TOKEN_CONNECTION=%s\n' "$TELEGRAM_BOT_TOKEN_CONNECTION" >> "$ENV_FILE"
+          printf 'TELEGRAM_BOT_TOKEN_DISKWALA=%s\n' "$TELEGRAM_BOT_TOKEN_DISKWALA" >> "$ENV_FILE"
+          printf 'TELEGRAM_BOT_TOKEN_TERABOX=%s\n' "$TELEGRAM_BOT_TOKEN_TERABOX" >> "$ENV_FILE"
+          printf 'TELEGRAM_BOT_TOKEN_UPLOAD=%s\n' "$TELEGRAM_BOT_TOKEN_UPLOAD" >> "$ENV_FILE"
+          printf 'BACKEND_URL=http://127.0.0.1:3010\n' >> "$ENV_FILE"
+          printf 'TELEGRAM_REQUIRE_CONNECT=true\n' >> "$ENV_FILE"
+          printf 'TELEGRAM_STATE_DIR=/var/www/nightbox/nightbox-p4/telegram-bots/state\n' >> "$ENV_FILE"
+
+          ssh -i ~/.ssh/nightbox_deploy "$VPS_USER@$VPS_HOST" \
+            'mkdir -p /var/www/nightbox/nightbox-p4/telegram-bots'
+          rsync -az --delete \
+            --exclude='.env' --exclude='venv/' --exclude='state/' \
+            --exclude='__pycache__/' --exclude='*.session' --exclude='*.session-journal' \
+            -e "ssh -i ~/.ssh/nightbox_deploy" \
+            appcode/nightbox/telegram-bots/ "$VPS_USER@$VPS_HOST:$BOT_DIR/"
+          rsync -az -e "ssh -i ~/.ssh/nightbox_deploy" \
+            "$ENV_FILE" "$VPS_USER@$VPS_HOST:$BOT_DIR/.env"
+          ssh -i ~/.ssh/nightbox_deploy "$VPS_USER@$VPS_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          BOT_DIR=/var/www/nightbox/nightbox-p4/telegram-bots
+          cd "$BOT_DIR"
+          chmod 600 .env
+          mkdir -p state
+          chmod 700 state
+          python3 -m venv venv
+          ./venv/bin/pip install --disable-pip-version-check -r requirements.txt
+          command -v pm2 >/dev/null || { echo "PM2 is not installed on the VPS" >&2; exit 1; }
+          legacy_upload_ids="$(pm2 jlist | python3 -c 'import json,sys; expected="/var/www/nightbox/nightbox-p4/telegram-bots/upload_bot.py"; apps=json.load(sys.stdin); print(" ".join(str(p["pm_id"]) for p in apps if p.get("name")=="upload-bot" and p.get("pm2_env",{}).get("pm_exec_path")==expected))')"
+          if [ -n "$legacy_upload_ids" ]; then pm2 delete $legacy_upload_ids; fi
+          pm2 startOrReload ecosystem.config.cjs --update-env
+          pm2 save
+          sleep 8
+          pm2 jlist | python3 -c 'import json,sys; apps=json.load(sys.stdin); expected={"nightbox-connection-bot","nightbox-terabox-bot","nightbox-diskwala-bot","nightbox-upload-bot"}; states={p["name"]:p["pm2_env"]["status"] for p in apps if p["name"] in expected}; missing=expected-set(states); failed={n:s for n,s in states.items() if s != "online"}; print("Bot process states:", states); sys.exit(bool(missing or failed))'
+          REMOTE
+
+      - name: Verify public endpoints
+        run: |
+          curl --fail --silent --show-error https://api.nightbox.in/health >/dev/null
+          curl --fail --silent --show-error https://app.nightbox.in/ >/dev/null
+          curl --fail --silent --show-error https://admin.nightbox.in/ >/dev/null

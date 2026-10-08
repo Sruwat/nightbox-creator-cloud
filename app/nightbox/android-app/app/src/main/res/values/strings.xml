@@ -1,0 +1,46 @@
+<resources>
+    <string name="app_name">NightBox : video player</string>
+    <string name="facebook_app_id">977476141884984</string>
+    <string name="app_tagline">Premium Video Streaming</string>
+
+    <!-- Home Screen -->
+    <string name="join_telegram">Join our Telegram for latest updates &amp; new releases</string>
+    <string name="play_local_files">Play Local Video Files from Gallery</string>
+    <string name="open_gallery">Open Gallery</string>
+    <string name="access_nightbox_links">Access NightBox Links</string>
+    <string name="input_nightbox_link">Input your NightBox Link to access premium content</string>
+    <string name="paste_link_hint">Paste NightBox URL here…</string>
+    <string name="watch_button">Watch Video</string>
+    <string name="features_title">Features</string>
+
+    <!-- Features -->
+    <string name="feature_cloud">Infinite Cloud\nStorage</string>
+    <string name="feature_multi_files">Multiple Files\nSupport</string>
+    <string name="feature_sharing">Easy Sharing\nvia Link</string>
+    <string name="feature_security">AI Powered Data\nSecurity</string>
+    <string name="feature_fast_playback">Distributed Video For\nFast Playback</string>
+    <string name="feature_more">Many More Premium\nFeatures</string>
+
+    <!-- File Info Screen -->
+    <string name="file_info_title">File Info</string>
+    <string name="social_join_text">Join Telegram and WhatsApp for new updates and improvements</string>
+    <string name="play_video_text">Play video with premium quality streaming</string>
+    <string name="open_video">Open Video</string>
+    <string name="advertisement_label">Advertisement</string>
+
+    <!-- Video Player Screen -->
+    <string name="share">Share</string>
+    <string name="telegram_join">Join Telegram</string>
+    <string name="download">Download</string>
+    <string name="replay">Replay</string>
+
+    <!-- General -->
+    <string name="loading">Loading…</string>
+    <string name="paste_description">Paste a NightBox video link or video ID to start watching</string>
+    <string name="error_invalid_link">Invalid link. Please use a valid NightBox video link</string>
+    <string name="error_playback">Playback error occurred</string>
+    <string name="no_videos_yet">No videos yet</string>
+    <string name="settings">Settings</string>
+    <string name="theme_toggle">Toggle Theme</string>
+    <string name="footer_text">NightBox : video player v4.1.4 • Premium Video Streaming</string>
+</resources>

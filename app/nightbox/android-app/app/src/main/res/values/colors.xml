@@ -1,0 +1,68 @@
+<resources>
+    <!-- Base -->
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <!-- Primary Purple Palette -->
+    <color name="primary_purple">#FF7C4DFF</color>
+    <color name="primary_purple_dark">#FF651FFF</color>
+    <color name="primary_purple_light">#FFB388FF</color>
+    <color name="accent_violet">#FF9C7CFF</color>
+    <color name="accent_indigo">#FF536DFE</color>
+
+    <!-- Dark Mode Surfaces -->
+    <color name="bg_dark">#FF0D0B1E</color>
+    <color name="surface_dark">#FF12102A</color>
+    <color name="surface_card_dark">#FF1A1733</color>
+    <color name="surface_card_elevated_dark">#FF241F45</color>
+    <color name="surface_input_dark">#FF1E1B38</color>
+
+    <!-- Light Mode Surfaces -->
+    <color name="bg_light">#FFF5F3FF</color>
+    <color name="surface_light">#FFFFFFFF</color>
+    <color name="surface_card_light">#FFEDE7F6</color>
+    <color name="surface_card_elevated_light">#FFE8DEFF</color>
+    <color name="surface_input_light">#FFF3EEFF</color>
+
+    <!-- Text Colors — Dark Mode -->
+    <color name="text_primary_dark">#FFFFFFFF</color>
+    <color name="text_secondary_dark">#FFB0A8CC</color>
+    <color name="text_hint_dark">#FF6B6188</color>
+
+    <!-- Text Colors — Light Mode -->
+    <color name="text_primary_light">#FF1A1033</color>
+    <color name="text_secondary_light">#FF5A5072</color>
+    <color name="text_hint_light">#FF9B93AD</color>
+
+    <!-- Status / Nav Bar -->
+    <color name="status_bar_dark">#FF080618</color>
+    <color name="nav_bar_dark">#FF080618</color>
+    <color name="status_bar_light">#FFF5F3FF</color>
+    <color name="nav_bar_light">#FFF5F3FF</color>
+
+    <!-- Borders -->
+    <color name="divider_dark">#FF2A2545</color>
+    <color name="divider_light">#FFD1C4E9</color>
+
+    <!-- Gradient stops -->
+    <color name="gradient_start">#FF7C4DFF</color>
+    <color name="gradient_end">#FF536DFE</color>
+    <color name="gradient_glow">#33B388FF</color>
+
+    <!-- Ad placeholder -->
+    <color name="ad_placeholder_dark">#FF15122A</color>
+    <color name="ad_placeholder_light">#FFE8E0F5</color>
+
+    <!-- Legacy compat aliases (used in some places) -->
+    <color name="primary_green">#FF7C4DFF</color>
+    <color name="primary_green_dark">#FF651FFF</color>
+    <color name="primary_green_light">#FFB388FF</color>
+    <color name="surface_card">#FF1A1733</color>
+    <color name="surface_card_elevated">#FF241F45</color>
+    <color name="text_primary">#FFFFFFFF</color>
+    <color name="text_secondary">#FFB0A8CC</color>
+    <color name="text_hint">#FF6B6188</color>
+    <color name="divider">#FF2A2545</color>
+    <color name="status_bar">#FF080618</color>
+    <color name="nav_bar">#FF080618</color>
+</resources>

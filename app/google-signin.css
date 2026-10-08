@@ -1,0 +1,51 @@
+.google-signin-wrap {
+  display: flex;
+  min-height: 42px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.google-signin-button {
+  display: flex;
+  min-height: 40px;
+  justify-content: center;
+}
+
+.google-signin-loading,
+.google-signin-error {
+  font-size: 12px;
+  text-align: center;
+}
+
+.google-signin-loading {
+  color: #667085;
+}
+
+.google-signin-error {
+  color: #c52b34;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #98a2b3;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  height: 1px;
+  flex: 1;
+  background: #e6eaf0;
+  content: "";
+}
+
+@media (max-width: 480px) {
+  .google-signin-button iframe {
+    max-width: 100%;
+  }
+}

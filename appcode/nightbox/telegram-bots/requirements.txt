@@ -1,0 +1,8 @@
+pyrogram==2.0.106
+yt-dlp
+requests==2.32.3
+python-dotenv==1.0.1
+aiohttp==3.9.5
+aiofiles==23.2.1
+tgcrypto
+

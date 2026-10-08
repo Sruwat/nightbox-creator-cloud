@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Opening NightBox : video player...</title>
+  <meta name="description" content="Watch high-quality videos on the NightBox : video player app.">
+  <meta name="theme-color" content="#000000">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-color: #050505;
+      --surface: rgba(255, 255, 255, 0.05);
+      --accent: #8B5CF6;
+      --accent-glow: rgba(139, 92, 246, 0.5);
+      --text: #FFFFFF;
+      --text-dim: #94A3B8;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: 'Outfit', sans-serif;
+      background: var(--bg-color);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    /* Ambient Background Glow */
+    .glow {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 300px;
+      height: 300px;
+      background: var(--accent);
+      filter: blur(120px);
+      opacity: 0.15;
+      z-index: -1;
+      animation: pulse 4s infinite alternate;
+    }
+
+    @keyframes pulse {
+      from { opacity: 0.1; transform: translate(-50%, -50%) scale(1); }
+      to { opacity: 0.2; transform: translate(-50%, -50%) scale(1.2); }
+    }
+
+    /* Glass Container */
+    .container {
+      width: 90%;
+      max-width: 400px;
+      background: var(--surface);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 32px;
+      padding: 40px 24px;
+      text-align: center;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+    }
+
+    .app-logo {
+      width: 80px;
+      height: 80px;
+      background: #FFFFFF;
+      border-radius: 20px;
+      margin: 0 auto 24px;
+      padding: 10px;
+      box-shadow: 0 0 20px var(--accent-glow);
+    }
+
+    .app-logo img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    h1 {
+      font-size: 24px;
+      font-weight: 800;
+      margin-bottom: 12px;
+      letter-spacing: -0.5px;
+    }
+
+    p {
+      color: var(--text-dim);
+      font-size: 15px;
+      line-height: 1.6;
+      margin-bottom: 32px;
+    }
+
+    /* Modern Loader */
+    .loader {
+      width: 40px;
+      height: 40px;
+      border: 3px solid rgba(255,255,255,0.1);
+      border-top: 3px solid var(--accent);
+      border-radius: 50%;
+      margin: 0 auto 32px;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* High-End Buttons */
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 16px;
+      border-radius: 16px;
+      font-weight: 600;
+      font-size: 16px;
+      text-decoration: none;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      margin-bottom: 12px;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+      box-shadow: 0 4px 12px var(--accent-glow);
+    }
+
+    .btn-primary:active {
+      transform: scale(0.98);
+      background: #7C3AED;
+    }
+
+    .btn-secondary {
+      background: rgba(255,255,255,0.05);
+      color: white;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .btn-secondary:active {
+      background: rgba(255,255,255,0.1);
+    }
+
+    .footer {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-top: 24px;
+      opacity: 0.6;
+    }
+
+  </style>
+</head>
+<body>
+  <div class="glow"></div>
+  
+  <div class="container">
+    <div class="app-logo">
+      <img src="/logo.png" alt="App Logo">
+    </div>
+    
+    <h1>Opening in NightBox</h1>
+    <p id="status">Attempting to open the video in your app. Please wait a moment...</p>
+    
+    <div class="loader" id="loader"></div>
+
+    <a href="#" class="btn btn-primary" id="openBtn">Open App Manually</a>
+    <a href="https://play.google.com/store/apps/details?id=simple.shayaribygenz" class="btn btn-secondary">Get it on Play Store</a>
+
+    <div class="footer">
+      NightBox : video player &copy; 2026
+    </div>
+  </div>
+
+  <script>
+    const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=simple.shayaribygenz";
+    const pathParts = window.location.pathname.split('/');
+    const videoId = pathParts[pathParts.length - 1];
+    
+    // THE CRITICAL FIX: Using correct host video.prernaupin.in
+    const intentUrl = `intent://video.prernaupin.in/watch/${videoId}#Intent;scheme=https;package=simple.shayaribygenz;S.browser_fallback_url=${encodeURIComponent(PLAY_STORE_URL)};end`;
+
+    function attemptOpen() {
+      // Direct jump for Android
+      if (/android/i.test(navigator.userAgent)) {
+        window.location.href = intentUrl;
+      }
+    }
+
+    document.getElementById('openBtn').addEventListener('click', (e) => {
+      e.preventDefault();
+      attemptOpen();
+    });
+
+    // Auto-attempt on load
+    window.onload = () => {
+      setTimeout(attemptOpen, 500);
+      
+      // Update status if it stays on page
+      setTimeout(() => {
+        document.getElementById('status').innerText = "If the app didn't open automatically, please click the button below.";
+        document.getElementById('loader').style.display = 'none';
+      }, 4000);
+    };
+  </script>
+</body>
+</html>
