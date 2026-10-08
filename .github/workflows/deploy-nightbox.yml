@@ -32,7 +32,7 @@ jobs:
       - name: Validate Telegram bot code and shared-key storage
         run: |
           python3 -m compileall -q appcode/nightbox/telegram-bots
-          node -e 'const apps=require("./appcode/nightbox/telegram-bots/ecosystem.config.cjs").apps; const expected=["nightbox-connection-bot","nightbox-terabox-bot","nightbox-diskwala-bot","nightbox-upload-bot"]; if (JSON.stringify(apps.map(a=>a.name).sort()) !== JSON.stringify(expected.sort())) process.exit(1); console.log("Telegram PM2 process list valid")'
+          node -e 'const apps=require("./appcode/nightbox/telegram-bots/ecosystem.config.cjs").apps; const expected=["nightbox-connection-bot","nightbox-terabox-bot","nightbox-diskwala-bot","nightbox-nightbox-to-nightbox-bot","nightbox-nightheast-to-nightbox-bot","nightbox-upload-bot"]; if (JSON.stringify(apps.map(a=>a.name).sort()) !== JSON.stringify(expected.sort())) process.exit(1); console.log("Telegram PM2 process list valid")'
           python3 - <<'PY'
           import os
           import sys
@@ -67,6 +67,8 @@ jobs:
           TELEGRAM_BOT_TOKEN_CONNECTION: ${{ secrets.NIGHTBOX_BOT_CONNECTION_TOKEN }}
           TELEGRAM_BOT_TOKEN_DISKWALA: ${{ secrets.NIGHTBOX_BOT_DISKWALA_TOKEN }}
           TELEGRAM_BOT_TOKEN_TERABOX: ${{ secrets.NIGHTBOX_BOT_TERABOX_TOKEN }}
+          TELEGRAM_BOT_TOKEN_NIGHTBOX_TO_NIGHTBOX: ${{ secrets.NIGHTBOX_BOT_NIGHTBOX_TO_NIGHTBOX_TOKEN }}
+          TELEGRAM_BOT_TOKEN_NIGHTHEAST_TO_NIGHTBOX: ${{ secrets.NIGHTBOX_BOT_NIGHTHEAST_TO_NIGHTBOX_TOKEN }}
           TELEGRAM_BOT_TOKEN_UPLOAD: ${{ secrets.NIGHTBOX_BOT_UPLOAD_TOKEN }}
         run: |
           python3 - <<'PY'
@@ -79,7 +81,7 @@ jobs:
           if not api_id.isdigit() or not api_hash:
               raise SystemExit("Telegram API ID/hash secrets are missing or malformed")
 
-          for name in ("CONNECTION", "DISKWALA", "TERABOX", "UPLOAD"):
+          for name in ("CONNECTION", "DISKWALA", "TERABOX", "NIGHTBOX_TO_NIGHTBOX", "NIGHTHEAST_TO_NIGHTBOX", "UPLOAD"):
               token = os.environ.get(f"TELEGRAM_BOT_TOKEN_{name}", "")
               if not token:
                   raise SystemExit(f"Telegram token secret for {name} is missing")
@@ -184,6 +186,8 @@ jobs:
           TELEGRAM_BOT_TOKEN_CONNECTION: ${{ secrets.NIGHTBOX_BOT_CONNECTION_TOKEN }}
           TELEGRAM_BOT_TOKEN_DISKWALA: ${{ secrets.NIGHTBOX_BOT_DISKWALA_TOKEN }}
           TELEGRAM_BOT_TOKEN_TERABOX: ${{ secrets.NIGHTBOX_BOT_TERABOX_TOKEN }}
+          TELEGRAM_BOT_TOKEN_NIGHTBOX_TO_NIGHTBOX: ${{ secrets.NIGHTBOX_BOT_NIGHTBOX_TO_NIGHTBOX_TOKEN }}
+          TELEGRAM_BOT_TOKEN_NIGHTHEAST_TO_NIGHTBOX: ${{ secrets.NIGHTBOX_BOT_NIGHTHEAST_TO_NIGHTBOX_TOKEN }}
           TELEGRAM_BOT_TOKEN_UPLOAD: ${{ secrets.NIGHTBOX_BOT_UPLOAD_TOKEN }}
         run: |
           set -euo pipefail
@@ -196,6 +200,8 @@ jobs:
           printf 'TELEGRAM_BOT_TOKEN_CONNECTION=%s\n' "$TELEGRAM_BOT_TOKEN_CONNECTION" >> "$ENV_FILE"
           printf 'TELEGRAM_BOT_TOKEN_DISKWALA=%s\n' "$TELEGRAM_BOT_TOKEN_DISKWALA" >> "$ENV_FILE"
           printf 'TELEGRAM_BOT_TOKEN_TERABOX=%s\n' "$TELEGRAM_BOT_TOKEN_TERABOX" >> "$ENV_FILE"
+          printf 'TELEGRAM_BOT_TOKEN_NIGHTBOX_TO_NIGHTBOX=%s\n' "$TELEGRAM_BOT_TOKEN_NIGHTBOX_TO_NIGHTBOX" >> "$ENV_FILE"
+          printf 'TELEGRAM_BOT_TOKEN_NIGHTHEAST_TO_NIGHTBOX=%s\n' "$TELEGRAM_BOT_TOKEN_NIGHTHEAST_TO_NIGHTBOX" >> "$ENV_FILE"
           printf 'TELEGRAM_BOT_TOKEN_UPLOAD=%s\n' "$TELEGRAM_BOT_TOKEN_UPLOAD" >> "$ENV_FILE"
           printf 'BACKEND_URL=http://127.0.0.1:3010\n' >> "$ENV_FILE"
           printf 'TELEGRAM_REQUIRE_CONNECT=true\n' >> "$ENV_FILE"
@@ -225,7 +231,7 @@ jobs:
           pm2 startOrReload ecosystem.config.cjs --update-env
           pm2 save
           sleep 8
-          pm2 jlist | python3 -c 'import json,sys; apps=json.load(sys.stdin); expected={"nightbox-connection-bot","nightbox-terabox-bot","nightbox-diskwala-bot","nightbox-upload-bot"}; states={p["name"]:p["pm2_env"]["status"] for p in apps if p["name"] in expected}; missing=expected-set(states); failed={n:s for n,s in states.items() if s != "online"}; print("Bot process states:", states); sys.exit(bool(missing or failed))'
+          pm2 jlist | python3 -c 'import json,sys; apps=json.load(sys.stdin); expected={"nightbox-connection-bot","nightbox-terabox-bot","nightbox-diskwala-bot","nightbox-nightbox-to-nightbox-bot","nightbox-nightheast-to-nightbox-bot","nightbox-upload-bot"}; states={p["name"]:p["pm2_env"]["status"] for p in apps if p["name"] in expected}; missing=expected-set(states); failed={n:s for n,s in states.items() if s != "online"}; print("Bot process states:", states); sys.exit(bool(missing or failed))'
           REMOTE
 
       - name: Verify public endpoints
