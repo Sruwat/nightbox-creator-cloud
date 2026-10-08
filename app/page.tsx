@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable react/no-unescaped-entities */
+
 import { Fragment, useEffect, useState } from "react";
 import LiveAdminViews from "./admin-views";
 import AdminPaymentActions from "./admin-payment-actions";
