@@ -35,11 +35,17 @@ const googleAuthClient = new OAuth2Client();
 app.set('trust proxy', process.env.TRUST_PROXY === 'true');
 const PORT = process.env.PORT || 3000;
 const DOMAIN_URL = process.env.DOMAIN_URL || 'https://video.nightbox.in';
+const PUBLIC_API_URL = String(process.env.PUBLIC_API_URL || 'https://api.nightbox.in').replace(/\/$/, '');
+const CREATOR_DEFAULT_QUOTA_BYTES = 2 * 1024 * 1024 * 1024;
+const CREATOR_MAX_QUOTA_BYTES = 3 * 1024 * 1024 * 1024;
 const BUNNY_STORAGE_PASSWORD = process.env.BUNNY_STORAGE_PASSWORD;
 const BUNNY_STORAGE_ZONE = process.env.BUNNY_STORAGE_ZONE;
 const BUNNY_LOCAL_STORAGE = String(process.env.VIDEO_STORAGE_DRIVER || '').toLowerCase() === 'local';
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || crypto.randomBytes(32).toString('hex');
-const allowedOrigins = (process.env.WEB_ORIGINS || 'http://localhost:4173,http://localhost:4174').split(',').map((value) => value.trim()).filter(Boolean);
+const allowedOrigins = [...new Set([
+  ...(process.env.WEB_ORIGINS || 'http://localhost:4173,http://localhost:4174').split(',').map((value) => value.trim()).filter(Boolean),
+  'https://nightbox.in',
+])];
 
 if (process.env.NODE_ENV === 'production') {
   for (const name of ['AUTH_SECRET', 'IP_HASH_SECRET', 'VIEW_HASH_SECRET', 'ADMIN_API_KEY']) {
@@ -84,6 +90,10 @@ function uploadOwner(req) {
 }
 
 function requestIp(req) {
+  if (process.env.TRUST_PROXY === 'true') {
+    const forwardedIp = req.headers['cf-connecting-ip'] || req.headers['x-real-ip'];
+    if (forwardedIp && net.isIP(String(forwardedIp).trim())) return String(forwardedIp).trim();
+  }
   return String(req.ip || req.socket.remoteAddress || '').trim();
 }
 
@@ -101,7 +111,8 @@ async function viewerIsBlocked(req) {
   const blocked = new Set(String(process.env.BLOCKED_IP_HASHES || '').split(',').map((value) => value.trim()).filter(Boolean));
   const ipHash = store.hash(`${ip}|${process.env.IP_HASH_SECRET || process.env.AUTH_SECRET || 'change-me'}`);
   if (blocked.has(ipHash)) return true;
-  if (!process.env.IPQUALITYSCORE_API_KEY) return process.env.NODE_ENV === 'production';
+  // Basic bot filtering and the per-IP view cap remain active when no reputation vendor is configured.
+  if (!process.env.IPQUALITYSCORE_API_KEY) return false;
   if (!ip || ip === '::1' || ip === '127.0.0.1') return false;
   try {
     const response = await axios.get(`https://ipqualityscore.com/api/json/ip/${process.env.IPQUALITYSCORE_API_KEY}/${encodeURIComponent(ip)}`, { timeout: 2500 });
@@ -177,6 +188,11 @@ app.use(cors({
 app.use('/api/webhooks/razorpay', express.raw({ type: 'application/json', limit: '1mb' }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+app.get(['/ads.txt', '/app-ads.txt'], (_req, res) => {
+  const { content } = store.db.prepare('SELECT content FROM ads_txt_content WHERE id=1').get();
+  res.status(200).type('text/plain').set('Cache-Control', 'no-store').send(content);
+});
 
 // HSTS Header
 app.use((req, res, next) => {
@@ -278,6 +294,46 @@ function requireApiKey(req, res, next) {
   next();
 }
 
+function creatorStorageQuota(creatorId) {
+  return Number(store.db.prepare('SELECT quota_bytes AS quotaBytes FROM creator_storage_limits WHERE creator_id=?').get(creatorId)?.quotaBytes || CREATOR_DEFAULT_QUOTA_BYTES);
+}
+
+function creatorStorageUsage(creatorId) {
+  const staleBefore = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  store.db.prepare('DELETE FROM creator_storage_reservations WHERE created_at < ?').run(staleBefore);
+  const filesBytes = Number(store.db.prepare('SELECT COALESCE(SUM(size_bytes),0) AS total FROM creator_files WHERE owner_id=?').get(creatorId).total);
+  const videosBytes = Number(store.db.prepare("SELECT COALESCE(SUM(file_size),0) AS total FROM videos WHERE owner_id=? AND status <> 'deleted'").get(creatorId).total);
+  const usedBytes = filesBytes + videosBytes;
+  const reservedBytes = Number(store.db.prepare('SELECT COALESCE(SUM(size_bytes),0) AS total FROM creator_storage_reservations WHERE creator_id=?').get(creatorId).total);
+  return { usedBytes, reservedBytes, quotaBytes: creatorStorageQuota(creatorId), maximumBytes: CREATOR_MAX_QUOTA_BYTES };
+}
+
+function reserveCreatorStorage(creatorId, sizeBytes) {
+  const reservationId = store.id();
+  store.db.exec('BEGIN IMMEDIATE');
+  try {
+    const storage = creatorStorageUsage(creatorId);
+    if (storage.usedBytes + storage.reservedBytes + sizeBytes > storage.quotaBytes) {
+      store.db.exec('ROLLBACK');
+      return { allowed: false, storage };
+    }
+    store.db.prepare('INSERT INTO creator_storage_reservations (id,creator_id,size_bytes,created_at) VALUES (?,?,?,?)').run(reservationId, creatorId, sizeBytes, store.now());
+    store.db.exec('COMMIT');
+    return { allowed: true, reservationId };
+  } catch (error) {
+    store.db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function releaseCreatorStorageReservation(reservationId) {
+  if (reservationId) store.db.prepare('DELETE FROM creator_storage_reservations WHERE id=?').run(reservationId);
+}
+
+function creatorFileUploadMiddleware(req, res, next) {
+  creatorFileUpload.single('file')(req, res, next);
+}
+
 // ─────────────────────────────────────────────
 // Routes
 // ─────────────────────────────────────────────
@@ -324,7 +380,7 @@ app.post('/api/auth/google', async (req, res) => {
     const user = store.linkGoogleUser(claims.email, claims.sub);
     if (user.role !== 'creator') return res.status(403).json({ error: 'Google sign-in is only available for creator accounts' });
     if (user.status === 'suspended') return res.status(403).json({ error: 'This account is suspended' });
-    return res.json({ user: { id: user.id, email: user.email, role: user.role }, token: store.signToken(user) });
+    return res.json({ user: { id: user.id, email: user.email, role: user.role, name: claims.name || claims.email.split('@')[0], picture: claims.picture || null }, token: store.signToken(user) });
   } catch (error) {
     if (String(error.message).includes('already linked')) {
       return res.status(409).json({ error: 'This email is already linked to a different Google account' });
@@ -363,25 +419,6 @@ app.get('/api/creator/bot-identity', (req, res) => {
   if (!user) return res.status(401).json({ error: 'Valid creator bot key is required' });
   res.json({ user: { id: user.id, email: user.email } });
 });
-// Attach an existing NightBox video to the authenticated creator without
-// downloading or duplicating the underlying video. The new creator link is
-// the ownership boundary used by the view/earning pipeline.
-app.post('/api/creator/import-link', (req, res) => {
-  const user = apiKeyUser(req);
-  if (!user) return res.status(401).json({ error: 'Valid creator bot key is required' });
-  const rawUrl = String(req.body?.url || '').trim();
-  let slug = rawUrl;
-  try {
-    if (/^https?:\/\//i.test(rawUrl)) slug = new URL(rawUrl).pathname.split('/').filter(Boolean).pop() || '';
-  } catch { slug = ''; }
-  if (!/^[A-Za-z0-9_-]{4,100}$/.test(slug)) return res.status(400).json({ error: 'Invalid NightBox link' });
-  const source = store.db.prepare('SELECT l.id,l.video_id AS videoId,v.title,v.watch_url AS watchUrl,v.embed_url AS embedUrl FROM creator_links l JOIN videos v ON v.id=l.video_id WHERE l.slug=? AND v.status <> \'deleted\'').get(slug);
-  if (!source) return res.status(404).json({ error: 'NightBox link not found' });
-  const existing = store.db.prepare('SELECT id,slug FROM creator_links WHERE video_id=? AND creator_id=? LIMIT 1').get(source.videoId, user.id);
-  const link = existing || store.createLink(source.videoId, user.id);
-  if (req.headers['x-bot-key']) store.db.prepare('INSERT INTO bot_events (id,user_id,bot_name,event_type,external_id,video_id,status,created_at) VALUES (?,?,?,?,?,?,?,?)').run(store.id(), user.id, String(req.headers['x-bot-name'] || 'nightbox-import').slice(0, 40), 'link_import', String(req.headers['x-bot-external-id'] || '').slice(0, 120) || null, source.videoId, existing ? 'duplicate' : 'created', store.now());
-  res.status(existing ? 200 : 201).json({ success: true, videoId: source.videoId, title: source.title, watchUrl: source.watchUrl, embedUrl: source.embedUrl, link: `${DOMAIN_URL}/l/${link.slug}`, duplicate: Boolean(existing) });
-});
 app.post('/api/creator/api-keys', requireUser, (req, res) => {
   const raw = `nb_live_${crypto.randomBytes(24).toString('base64url')}`;
   const keyHash = store.hash(`${raw}|${process.env.AUTH_SECRET || 'local-development-secret-change-me'}`);
@@ -395,6 +432,184 @@ app.delete('/api/creator/api-keys/:id', requireUser, (req, res) => {
   res.json({ revoked: true });
 });
 app.get('/api/creator/bot-events', requireUser, (req, res) => res.json({ events: store.db.prepare('SELECT id,bot_name AS botName,event_type AS eventType,external_id AS externalId,video_id AS videoId,status,error,created_at AS createdAt FROM bot_events WHERE user_id=? ORDER BY created_at DESC LIMIT 100').all(req.user.id) }));
+app.post('/api/bot-events', (req, res) => {
+  const owner = apiKeyUser(req);
+  if (!owner) return res.status(401).json({ error: 'Valid creator bot key is required' });
+  const eventType = String(req.body?.eventType || 'bot').replace(/[^a-z0-9_-]/gi, '').slice(0, 40) || 'bot';
+  const status = String(req.body?.status || 'unknown').replace(/[^a-z0-9_-]/gi, '').slice(0, 40) || 'unknown';
+  const botName = String(req.headers['x-bot-name'] || 'bot').slice(0, 40);
+  const externalId = String(req.body?.externalId || '').slice(0, 120) || null;
+  const videoId = String(req.body?.videoId || '').slice(0, 120) || null;
+  const error = req.body?.error ? String(req.body.error).slice(0, 500) : null;
+  store.db.prepare('INSERT INTO bot_events (id,user_id,bot_name,event_type,external_id,video_id,status,error,created_at) VALUES (?,?,?,?,?,?,?,?,?)').run(store.id(), owner.id, botName, eventType, externalId, videoId, status, error, store.now());
+  res.status(201).json({ recorded: true });
+});
+app.get('/api/creator/folders', requireUser, (req, res) => {
+  const folders = store.db.prepare('SELECT id,name,parent_id AS parentId,created_at AS createdAt FROM creator_folders WHERE owner_id=? ORDER BY name COLLATE NOCASE').all(req.user.id);
+  res.json({ folders });
+});
+app.post('/api/creator/folders', requireUser, (req, res) => {
+  const name = String(req.body?.name || '').trim().replace(/[\\/\u0000-\u001f]/g, '').slice(0, 100);
+  const parentId = req.body?.parentId ? String(req.body.parentId) : null;
+  if (!name) return res.status(400).json({ error: 'Folder name is required' });
+  if (parentId && !store.db.prepare('SELECT id FROM creator_folders WHERE id=? AND owner_id=?').get(parentId, req.user.id)) return res.status(404).json({ error: 'Parent folder not found' });
+  const folder = { id: store.id(), ownerId: req.user.id, parentId, name, createdAt: store.now() };
+  try {
+    store.db.prepare('INSERT INTO creator_folders (id,owner_id,parent_id,name,created_at) VALUES (?,?,?,?,?)').run(folder.id, folder.ownerId, folder.parentId, folder.name, folder.createdAt);
+  } catch (error) {
+    if (String(error.message).includes('UNIQUE')) return res.status(409).json({ error: 'A folder with that name already exists here' });
+    throw error;
+  }
+  res.status(201).json({ folder });
+});
+app.patch('/api/creator/folders/:id', requireUser, (req, res) => {
+  const name = String(req.body?.name || '').trim().replace(/[\\/\u0000-\u001f]/g, '').slice(0, 100);
+  if (!name) return res.status(400).json({ error: 'Folder name is required' });
+  const current = store.db.prepare('SELECT id,parent_id AS parentId FROM creator_folders WHERE id=? AND owner_id=?').get(req.params.id, req.user.id);
+  if (!current) return res.status(404).json({ error: 'Folder not found' });
+  try {
+    store.db.prepare('UPDATE creator_folders SET name=? WHERE id=? AND owner_id=?').run(name, current.id, req.user.id);
+  } catch (error) {
+    if (String(error.message).includes('UNIQUE')) return res.status(409).json({ error: 'A folder with that name already exists here' });
+    throw error;
+  }
+  res.json({ folder: { id: current.id, name, parentId: current.parentId } });
+});
+app.delete('/api/creator/folders/:id', requireUser, (req, res) => {
+  const folder = store.db.prepare('SELECT id FROM creator_folders WHERE id=? AND owner_id=?').get(req.params.id, req.user.id);
+  if (!folder) return res.status(404).json({ error: 'Folder not found' });
+  const children = store.db.prepare('SELECT 1 AS found FROM creator_folders WHERE parent_id=? LIMIT 1').get(folder.id);
+  const files = store.db.prepare('SELECT 1 AS found FROM creator_files WHERE folder_id=? LIMIT 1').get(folder.id);
+  if (children || files) return res.status(409).json({ error: 'Move or delete this folder’s contents before deleting it' });
+  store.db.prepare('DELETE FROM creator_folders WHERE id=? AND owner_id=?').run(folder.id, req.user.id);
+  res.json({ deleted: true });
+});
+app.get('/api/creator/files', requireUser, (req, res) => {
+  const folderId = String(req.query.folderId || '');
+  if (folderId && !store.db.prepare('SELECT id FROM creator_folders WHERE id=? AND owner_id=?').get(folderId, req.user.id)) return res.status(404).json({ error: 'Folder not found' });
+  const files = folderId
+    ? store.db.prepare('SELECT id,folder_id AS folderId,original_name AS name,mime_type AS mimeType,size_bytes AS sizeBytes,share_slug AS shareSlug,created_at AS createdAt FROM creator_files WHERE owner_id=? AND folder_id=? ORDER BY created_at DESC').all(req.user.id, folderId)
+    : store.db.prepare('SELECT id,folder_id AS folderId,original_name AS name,mime_type AS mimeType,size_bytes AS sizeBytes,share_slug AS shareSlug,created_at AS createdAt FROM creator_files WHERE owner_id=? AND folder_id IS NULL ORDER BY created_at DESC').all(req.user.id);
+  res.json({ files: files.map((file) => ({ ...file, shareUrl: file.shareSlug ? `${PUBLIC_API_URL}/f/${file.shareSlug}` : null })), storage: creatorStorageUsage(req.user.id) });
+});
+app.post('/api/creator/files', uploadLimiter, requireUser, creatorFileUploadMiddleware, async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Choose a file to upload' });
+  const filePath = req.file.path;
+  let storageKey;
+  let reservationId;
+  try {
+    const folderId = req.body?.folderId ? String(req.body.folderId) : null;
+    if (folderId && !store.db.prepare('SELECT id FROM creator_folders WHERE id=? AND owner_id=?').get(folderId, req.user.id)) return res.status(404).json({ error: 'Folder not found' });
+    const rawName = path.basename(String(req.file.originalname || 'upload').replace(/\\/g, '/'));
+    const originalName = rawName.replace(/[\u0000-\u001f]/g, '').slice(0, 255) || 'upload';
+    const extension = path.extname(originalName).toLowerCase().replace('.', '').replace(/[^a-z0-9]/g, '').slice(0, 12);
+    const id = store.id();
+    storageKey = `files/${req.user.id}/${id}${extension ? `.${extension}` : ''}`;
+    const reservation = reserveCreatorStorage(req.user.id, req.file.size);
+    if (!reservation.allowed) return res.status(413).json({ error: 'Creator storage quota exceeded', storage: reservation.storage });
+    reservationId = reservation.reservationId;
+    const contentHash = await fileSha256(filePath);
+    await bunny.uploadCreatorFile(storageKey, filePath, req.file.mimetype);
+    const createdAt = store.now();
+    store.db.exec('BEGIN IMMEDIATE');
+    try {
+      store.db.prepare('INSERT INTO creator_files (id,owner_id,folder_id,original_name,mime_type,size_bytes,storage_key,content_hash,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
+        .run(id, req.user.id, folderId, originalName, String(req.file.mimetype || 'application/octet-stream').slice(0, 150), req.file.size, storageKey, contentHash, createdAt);
+      releaseCreatorStorageReservation(reservationId);
+      store.db.exec('COMMIT');
+      reservationId = null;
+    } catch (error) {
+      store.db.exec('ROLLBACK');
+      throw error;
+    }
+    res.status(201).json({ file: { id, folderId, name: originalName, mimeType: req.file.mimetype || 'application/octet-stream', sizeBytes: req.file.size, shareUrl: null, createdAt } });
+  } catch (error) {
+    releaseCreatorStorageReservation(reservationId);
+    if (storageKey) {
+      try { await bunny.deleteCreatorFile(storageKey); } catch (cleanupError) { console.error('[Creator file cleanup] Failed:', cleanupError.message); }
+    }
+    console.error('[Creator file upload] Failed:', error.message);
+    res.status(502).json({ error: 'File could not be stored. Check storage configuration and retry.' });
+  } finally {
+    bunny.cleanupTempFile(filePath);
+  }
+});
+app.patch('/api/creator/files/:id/move', requireUser, (req, res) => {
+  const folderId = req.body?.folderId ? String(req.body.folderId) : null;
+  const file = store.db.prepare('SELECT id FROM creator_files WHERE id=? AND owner_id=?').get(req.params.id, req.user.id);
+  if (!file) return res.status(404).json({ error: 'File not found' });
+  if (folderId && !store.db.prepare('SELECT id FROM creator_folders WHERE id=? AND owner_id=?').get(folderId, req.user.id)) return res.status(404).json({ error: 'Folder not found' });
+  store.db.prepare('UPDATE creator_files SET folder_id=? WHERE id=? AND owner_id=?').run(folderId, file.id, req.user.id);
+  res.json({ moved: true, folderId });
+});
+app.post('/api/creator/files/:id/share', requireUser, (req, res) => {
+  const file = store.db.prepare('SELECT id,share_slug AS shareSlug FROM creator_files WHERE id=? AND owner_id=?').get(req.params.id, req.user.id);
+  if (!file) return res.status(404).json({ error: 'File not found' });
+  const slug = file.shareSlug || crypto.randomBytes(18).toString('base64url');
+  store.db.prepare('UPDATE creator_files SET share_slug=? WHERE id=? AND owner_id=?').run(slug, file.id, req.user.id);
+  res.json({ shareUrl: `${PUBLIC_API_URL}/f/${slug}` });
+});
+app.delete('/api/creator/files/:id/share', requireUser, (req, res) => {
+  const result = store.db.prepare('UPDATE creator_files SET share_slug=NULL WHERE id=? AND owner_id=? AND share_slug IS NOT NULL').run(req.params.id, req.user.id);
+  if (!result.changes) return res.status(404).json({ error: 'File or active share link not found' });
+  res.json({ revoked: true });
+});
+app.delete('/api/creator/files/:id', requireUser, async (req, res) => {
+  const file = store.db.prepare('SELECT id,storage_key AS storageKey FROM creator_files WHERE id=? AND owner_id=?').get(req.params.id, req.user.id);
+  if (!file) return res.status(404).json({ error: 'File not found' });
+  try {
+    await bunny.deleteCreatorFile(file.storageKey);
+    store.db.prepare('DELETE FROM creator_files WHERE id=? AND owner_id=?').run(file.id, req.user.id);
+    res.json({ deleted: true });
+  } catch (error) {
+    console.error('[Creator file delete] Failed:', error.message);
+    res.status(502).json({ error: 'File could not be removed from storage. Retry later.' });
+  }
+});
+app.get('/f/:slug', downloadLimiter, async (req, res) => {
+  const file = store.db.prepare('SELECT storage_key AS storageKey,original_name AS name,mime_type AS mimeType,size_bytes AS sizeBytes FROM creator_files WHERE share_slug=?').get(req.params.slug);
+  if (!file) return res.status(404).send('This share link is unavailable.');
+  const safeMime = /^(text\/html|image\/svg\+xml|application\/xhtml\+xml|text\/xml|application\/javascript)/i.test(file.mimeType)
+    ? 'application/octet-stream'
+    : file.mimeType;
+  const fallbackName = file.name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_').slice(0, 180) || 'download';
+  res.setHeader('Content-Type', safeMime || 'application/octet-stream');
+  res.setHeader('Content-Disposition', `attachment; filename="${fallbackName}"; filename*=UTF-8''${encodeURIComponent(file.name)}`);
+  res.setHeader('Content-Length', String(file.sizeBytes));
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'private, no-store');
+  try {
+    if (bunny.isLocalStorage()) {
+      const localFile = bunny.getCreatorFilePath(file.storageKey);
+      if (!localFile || !fs.existsSync(localFile)) return res.status(404).end();
+      return fs.createReadStream(localFile).on('error', (error) => {
+        console.error('[Creator file share] Local stream failed:', error.message);
+        if (!res.headersSent) res.status(503).end(); else res.destroy(error);
+      }).pipe(res);
+    }
+    const upstream = await axios.get(bunny.getCreatorFileUrl(file.storageKey), {
+      responseType: 'stream', timeout: 30000,
+      headers: req.headers.range ? { Range: req.headers.range } : {},
+      validateStatus: (status) => status >= 200 && status < 500,
+    });
+    if (upstream.status !== 200 && upstream.status !== 206) {
+      upstream.data.destroy();
+      return res.status(upstream.status === 404 ? 404 : 503).end();
+    }
+    if (upstream.status === 206) res.status(206);
+    if (upstream.headers['content-range']) res.setHeader('Content-Range', upstream.headers['content-range']);
+    res.setHeader('Accept-Ranges', 'bytes');
+    if (upstream.headers['content-length']) res.setHeader('Content-Length', upstream.headers['content-length']);
+    upstream.data.on('error', (error) => {
+      console.error('[Creator file share] CDN stream failed:', error.message);
+      if (!res.headersSent) res.status(503).end(); else res.destroy(error);
+    });
+    upstream.data.pipe(res);
+  } catch (error) {
+    console.error('[Creator file share] Failed:', error.message);
+    if (!res.headersSent) res.status(503).send('File delivery is temporarily unavailable.'); else res.destroy(error);
+  }
+});
 app.get('/api/creator/tickets', requireUser, (req, res) => res.json({ tickets: store.db.prepare('SELECT id,subject,message,status,admin_note AS adminNote,created_at AS createdAt,updated_at AS updatedAt FROM support_tickets WHERE user_id=? ORDER BY created_at DESC').all(req.user.id) }));
 app.post('/api/creator/tickets', requireUser, (req, res) => {
   const subject = sanitizeInput(req.body?.subject);
@@ -403,6 +618,27 @@ app.post('/api/creator/tickets', requireUser, (req, res) => {
   const ticket = { id: store.id(), userId: req.user.id, subject, message, createdAt: store.now() };
   store.db.prepare('INSERT INTO support_tickets (id,user_id,subject,message,created_at,updated_at) VALUES (?,?,?,?,?,?)').run(ticket.id, ticket.userId, ticket.subject, ticket.message, ticket.createdAt, ticket.createdAt);
   res.status(201).json({ ticket: { ...ticket, status: 'open', adminNote: null, updatedAt: ticket.createdAt } });
+});
+app.get('/api/creator/rewards', requireUser, (req, res) => {
+  const eligibleViews = Number(store.db.prepare('SELECT COUNT(*) AS total FROM view_sessions s JOIN creator_links l ON l.id=s.link_id WHERE l.creator_id=? AND s.counted=1').get(req.user.id).total);
+  const claims = new Map(store.db.prepare('SELECT milestone_id AS milestoneId,status FROM reward_claims WHERE creator_id=?').all(req.user.id).map((claim) => [claim.milestoneId, claim.status]));
+  const milestones = store.db.prepare('SELECT id,title,description,threshold_views AS thresholdViews,reward_note AS rewardNote FROM reward_milestones WHERE active=1 ORDER BY threshold_views').all();
+  res.json({ eligibleViews, milestones: milestones.map((milestone) => ({ ...milestone, claimStatus: claims.get(milestone.id) || null, eligible: eligibleViews >= milestone.thresholdViews })) });
+});
+app.post('/api/creator/rewards/:id/claim', requireUser, (req, res) => {
+  const milestone = store.db.prepare('SELECT id,threshold_views AS thresholdViews FROM reward_milestones WHERE id=? AND active=1').get(req.params.id);
+  if (!milestone) return res.status(404).json({ error: 'Active reward milestone not found' });
+  const eligibleViews = Number(store.db.prepare('SELECT COUNT(*) AS total FROM view_sessions s JOIN creator_links l ON l.id=s.link_id WHERE l.creator_id=? AND s.counted=1').get(req.user.id).total);
+  if (eligibleViews < milestone.thresholdViews) return res.status(403).json({ error: 'This milestone has not been reached yet' });
+  const now = store.now();
+  try {
+    const claim = { id: store.id(), milestoneId: milestone.id, creatorId: req.user.id, createdAt: now };
+    store.db.prepare("INSERT INTO reward_claims (id,milestone_id,creator_id,status,created_at,updated_at) VALUES (?,?,?,'claimed',?,?)").run(claim.id, claim.milestoneId, claim.creatorId, now, now);
+    return res.status(201).json({ claim: { id: claim.id, milestoneId: claim.milestoneId, status: 'claimed', createdAt: now } });
+  } catch (error) {
+    if (String(error.message).includes('UNIQUE')) return res.status(409).json({ error: 'This milestone has already been claimed' });
+    throw error;
+  }
 });
 app.get('/api/events', (req, res) => res.json({ events: store.db.prepare("SELECT id,title,description,starts_at AS startsAt,ends_at AS endsAt,reward_note AS rewardNote FROM platform_events WHERE active=1 ORDER BY starts_at ASC,created_at DESC").all() }));
 app.post('/api/contact', apiLimiter, (req, res) => {
@@ -517,11 +753,11 @@ app.post('/api/subscriptions/:id/cancel', requireUser, async (req, res) => {
 app.get('/api/creator/videos', requireUser, (req, res) => {
   const videos = store.db.prepare(`
     SELECT v.id, v.title, v.status, v.file_size AS fileSize, v.watch_url AS watchUrl, v.embed_url AS embedUrl, v.created_at AS createdAt,
-      (SELECT MIN(l.slug) FROM creator_links l WHERE l.video_id = v.id AND l.creator_id = ?) AS linkSlug,
-      COALESCE((SELECT COUNT(*) FROM view_sessions s JOIN creator_links l ON l.id = s.link_id WHERE l.video_id = v.id AND l.creator_id = ? AND s.counted = 1), 0) AS eligibleViews
-      ,COALESCE((SELECT SUM(e.amount_micros) FROM earnings e JOIN creator_links l2 ON l2.id = e.link_id WHERE l2.video_id = v.id AND l2.creator_id = ?), 0) AS earningsMicros
-    FROM videos v WHERE v.owner_id = ? OR EXISTS (SELECT 1 FROM creator_links own_link WHERE own_link.video_id = v.id AND own_link.creator_id = ?) ORDER BY v.created_at DESC
-  `).all(req.user.id, req.user.id, req.user.id, req.user.id, req.user.id);
+      (SELECT MIN(l.slug) FROM creator_links l WHERE l.video_id = v.id AND l.creator_id = v.owner_id) AS linkSlug,
+      COALESCE((SELECT COUNT(*) FROM view_sessions s JOIN creator_links l ON l.id = s.link_id WHERE l.video_id = v.id AND s.counted = 1), 0) AS eligibleViews
+      ,COALESCE((SELECT SUM(e.amount_micros) FROM earnings e JOIN creator_links l2 ON l2.id = e.link_id WHERE l2.video_id = v.id), 0) AS earningsMicros
+    FROM videos v WHERE v.owner_id = ? ORDER BY v.created_at DESC
+  `).all(req.user.id);
   res.json({ videos: videos.map((video) => ({ ...video, link: video.linkSlug ? `${DOMAIN_URL}/l/${video.linkSlug}` : null })) });
 });
 
@@ -569,8 +805,9 @@ app.post('/api/views/:id/qualify', (req, res) => {
   const rules = store.db.prepare('SELECT * FROM view_rules WHERE id = 1').get();
   const elapsed = (Date.now() - Date.parse(session.started_at)) / 1000;
   if (elapsed < rules.minimum_watch_seconds) return res.status(400).json({ error: `Watch at least ${rules.minimum_watch_seconds} seconds` });
-  const recent = store.db.prepare("SELECT COUNT(*) AS count FROM view_sessions WHERE link_id = ? AND viewer_hash = ? AND started_at >= datetime('now', '-24 hours') AND counted = 1").get(session.link_id, session.viewer_hash);
-  if (recent.count >= rules.max_views_per_viewer_24h) {
+  const ipRule = store.db.prepare('SELECT max_views_per_ip_24h AS maxViews FROM view_rules WHERE id=1').get();
+  const recent = store.db.prepare("SELECT COUNT(*) AS count FROM view_sessions WHERE link_id = ? AND ip_hash = ? AND started_at >= datetime('now', '-24 hours') AND counted = 1").get(session.link_id, session.ip_hash);
+  if (recent.count >= ipRule.maxViews) {
     store.db.prepare('UPDATE view_sessions SET qualified_at = ?, counted = 0 WHERE id = ?').run(store.now(), session.id);
     return res.json({ counted: false, duplicate: true });
   }
@@ -595,7 +832,14 @@ app.post('/api/views/:id/qualify', (req, res) => {
 app.get('/api/creator/analytics', requireUser, (req, res) => {
   const summary = store.db.prepare(`SELECT COUNT(s.id) AS views, COALESCE(SUM(e.amount_micros),0) AS earningsMicros FROM view_sessions s JOIN creator_links l ON l.id=s.link_id LEFT JOIN earnings e ON e.view_id=s.id WHERE l.creator_id = ? AND s.counted = 1`).get(req.user.id);
   const countries = store.db.prepare(`SELECT s.country, COUNT(s.id) AS views, COALESCE(SUM(e.amount_micros),0) AS earningsMicros, COALESCE(MAX(e.cpm_cents),0) AS cpmCents FROM view_sessions s JOIN creator_links l ON l.id=s.link_id LEFT JOIN earnings e ON e.view_id=s.id WHERE l.creator_id = ? AND s.counted = 1 GROUP BY s.country ORDER BY views DESC`).all(req.user.id);
-  res.json({ summary, countries });
+  const rates = store.db.prepare(`SELECT country,cpm_cents AS cpmCents FROM cpm_rates ORDER BY CASE WHEN country='ZZ' THEN 1 ELSE 0 END,country`).all();
+  res.json({ summary, countries, rates });
+});
+
+app.get('/api/cpm', (_req, res) => {
+  const rates = store.db.prepare(`SELECT country,cpm_cents AS cpmCents FROM cpm_rates ORDER BY CASE WHEN country='ZZ' THEN 1 ELSE 0 END,country`).all();
+  res.set('Cache-Control', 'public, max-age=60');
+  res.json({ rates });
 });
 
 function creatorBalance(creatorId) {
@@ -629,16 +873,19 @@ app.put('/api/admin/cpm/:country', requireAdmin, (req, res) => {
   store.db.prepare('INSERT INTO cpm_rates(country,cpm_cents,updated_at) VALUES(?,?,?) ON CONFLICT(country) DO UPDATE SET cpm_cents=excluded.cpm_cents,updated_at=excluded.updated_at').run(country, cpmCents, store.now());
   res.json({ country, cpmCents });
 });
-app.get('/api/admin/view-rules', requireAdmin, (req, res) => res.json({ rules: store.db.prepare('SELECT eligible_percent AS eligiblePercent,max_views_per_viewer_24h AS maxViewsPerViewer24h,minimum_watch_seconds AS minimumWatchSeconds FROM view_rules WHERE id = 1').get() }));
+app.get('/api/admin/view-rules', requireAdmin, (req, res) => res.json({ rules: store.db.prepare('SELECT eligible_percent AS eligiblePercent,max_views_per_ip_24h AS maxViewsPerIp24h,minimum_watch_seconds AS minimumWatchSeconds FROM view_rules WHERE id = 1').get() }));
 app.put('/api/admin/view-rules', requireAdmin, (req, res) => {
   const eligiblePercent = Number(req.body?.eligiblePercent);
-  const maxViews = Number(req.body?.maxViewsPerViewer24h);
+  const maxViews = Number(req.body?.maxViewsPerIp24h);
   const minimum = Number(req.body?.minimumWatchSeconds);
-  if (![eligiblePercent, maxViews, minimum].every(Number.isInteger) || eligiblePercent < 0 || eligiblePercent > 100 || maxViews < 1 || minimum < 5) return res.status(400).json({ error: 'Invalid view rules; minimum watch time must be at least 5 seconds' });
-  store.db.prepare('UPDATE view_rules SET eligible_percent=?,max_views_per_viewer_24h=?,minimum_watch_seconds=?,updated_at=? WHERE id=1').run(eligiblePercent, maxViews, minimum, store.now());
-  res.json({ eligiblePercent, maxViewsPerViewer24h: maxViews, minimumWatchSeconds: minimum });
+  if (![eligiblePercent, maxViews, minimum].every(Number.isInteger) || eligiblePercent < 0 || eligiblePercent > 100 || maxViews < 1 || maxViews > 10000 || minimum < 5) return res.status(400).json({ error: 'Invalid view rules; IP cap must be 1-10000 and minimum watch time at least 5 seconds' });
+  store.db.prepare('UPDATE view_rules SET eligible_percent=?,max_views_per_ip_24h=?,minimum_watch_seconds=?,updated_at=? WHERE id=1').run(eligiblePercent, maxViews, minimum, store.now());
+  res.json({ eligiblePercent, maxViewsPerIp24h: maxViews, minimumWatchSeconds: minimum });
 });
-app.get('/api/admin/users', requireAdmin, (req, res) => res.json({ users: store.db.prepare('SELECT id,email,role,status,telegram_user_id AS telegramUserId,created_at AS createdAt FROM users ORDER BY created_at DESC').all() }));
+app.get('/api/admin/users', requireAdmin, (req, res) => res.json({ users: store.db.prepare(`SELECT u.id,u.email,u.role,u.status,u.telegram_user_id AS telegramUserId,u.created_at AS createdAt,
+  CASE WHEN u.role='creator' THEN COALESCE(l.quota_bytes,?) ELSE 0 END AS storageQuotaBytes,
+  CASE WHEN u.role='creator' THEN COALESCE((SELECT SUM(f.size_bytes) FROM creator_files f WHERE f.owner_id=u.id),0)+COALESCE((SELECT SUM(r.size_bytes) FROM creator_storage_reservations r WHERE r.creator_id=u.id),0) ELSE 0 END AS storageUsedBytes
+  FROM users u LEFT JOIN creator_storage_limits l ON l.creator_id=u.id ORDER BY u.created_at DESC`).all(CREATOR_DEFAULT_QUOTA_BYTES) }));
 app.put('/api/admin/users/:id', requireAdmin, (req, res) => {
   const status = String(req.body?.status || '');
   if (!['active', 'suspended'].includes(status)) return res.status(400).json({ error: 'Invalid user status' });
@@ -646,14 +893,57 @@ app.put('/api/admin/users/:id', requireAdmin, (req, res) => {
   if (!result.changes) return res.status(404).json({ error: 'Creator not found' });
   res.json({ user: store.db.prepare('SELECT id,email,role,status,telegram_user_id AS telegramUserId,created_at AS createdAt FROM users WHERE id=?').get(req.params.id) });
 });
+app.put('/api/admin/users/:id/storage-limit', requireAdmin, (req, res) => {
+  const creator = store.db.prepare("SELECT id FROM users WHERE id=? AND role='creator'").get(req.params.id);
+  if (!creator) return res.status(404).json({ error: 'Creator not found' });
+  const quotaBytes = Number(req.body?.quotaBytes);
+  if (![CREATOR_DEFAULT_QUOTA_BYTES, CREATOR_MAX_QUOTA_BYTES].includes(quotaBytes)) return res.status(400).json({ error: 'Storage limit must be 2 GiB or 3 GiB' });
+  const storage = creatorStorageUsage(creator.id);
+  if (storage.usedBytes + storage.reservedBytes > quotaBytes) return res.status(409).json({ error: 'Creator is currently using more storage than that limit allows', storage });
+  if (quotaBytes === CREATOR_DEFAULT_QUOTA_BYTES) {
+    store.db.prepare('DELETE FROM creator_storage_limits WHERE creator_id=?').run(creator.id);
+  } else {
+    store.db.prepare('INSERT INTO creator_storage_limits (creator_id,quota_bytes,updated_at) VALUES (?,?,?) ON CONFLICT(creator_id) DO UPDATE SET quota_bytes=excluded.quota_bytes,updated_at=excluded.updated_at').run(creator.id, quotaBytes, store.now());
+  }
+  res.json({ creatorId: creator.id, quotaBytes });
+});
 app.get('/api/admin/videos', requireAdmin, (req, res) => res.json({ videos: store.db.prepare(`SELECT v.id,v.title,v.status,v.owner_id AS ownerId,v.created_at AS createdAt,COALESCE(SUM(CASE WHEN s.counted = 1 THEN 1 ELSE 0 END),0) AS eligibleViews FROM videos v LEFT JOIN creator_links l ON l.video_id = v.id LEFT JOIN view_sessions s ON s.link_id = l.id GROUP BY v.id ORDER BY v.created_at DESC`).all() }));
+app.get('/api/admin/bot-events', requireAdmin, (req, res) => {
+  const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 100, 1), 500);
+  res.json({ events: store.db.prepare(`SELECT e.id,e.user_id AS userId,u.email,e.bot_name AS botName,e.event_type AS eventType,e.external_id AS externalId,e.video_id AS videoId,e.status,e.error,e.created_at AS createdAt FROM bot_events e LEFT JOIN users u ON u.id=e.user_id ORDER BY e.created_at DESC LIMIT ?`).all(limit) });
+});
 app.get('/api/admin/overview', requireAdmin, (req, res) => {
-  const users = store.db.prepare("SELECT COUNT(*) AS count FROM users WHERE role='creator'").get().count;
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+  const startDate = String(req.query.start || '');
+  const endDate = String(req.query.end || '');
+  if ((startDate || endDate) && (!datePattern.test(startDate) || !datePattern.test(endDate) || startDate > endDate)) {
+    return res.status(400).json({ error: 'Provide a valid start and end date in YYYY-MM-DD format' });
+  }
+  const dateFilter = startDate ? ' AND DATE(s.qualified_at) BETWEEN ? AND ?' : '';
+  const dateParams = startDate ? [startDate, endDate] : [];
+  const creators = store.db.prepare("SELECT COUNT(*) AS count FROM users WHERE role='creator'").get().count;
+  const users = store.db.prepare('SELECT COUNT(*) AS count FROM users').get().count;
   const videos = store.db.prepare('SELECT COUNT(*) AS count FROM videos').get().count;
-  const qualifiedViews = store.db.prepare('SELECT COUNT(*) AS count FROM view_sessions WHERE counted=1').get().count;
-  const earningsMicros = store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS amount FROM earnings').get().amount;
+  const qualifiedViews = store.db.prepare(`SELECT COUNT(*) AS count FROM view_sessions s WHERE s.counted=1 AND s.qualified_at IS NOT NULL${dateFilter}`).get(...dateParams).count;
+  const earningsMicros = store.db.prepare(`SELECT COALESCE(SUM(e.amount_micros),0) AS amount FROM earnings e${startDate ? ' WHERE DATE(e.created_at) BETWEEN ? AND ?' : ''}`).get(...dateParams).amount;
   const pendingWithdrawals = store.db.prepare("SELECT COUNT(*) AS count FROM withdrawal_requests WHERE status='pending'").get().count;
-  res.json({ users, videos, qualifiedViews, earningsMicros, pendingWithdrawals });
+  const dailyActivity = store.db.prepare(`
+    SELECT DATE(s.qualified_at) AS date, COUNT(s.id) AS qualifiedViews,
+      COALESCE(SUM(e.amount_micros),0) AS earningsMicros, COUNT(DISTINCT l.creator_id) AS activeCreators
+    FROM view_sessions s
+    JOIN creator_links l ON l.id=s.link_id
+    LEFT JOIN earnings e ON e.view_id=s.id
+    WHERE s.counted=1 AND s.qualified_at IS NOT NULL${dateFilter}
+    GROUP BY DATE(s.qualified_at) ORDER BY DATE(s.qualified_at) DESC
+  `).all(...dateParams);
+  const recentCreators = store.db.prepare(`
+    SELECT u.id,u.email,u.created_at AS createdAt,
+      (SELECT COUNT(*) FROM videos v WHERE v.owner_id=u.id) AS videos,
+      (SELECT COUNT(*) FROM view_sessions s JOIN creator_links l ON l.id=s.link_id WHERE l.creator_id=u.id AND s.counted=1) AS qualifiedViews,
+      (SELECT COALESCE(SUM(e.amount_micros),0) FROM earnings e WHERE e.creator_id=u.id) AS earningsMicros
+    FROM users u WHERE u.role='creator' ORDER BY u.created_at DESC LIMIT 20
+  `).all();
+  res.json({ users, creators, videos, qualifiedViews, earningsMicros, pendingWithdrawals, dailyActivity, recentCreators, updatedAt: store.now() });
 });
 app.get('/api/admin/views', requireAdmin, (req, res) => {
   const requestedLimit = Number(req.query.limit || 100);
@@ -673,6 +963,31 @@ app.get('/api/admin/views', requireAdmin, (req, res) => {
   `).all();
   res.json({ views });
 });
+app.get('/api/admin/traffic', requireAdmin, (req, res) => {
+  const startDate = String(req.query.start || '');
+  const endDate = String(req.query.end || '');
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+  if (!datePattern.test(startDate) || !datePattern.test(endDate) || startDate > endDate) {
+    return res.status(400).json({ error: 'Provide a valid start and end date in YYYY-MM-DD format' });
+  }
+  const dateFilter = 'DATE(s.started_at) BETWEEN ? AND ?';
+  const total = store.db.prepare(`SELECT COUNT(*) AS sessions, COUNT(DISTINCT ip_hash) AS uniqueIps, SUM(CASE WHEN counted=1 THEN 1 ELSE 0 END) AS qualified FROM view_sessions s WHERE ${dateFilter}`).get(startDate, endDate);
+  const dailyActivity = store.db.prepare(`
+    SELECT DATE(s.started_at) AS date, COUNT(*) AS sessions,
+      SUM(CASE WHEN counted=1 THEN 1 ELSE 0 END) AS qualified,
+      COUNT(DISTINCT ip_hash) AS uniqueIps
+    FROM view_sessions s WHERE ${dateFilter}
+    GROUP BY DATE(s.started_at) ORDER BY DATE(s.started_at) DESC
+  `).all(startDate, endDate);
+  res.json({
+    sessions: Number(total.sessions || 0),
+    qualified: Number(total.qualified || 0),
+    uniqueIps: Number(total.uniqueIps || 0),
+    filtered: Number(total.sessions || 0) - Number(total.qualified || 0),
+    dailyActivity: dailyActivity.map(row => ({ ...row, sessions: Number(row.sessions), qualified: Number(row.qualified || 0), uniqueIps: Number(row.uniqueIps) })),
+    updatedAt: store.now(),
+  });
+});
 app.put('/api/admin/views/:id', requireAdmin, (req, res) => {
   const counted = req.body?.counted === true || req.body?.counted === 1 || req.body?.counted === '1';
   const session = store.db.prepare('SELECT * FROM view_sessions WHERE id=?').get(req.params.id);
@@ -680,6 +995,11 @@ app.put('/api/admin/views/:id', requireAdmin, (req, res) => {
   const rules = store.db.prepare('SELECT minimum_watch_seconds AS minimumWatchSeconds FROM view_rules WHERE id=1').get();
   const elapsed = (Date.now() - Date.parse(session.started_at)) / 1000;
   if (counted && elapsed < rules.minimumWatchSeconds) return res.status(400).json({ error: `View must reach ${rules.minimumWatchSeconds} seconds before approval` });
+  if (counted) {
+    const cap = store.db.prepare('SELECT max_views_per_ip_24h AS maxViews FROM view_rules WHERE id=1').get().maxViews;
+    const recent = store.db.prepare("SELECT COUNT(*) AS count FROM view_sessions WHERE link_id=? AND ip_hash=? AND id<>? AND started_at>=datetime('now','-24 hours') AND counted=1").get(session.link_id, session.ip_hash, session.id);
+    if (recent.count >= cap) return res.status(409).json({ error: 'This IP has reached the eligible-view limit for this link in the last 24 hours' });
+  }
   const timestamp = store.now();
   store.db.exec('BEGIN');
   try {
@@ -695,7 +1015,7 @@ app.put('/api/admin/views/:id', requireAdmin, (req, res) => {
       store.db.prepare('UPDATE view_sessions SET counted=1,qualified_at=COALESCE(qualified_at,?) WHERE id=?').run(timestamp, session.id);
       if (amountMicros > 0) {
         store.db.prepare('INSERT OR REPLACE INTO earnings (id,creator_id,link_id,view_id,country,cpm_cents,amount_micros,created_at) VALUES (?,?,?,?,?,?,?,COALESCE((SELECT created_at FROM earnings WHERE view_id=?),?))').run(store.id(), link.creator_id, session.link_id, session.id, session.country, cpmCents, amountMicros, session.id, timestamp);
-      }
+      } else store.db.prepare('DELETE FROM earnings WHERE view_id=?').run(session.id);
     }
     store.db.exec('COMMIT');
   } catch (error) { store.db.exec('ROLLBACK'); throw error; }
@@ -795,7 +1115,60 @@ app.put('/api/admin/events/:id', requireAdmin, (req, res) => {
   if (!result.changes) return res.status(404).json({ error: 'Event not found' });
   res.json({ updated: true });
 });
+app.get('/api/admin/milestones', requireAdmin, (req, res) => {
+  const milestones = store.db.prepare('SELECT id,title,description,threshold_views AS thresholdViews,reward_note AS rewardNote,active,created_at AS createdAt,updated_at AS updatedAt FROM reward_milestones ORDER BY threshold_views').all();
+  res.json({ milestones });
+});
+app.post('/api/admin/milestones', requireAdmin, (req, res) => {
+  const title = sanitizeInput(req.body?.title);
+  const description = String(req.body?.description || '').trim().slice(0, 2000);
+  const rewardNote = String(req.body?.rewardNote || '').trim().slice(0, 1000);
+  const thresholdViews = Number(req.body?.thresholdViews);
+  if (!title || !description || !rewardNote || !Number.isSafeInteger(thresholdViews) || thresholdViews < 1) return res.status(400).json({ error: 'Title, description, reward details, and a positive whole-number view threshold are required' });
+  const now = store.now();
+  const milestone = { id: store.id(), title, description, rewardNote, thresholdViews, active: req.body?.active === 0 ? 0 : 1, createdAt: now, updatedAt: now };
+  store.db.prepare('INSERT INTO reward_milestones (id,title,description,threshold_views,reward_note,active,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)').run(milestone.id, milestone.title, milestone.description, milestone.thresholdViews, milestone.rewardNote, milestone.active, now, now);
+  res.status(201).json({ milestone });
+});
+app.put('/api/admin/milestones/:id', requireAdmin, (req, res) => {
+  const current = store.db.prepare('SELECT id FROM reward_milestones WHERE id=?').get(req.params.id);
+  if (!current) return res.status(404).json({ error: 'Milestone not found' });
+  const title = sanitizeInput(req.body?.title);
+  const description = String(req.body?.description || '').trim().slice(0, 2000);
+  const rewardNote = String(req.body?.rewardNote || '').trim().slice(0, 1000);
+  const thresholdViews = Number(req.body?.thresholdViews);
+  const active = Number(req.body?.active);
+  if (!title || !description || !rewardNote || !Number.isSafeInteger(thresholdViews) || thresholdViews < 1 || ![0,1].includes(active)) return res.status(400).json({ error: 'Provide valid milestone details and active status' });
+  store.db.prepare('UPDATE reward_milestones SET title=?,description=?,threshold_views=?,reward_note=?,active=?,updated_at=? WHERE id=?').run(title, description, thresholdViews, rewardNote, active, store.now(), current.id);
+  res.json({ updated: true });
+});
+app.get('/api/admin/reward-claims', requireAdmin, (req, res) => {
+  const claims = store.db.prepare('SELECT c.id,c.milestone_id AS milestoneId,c.creator_id AS creatorId,u.email AS creatorEmail,m.title AS milestoneTitle,m.threshold_views AS thresholdViews,m.reward_note AS rewardNote,c.status,c.creator_note AS creatorNote,c.admin_note AS adminNote,c.created_at AS createdAt,c.updated_at AS updatedAt FROM reward_claims c JOIN users u ON u.id=c.creator_id JOIN reward_milestones m ON m.id=c.milestone_id ORDER BY c.created_at DESC').all();
+  res.json({ claims });
+});
+app.put('/api/admin/reward-claims/:id', requireAdmin, (req, res) => {
+  const current = store.db.prepare('SELECT status FROM reward_claims WHERE id=?').get(req.params.id);
+  if (!current) return res.status(404).json({ error: 'Reward claim not found' });
+  const nextStatus = String(req.body?.status || '');
+  const allowed = { claimed: ['approved', 'rejected'], approved: ['fulfilled', 'rejected'], rejected: [], fulfilled: [] };
+  if (!allowed[current.status]?.includes(nextStatus)) return res.status(409).json({ error: `Cannot move a ${current.status} claim to ${nextStatus}` });
+  const adminNote = String(req.body?.adminNote || '').trim().slice(0, 1000) || null;
+  store.db.prepare('UPDATE reward_claims SET status=?,admin_note=?,updated_at=? WHERE id=?').run(nextStatus, adminNote, store.now(), req.params.id);
+  res.json({ status: nextStatus });
+});
 app.get('/api/admin/settings', requireAdmin, (req, res) => res.json({ settings: { environment: process.env.NODE_ENV || 'development', domain: DOMAIN_URL, paymentProvider: process.env.PAYMENT_PROVIDER || 'not configured', bunnyConfigured: Boolean(process.env.BUNNY_CDN_HOST && (BUNNY_LOCAL_STORAGE || (process.env.BUNNY_STORAGE_PASSWORD && process.env.BUNNY_STORAGE_ZONE))), reputationChecksConfigured: Boolean(process.env.IPQUALITYSCORE_API_KEY), recurringPlansConfigured: Boolean(process.env.RAZORPAY_PLAN_MONTHLY && process.env.RAZORPAY_PLAN_PRIORITY) } }));
+app.get('/api/admin/ads-txt', requireAdmin, (_req, res) => {
+  res.json(store.db.prepare('SELECT content,updated_at AS updatedAt FROM ads_txt_content WHERE id=1').get());
+});
+app.put('/api/admin/ads-txt', requireAdmin, (req, res) => {
+  if (typeof req.body?.content !== 'string') return res.status(400).json({ error: 'Content must be plain text' });
+  if (Buffer.byteLength(req.body.content, 'utf8') > 65536) return res.status(413).json({ error: 'ads.txt content must be 64 KiB or smaller' });
+  if (req.body.content.includes('\0')) return res.status(400).json({ error: 'Content cannot contain null characters' });
+  const content = req.body.content.replace(/\r\n?/g, '\n');
+  const updatedAt = store.now();
+  store.db.prepare('UPDATE ads_txt_content SET content=?,updated_at=? WHERE id=1').run(content, updatedAt);
+  res.json({ content, updatedAt });
+});
 app.put('/api/admin/withdrawals/:id', requireAdmin, (req, res) => {
   const status = String(req.body?.status || '');
   if (!['approved', 'paid', 'rejected'].includes(status)) return res.status(400).json({ error: 'Invalid withdrawal status' });
@@ -908,7 +1281,7 @@ const storage = multer.diskStorage({
   filename: (req, file, cb) => {
     // Sanitize original filename
     const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
-    cb(null, `${Date.now()}_${safeName}`);
+    cb(null, `${crypto.randomUUID()}_${safeName}`);
   },
 });
 
@@ -929,6 +1302,11 @@ const upload = multer({
   },
 });
 
+const creatorFileUpload = multer({
+  storage,
+  limits: { fileSize: 3 * 1024 * 1024 * 1024, files: 1 },
+});
+
 // POST /upload-file
 app.post('/upload-file', (req, res, next) => {
   if (process.env.NODE_ENV === 'production' && !uploadOwner(req)) return res.status(401).json({ error: 'Creator authentication or bot API key is required for uploads' });
@@ -943,6 +1321,7 @@ app.post('/upload-file', (req, res, next) => {
   const owner = uploadOwner(req);
   const botName = String(req.headers['x-bot-name'] || 'upload').slice(0, 40);
   const botExternalId = String(req.headers['x-bot-external-id'] || '').slice(0, 120) || null;
+  let reservationId;
 
   // CRITICAL: Reject empty/tiny files BEFORE creating Bunny video slot
   if (!fileSize || fileSize === 0) {
@@ -1007,10 +1386,17 @@ app.post('/upload-file', (req, res, next) => {
       if (owner && req.headers['x-bot-key']) store.db.prepare('INSERT INTO bot_events (id,user_id,bot_name,event_type,external_id,video_id,status,created_at) VALUES (?,?,?,?,?,?,?,?)').run(store.id(), owner.id, botName, 'upload', botExternalId, existing.id, 'duplicate', store.now());
       return res.json({ success: true, duplicate: true, videoId: existing.id, watchUrl: existing.watchUrl, embedUrl: existing.embedUrl, link: creatorLink ? `${DOMAIN_URL}/l/${creatorLink.slug}` : null, message: 'Exact duplicate detected; existing video reused.' });
     }
+    if (owner) {
+      const reservation = reserveCreatorStorage(owner.id, fileSize);
+      if (!reservation.allowed) return res.status(413).json({ error: 'Creator storage quota exceeded', storage: reservation.storage });
+      reservationId = reservation.reservationId;
+    }
     const videoData = await bunny.createVideo(title);
     const videoId = videoData.guid;
     await bunny.uploadVideo(videoId, filePath);
     store.createVideo({ id: videoId, ownerId: owner?.id, title, contentHash, fileSize, watchUrl: bunny.getWatchUrl(videoId), embedUrl: bunny.getEmbedUrl(videoId) });
+    releaseCreatorStorageReservation(reservationId);
+    reservationId = null;
     const creatorLink = owner ? store.createLink(videoId, owner.id) : null;
     if (owner && req.headers['x-bot-key']) store.db.prepare('INSERT INTO bot_events (id,user_id,bot_name,event_type,external_id,video_id,status,created_at) VALUES (?,?,?,?,?,?,?,?)').run(store.id(), owner.id, botName, 'upload', botExternalId, videoId, 'created', store.now());
 
@@ -1035,6 +1421,7 @@ app.post('/upload-file', (req, res, next) => {
     console.error('Upload error:', error.message);
     res.status(500).json({ error: error.message });
   } finally {
+    releaseCreatorStorageReservation(reservationId);
     activeUploads--;
     bunny.cleanupTempFile(filePath);
   }
@@ -1271,7 +1658,7 @@ app.get('/ready', (req, res) => {
 // Error handler
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
-    if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'File too large. Max 4GB.' });
+    if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Upload exceeds the 3 GiB per-file maximum or your remaining storage quota.' });
     return res.status(400).json({ error: err.message });
   }
 

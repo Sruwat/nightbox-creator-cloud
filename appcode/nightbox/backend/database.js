@@ -3,7 +3,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const dataDir = path.join(__dirname, 'data');
+const dataDir = path.resolve(process.env.NIGHTBOX_DATA_DIR || path.join(__dirname, 'data'));
 fs.mkdirSync(dataDir, { recursive: true });
 const db = new DatabaseSync(path.join(dataDir, 'nightbox.sqlite'));
 
@@ -31,6 +31,66 @@ db.exec(`
     status TEXT NOT NULL DEFAULT 'processing',
     created_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS creator_folders (
+    id TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    parent_id TEXT REFERENCES creator_folders(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_creator_folders_root_name
+    ON creator_folders(owner_id, name) WHERE parent_id IS NULL;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_creator_folders_child_name
+    ON creator_folders(owner_id, parent_id, name) WHERE parent_id IS NOT NULL;
+  CREATE TABLE IF NOT EXISTS creator_files (
+    id TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    folder_id TEXT REFERENCES creator_folders(id) ON DELETE SET NULL,
+    original_name TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
+    storage_key TEXT NOT NULL UNIQUE,
+    content_hash TEXT,
+    share_slug TEXT UNIQUE,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_creator_files_owner_folder
+    ON creator_files(owner_id, folder_id, created_at DESC);
+  CREATE TABLE IF NOT EXISTS creator_storage_limits (
+    creator_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    quota_bytes INTEGER NOT NULL CHECK (quota_bytes IN (2147483648,3221225472)),
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS creator_storage_reservations (
+    id TEXT PRIMARY KEY,
+    creator_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    size_bytes INTEGER NOT NULL CHECK (size_bytes > 0),
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_creator_storage_reservations_creator
+    ON creator_storage_reservations(creator_id, created_at);
+  CREATE TABLE IF NOT EXISTS reward_milestones (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    threshold_views INTEGER NOT NULL CHECK (threshold_views > 0),
+    reward_note TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS reward_claims (
+    id TEXT PRIMARY KEY,
+    milestone_id TEXT NOT NULL REFERENCES reward_milestones(id) ON DELETE CASCADE,
+    creator_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'claimed' CHECK (status IN ('claimed','approved','rejected','fulfilled')),
+    creator_note TEXT,
+    admin_note TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(milestone_id, creator_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_reward_claims_creator ON reward_claims(creator_id, created_at DESC);
   CREATE TABLE IF NOT EXISTS creator_links (
     id TEXT PRIMARY KEY,
     video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
@@ -71,6 +131,7 @@ db.exec(`
     id INTEGER PRIMARY KEY CHECK (id = 1),
     eligible_percent INTEGER NOT NULL DEFAULT 100 CHECK (eligible_percent BETWEEN 0 AND 100),
     max_views_per_viewer_24h INTEGER NOT NULL DEFAULT 1 CHECK (max_views_per_viewer_24h >= 1),
+    max_views_per_ip_24h INTEGER NOT NULL DEFAULT 5 CHECK (max_views_per_ip_24h >= 1),
     minimum_watch_seconds INTEGER NOT NULL DEFAULT 5 CHECK (minimum_watch_seconds >= 1),
     updated_at TEXT NOT NULL
   );
@@ -195,13 +256,21 @@ db.exec(`
     received_at TEXT NOT NULL,
     payload TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS ads_txt_content (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    content TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+  );
 `);
+
+db.prepare('INSERT OR IGNORE INTO ads_txt_content (id, content, updated_at) VALUES (1, ?, ?)').run('', new Date().toISOString());
 
 for (const statement of [
   'ALTER TABLE videos ADD COLUMN content_hash TEXT',
   'ALTER TABLE videos ADD COLUMN file_size INTEGER',
   'ALTER TABLE view_sessions ADD COLUMN viewer_user_id TEXT REFERENCES users(id) ON DELETE SET NULL',
   'ALTER TABLE view_sessions ADD COLUMN view_token_hash TEXT',
+  'ALTER TABLE view_rules ADD COLUMN max_views_per_ip_24h INTEGER NOT NULL DEFAULT 5 CHECK (max_views_per_ip_24h >= 1)',
   'ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT \'active\'',
   'ALTER TABLE users ADD COLUMN google_sub TEXT',
 ]) {
@@ -270,6 +339,7 @@ function seedPlans() {
   db.prepare('UPDATE subscription_plans SET video_ads_removed=0, all_ads_removed=0 WHERE id=?').run('priority');
   db.prepare('INSERT OR IGNORE INTO view_rules (id, updated_at) VALUES (1, ?)').run(now());
   db.prepare('UPDATE view_rules SET minimum_watch_seconds=5, updated_at=? WHERE id=1 AND minimum_watch_seconds < 5').run(now());
+  db.prepare('INSERT OR IGNORE INTO cpm_rates (country, cpm_cents, updated_at) VALUES (?, ?, ?)').run('ZZ', 1000, now());
 }
 seedPlans();
 
