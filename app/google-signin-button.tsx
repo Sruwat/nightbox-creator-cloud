@@ -14,7 +14,7 @@ type GoogleIdentity = {
       }) => void;
       renderButton: (
         element: HTMLElement,
-        options: { theme: "outline"; size: "large"; text: "continue_with"; shape: "rectangular"; width: number },
+        options: { theme: "outline"; size: "large"; text: "signin_with" | "signup_with"; shape: "rectangular"; width: number },
       ) => void;
     };
   };
@@ -54,7 +54,7 @@ function loadGoogleIdentity(): Promise<boolean> {
   });
 }
 
-export default function GoogleSignInButton({ onCredential }: { onCredential: (credential: string) => Promise<void> }) {
+export default function GoogleSignInButton({ onCredential, mode }: { onCredential: (credential: string) => Promise<void>; mode: "signin" | "signup" }) {
   const buttonRef = useRef<HTMLDivElement>(null);
   const callbackRef = useRef(onCredential);
   const [error, setError] = useState("");
@@ -86,7 +86,7 @@ export default function GoogleSignInButton({ onCredential }: { onCredential: (cr
       window.google.accounts.id.renderButton(button, {
         theme: "outline",
         size: "large",
-        text: "continue_with",
+        text: mode === "signup" ? "signup_with" : "signin_with",
         shape: "rectangular",
         width: 320,
       });
@@ -96,7 +96,7 @@ export default function GoogleSignInButton({ onCredential }: { onCredential: (cr
       active = false;
       button?.replaceChildren();
     };
-  }, []);
+  }, [mode]);
 
   return <div className="google-signin-wrap">
     <div className="google-signin-button" ref={buttonRef} />
