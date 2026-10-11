@@ -57,6 +57,7 @@
 .admin-app .topbar-search-results button,.admin-app .quick-actions-panel button{color:#ddd!important}
 .admin-app .app-content{background:#09090b;color:#e7e7e9;min-height:calc(100vh - 70px)}
 .admin-app .app-content h1,.admin-app .app-content h2,.admin-app .app-content h3,.admin-app .app-content b{color:#e8e8ea}
+.admin-app .app-content label{color:#c7c7ce}
 .admin-app .app-content p,.admin-app .app-content small,.admin-app .app-content em{color:var(--admin-muted)}
 .admin-app .card,.admin-app .admin-table,.admin-app .admin-table-card,.admin-app .admin-chart-card,.admin-app .admin-overview-section,.admin-app .admin-overview-toolbar,.admin-app .admin-overview-metric,.admin-app .admin-policy-panel,.admin-app .admin-policy-stat,.admin-app .admin-queue-row,.admin-app .admin-status-banner,.admin-app .compact-form,.admin-app .region-table,.admin-app .empty-state,.admin-app .monetization-summary{background:var(--admin-panel)!important;border:1px solid var(--admin-line)!important;color:var(--admin-text);box-shadow:none}
 .admin-app .btn-dark{background:#202023!important;color:#ededee!important;border:1px solid #38383c!important;box-shadow:none}
