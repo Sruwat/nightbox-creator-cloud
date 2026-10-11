@@ -1125,3 +1125,42 @@
 .files-table .table-row>button{justify-self:end;white-space:nowrap;font-size:10px;color:var(--blue)!important;font-weight:750;padding:6px 0}
 .files-table .table-row:hover{background:#fbfcff}
 @media(max-width:760px){.files-table .table-head,.files-table .table-row{grid-template-columns:minmax(280px,2.2fr) minmax(90px,.8fr) minmax(70px,.7fr) minmax(90px,.8fr) minmax(100px,.9fr) 80px 80px}}
+
+/* Keep the mobile app drawer full-height after the legacy bottom-nav rules. */
+@media(max-width:760px){
+  .app-shell .sidebar{
+    display:flex!important;
+    position:fixed!important;
+    inset:0 auto 0 0!important;
+    width:min(330px,90vw)!important;
+    height:100dvh!important;
+    min-height:100dvh!important;
+    max-height:100dvh!important;
+    padding:18px 14px 20px!important;
+    background:#07152f!important;
+    background:linear-gradient(180deg,#07152f 0%,#081d3d 100%)!important;
+    overflow-x:hidden!important;
+    overflow-y:auto!important;
+    isolation:isolate;
+    z-index:70!important;
+  }
+  .app-shell .sidebar.drawer-open{transform:translateX(0)!important}
+  .app-shell .sidebar:not(.drawer-open){transform:translateX(-105%)!important}
+  .app-shell .sidebar>*,.app-shell .sidebar nav>*{position:relative;z-index:1}
+  .app-shell .sidebar nav{
+    display:flex!important;
+    flex:0 0 auto!important;
+    flex-direction:column!important;
+    width:100%!important;
+    height:auto!important;
+    min-height:0!important;
+    overflow:visible!important;
+    padding:0 0 18px!important;
+  }
+  .app-shell .side-bottom{
+    display:block!important;
+    flex:0 0 auto!important;
+    margin-top:auto!important;
+    background:transparent!important;
+  }
+}
