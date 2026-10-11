@@ -836,6 +836,21 @@ app.get('/api/creator/analytics', requireUser, (req, res) => {
   res.json({ summary, countries, rates });
 });
 
+app.get('/api/creator/overview', requireUser, (req, res) => {
+  const dailyActivity = store.db.prepare(`
+    SELECT DATE(s.qualified_at) AS date, COUNT(s.id) AS views,
+      COALESCE(SUM(e.amount_micros),0) AS earningsMicros
+    FROM view_sessions s
+    JOIN creator_links l ON l.id=s.link_id
+    LEFT JOIN earnings e ON e.view_id=s.id
+    WHERE l.creator_id = ? AND s.counted = 1 AND s.qualified_at IS NOT NULL
+      AND DATE(s.qualified_at) >= DATE('now','-6 days')
+    GROUP BY DATE(s.qualified_at)
+    ORDER BY DATE(s.qualified_at) ASC
+  `).all(req.user.id);
+  res.json({ dailyActivity });
+});
+
 app.get('/api/cpm', (_req, res) => {
   const rates = store.db.prepare(`SELECT country,cpm_cents AS cpmCents FROM cpm_rates ORDER BY CASE WHEN country='ZZ' THEN 1 ELSE 0 END,country`).all();
   res.set('Cache-Control', 'public, max-age=60');

@@ -1200,3 +1200,23 @@
 .rate-highlight small{color:#728097;font-size:9px;font-weight:650}
 .creator-rate-chips>span small{color:#8a96a8;font-size:9px}
 @media(max-width:520px){.rate-highlight{align-self:stretch;align-items:flex-start}.app-shell:not(.admin-app) .metrics .metric:hover{transform:none}}
+
+.overview-analytics-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:0 0 18px}
+.overview-chart{min-width:0;padding:20px 22px;border:1px solid #e2e8f2;box-shadow:0 12px 30px rgba(25,52,94,.045)}
+.overview-chart>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px}
+.overview-chart>header>div{display:flex;flex-direction:column;gap:4px}
+.overview-chart>header span{color:#2461cc;font-size:9px;font-weight:850;letter-spacing:.12em}
+.overview-chart>header h2{margin:0;color:#13213a;font-size:16px;letter-spacing:-.3px}
+.overview-chart>header>b{padding:6px 9px;border-radius:999px;background:#f5eaff;color:#8b3dcc;font-size:9px;white-space:nowrap}
+.overview-chart-canvas{height:155px;position:relative;margin-top:4px;background:repeating-linear-gradient(to bottom,#fff 0,#fff 36px,#f0f3f8 37px,#fff 38px)}
+.overview-chart-canvas svg{display:block;width:100%;height:155px;overflow:visible}
+.chart-area{fill:url(#overview-chart-fill);fill:#8d35df18}
+.chart-line{fill:none;stroke:#8d35df;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 3px 4px #8d35df35)}
+.chart-axis{stroke:#dfe5ee;stroke-width:1}
+.chart-dot{fill:#fff;stroke:#8d35df;stroke-width:2}
+.overview-bars{height:155px;display:flex;align-items:flex-end;justify-content:space-around;gap:12px;padding:8px 8px 0}
+.overview-bar-item{height:100%;flex:1;display:flex;align-items:flex-end;justify-content:center}
+.overview-bar-item i{display:block;width:min(34px,75%);min-height:4px;border-radius:7px 7px 2px 2px;background:linear-gradient(180deg,#963be5,#7430cf);box-shadow:0 8px 16px #8132d52d}
+.overview-chart-labels{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-top:7px;color:#8a95a6;font-size:9px;text-align:center}
+.overview-chart-empty{display:block;margin-top:9px;color:#98a2b3;font-size:10px;text-align:center}
+@media(max-width:760px){.overview-analytics-grid{grid-template-columns:minmax(0,1fr);gap:12px}.overview-chart{padding:17px 15px}}

@@ -188,6 +188,11 @@ export async function getCreatorAnalytics(token: string) {
   return parseResponse<{ summary: { views: number; earningsMicros: number }; countries: Array<{ country: string; views: number; earningsMicros: number; cpmCents: number }>; rates: Array<{ country: string; cpmCents: number }> }>(response);
 }
 
+export async function getCreatorOverview(token: string) {
+  const response = await fetch(`${BACKEND_URL}/api/creator/overview`, { headers: authHeaders(token) });
+  return parseResponse<{ dailyActivity: Array<{ date: string; views: number; earningsMicros: number }> }>(response);
+}
+
 export async function getPublicCpm() {
   const response = await fetch(`${BACKEND_URL}/api/cpm`);
   return parseResponse<{ rates: Array<{ country: string; cpmCents: number }> }>(response);
