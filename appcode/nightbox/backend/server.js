@@ -1163,6 +1163,11 @@ app.put('/api/admin/events/:id', requireAdmin, (req, res) => {
   if (!result.changes) return res.status(404).json({ error: 'Event not found' });
   res.json({ updated: true });
 });
+app.delete('/api/admin/tickets/:id', requireAdmin, (req, res) => {
+  const result = store.db.prepare('DELETE FROM support_tickets WHERE id=?').run(req.params.id);
+  if (!result.changes) return res.status(404).json({ error: 'Ticket not found' });
+  res.json({ deleted: true });
+});
 app.get('/api/admin/milestones', requireAdmin, (req, res) => {
   const milestones = store.db.prepare('SELECT id,title,description,threshold_views AS thresholdViews,reward_note AS rewardNote,active,created_at AS createdAt,updated_at AS updatedAt FROM reward_milestones ORDER BY threshold_views').all();
   res.json({ milestones });

@@ -363,6 +363,10 @@ export async function updateAdminTicket(token: string, id: string, status: strin
   const response = await fetch(`${BACKEND_URL}/api/admin/tickets/${encodeURIComponent(id)}`, { method: "PUT", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify({ status, adminNote }) });
   return parseResponse(response);
 }
+export async function deleteAdminTicket(token: string, id: string) {
+  const response = await fetch(`${BACKEND_URL}/api/admin/tickets/${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders(token) });
+  return parseResponse<{ deleted: boolean }>(response);
+}
 export async function getAdminReports(token: string) { const response = await fetch(`${BACKEND_URL}/api/admin/reports`, { headers: authHeaders(token) }); return parseResponse<{ reports: AdminReport[] }>(response); }
 export async function updateAdminReport(token: string, id: string, status: string, adminNote: string) { const response = await fetch(`${BACKEND_URL}/api/admin/reports/${encodeURIComponent(id)}`, { method: "PUT", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify({ status, adminNote }) }); return parseResponse(response); }
 export async function getAdminSettings(token: string) { const response = await fetch(`${BACKEND_URL}/api/admin/settings`, { headers: authHeaders(token) }); return parseResponse<{ settings: Record<string, string | boolean> }>(response); }
