@@ -1119,3 +1119,9 @@
 .file-rows>div>span:nth-child(3),.file-rows>div>span:nth-child(4),.file-rows>div>.pill{justify-self:start}
 .file-rows>div>button{justify-self:end;white-space:nowrap;font-size:10px;color:var(--blue)!important;font-weight:750;padding:6px 0}
 @media(max-width:760px){.file-rows>div{grid-template-columns:40px minmax(220px,1fr) 80px 80px 78px 68px 30px}}
+/* Give the full file table its own action columns so row controls never wrap into content. */
+.files-table .table-head,.files-table .table-row{grid-template-columns:minmax(280px,2.2fr) minmax(90px,.8fr) minmax(70px,.7fr) minmax(90px,.8fr) minmax(100px,.9fr) 80px 80px;gap:16px}
+.files-table .table-head>span:last-child{grid-column:6 / 8}
+.files-table .table-row>button{justify-self:end;white-space:nowrap;font-size:10px;color:var(--blue)!important;font-weight:750;padding:6px 0}
+.files-table .table-row:hover{background:#fbfcff}
+@media(max-width:760px){.files-table .table-head,.files-table .table-row{grid-template-columns:minmax(280px,2.2fr) minmax(90px,.8fr) minmax(70px,.7fr) minmax(90px,.8fr) minmax(100px,.9fr) 80px 80px}}
