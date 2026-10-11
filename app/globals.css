@@ -1114,3 +1114,8 @@
 .admin-ticket-reply::placeholder{color:#888891}
 @media(max-width:760px){.app-content{padding:20px 16px}.topbar{padding:0 16px;gap:12px}.topbar>div:first-of-type{gap:7px}.topbar>div:first-of-type>b{font-size:10px}.ticket-conversation{padding:16px 14px}.ticket-conversation>header{align-items:flex-start}.tickets-history-heading h2{font-size:18px}}
 @media(max-width:420px){.ticket-conversation>header{flex-direction:column}.ticket-reply>span{flex-wrap:wrap}.ticket-reply>span small{margin-left:30px}}
+/* Keep recent-video metadata, status, and actions in separate columns. */
+.file-rows>div{grid-template-columns:40px minmax(220px,1fr) 80px 80px 78px 68px 30px;gap:12px}
+.file-rows>div>span:nth-child(3),.file-rows>div>span:nth-child(4),.file-rows>div>.pill{justify-self:start}
+.file-rows>div>button{justify-self:end;white-space:nowrap;font-size:10px;color:var(--blue)!important;font-weight:750;padding:6px 0}
+@media(max-width:760px){.file-rows>div{grid-template-columns:40px minmax(220px,1fr) 80px 80px 78px 68px 30px}}
