@@ -34,7 +34,7 @@ const app = express();
 const googleAuthClient = new OAuth2Client();
 app.set('trust proxy', process.env.TRUST_PROXY === 'true');
 const PORT = process.env.PORT || 3000;
-const DOMAIN_URL = process.env.DOMAIN_URL || 'https://video.nightbox.in';
+const DOMAIN_URL = String(process.env.PUBLIC_SITE_URL || 'https://nightbox.in').replace(/\/$/, '');
 const PUBLIC_API_URL = String(process.env.PUBLIC_API_URL || 'https://api.nightbox.in').replace(/\/$/, '');
 const CREATOR_DEFAULT_QUOTA_BYTES = 2 * 1024 * 1024 * 1024;
 const CREATOR_MAX_QUOTA_BYTES = CREATOR_DEFAULT_QUOTA_BYTES;
