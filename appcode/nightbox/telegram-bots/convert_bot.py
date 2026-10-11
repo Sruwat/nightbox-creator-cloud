@@ -234,6 +234,30 @@ async def connect_command(_, message):
         await message.reply_text(f"Connection failed: {str(error)[:200]}")
 
 
+@app.on_message(filters.text & filters.regex(r"^\s*nb_live_[A-Za-z0-9_-]+\s*$"))
+async def pasted_key_command(_, message):
+    """Accept a pasted creator key directly; users often paste it without /connect."""
+    key = (message.text or "").strip()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{BACKEND_URL}/api/creator/bot-identity",
+                headers={"X-Bot-Key": key},
+                timeout=15,
+            ) as response:
+                data = await response.json(content_type=None)
+                if response.status >= 300:
+                    raise RuntimeError(data.get("error", f"HTTP {response.status}"))
+        set_creator_key(message.chat.id, key)
+        await message.reply_text(
+            f"Connected to creator account {data['user']['email']}. Now send your link or video."
+        )
+    except Exception as error:
+        await message.reply_text(
+            f"Connection failed: {str(error)[:200]}\nUse /connect nb_live_your_creator_key"
+        )
+
+
 @app.on_message(filters.command("disconnect"))
 async def disconnect_command(_, message):
     remove_creator_key(message.chat.id)
