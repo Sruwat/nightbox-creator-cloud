@@ -202,6 +202,19 @@ export async function getAdminUsers(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/users`, { headers: authHeaders(token) });
   return parseResponse<{ users: Array<{ id: string; email: string; role: string; status: string; telegramUserId: string | null; createdAt: string; storageQuotaBytes: number; storageUsedBytes: number }> }>(response);
 }
+export type AdminCreatorDetail = {
+  creator: { id: string; email: string; status: string; telegramUserId: string | null; createdAt: string; storageQuotaBytes: number; storageUsedBytes: number };
+  metrics: { views: { today: number; week: number; month: number; lifetime: number }; earningsMicros: { today: number; yesterday: number; week: number; month: number; lifetime: number; available: number; paid: number }; activeUsers: { today: number; week: number; month: number; lifetime: number }; watchMinutes: { today: number; week: number; month: number; lifetime: number } };
+  files: Array<{ id: string; name: string; sizeBytes: number; createdAt: string; status: string }>;
+};
+export async function getAdminCreator(token: string, id: string) {
+  const response = await fetch(`${BACKEND_URL}/api/admin/creators/${encodeURIComponent(id)}`, { headers: authHeaders(token) });
+  return parseResponse<AdminCreatorDetail>(response);
+}
+export async function updateAdminCreator(token: string, id: string, patch: { email?: string; telegramUserId?: string; status?: string }) {
+  const response = await fetch(`${BACKEND_URL}/api/admin/creators/${encodeURIComponent(id)}`, { method: "PUT", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+  return parseResponse<{ creator: AdminCreatorDetail["creator"] }>(response);
+}
 export async function updateAdminStorageQuota(token: string, id: string, quotaBytes: number) {
   const response = await fetch(`${BACKEND_URL}/api/admin/users/${encodeURIComponent(id)}/storage-limit`, { method: "PUT", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify({ quotaBytes }) });
   return parseResponse<{ creatorId: string; quotaBytes: number }>(response);

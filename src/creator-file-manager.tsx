@@ -176,7 +176,7 @@ export default function CreatorFileManager({ token, toast }: { token: string; to
 
   return <section className="card creator-storage">
     <div className="card-head">
-      <div><b>Cloud files</b><span>2 GiB included storage · admins can extend it to 3 GiB</span></div>
+      <div><b>Cloud files</b><span>2 GiB included storage · maximum file size 2 GiB</span></div>
       <label className="btn btn-primary creator-storage-upload">{busy ? "Uploading…" : "Upload files"}<input type="file" multiple disabled={busy} onChange={uploadFiles} /></label>
     </div>
     {storage && <div className="creator-storage-usage" aria-label="Storage usage">
@@ -206,6 +206,6 @@ export default function CreatorFileManager({ token, toast }: { token: string; to
       </article>)}
       {!visibleFolders.length && !files.length && !error && <p className="empty-copy">This folder is empty. Upload a file or create a folder to get started.</p>}
     </div>
-    <small className="creator-storage-private">Files are private until you create a share link. Anyone with a share link can access that file. Each file is limited by your remaining quota, up to 3 GiB.</small>
+    <small className="creator-storage-private">Files are private until you create a share link. Anyone with a share link can access that file. Each file is limited by your remaining quota, up to 2 GiB.</small>
   </section>;
 }

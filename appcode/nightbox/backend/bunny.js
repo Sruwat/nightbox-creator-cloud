@@ -15,7 +15,7 @@ const STORAGE_DRIVER = String(process.env.VIDEO_STORAGE_DRIVER || 'bunny').toLow
 const LOCAL_STORAGE_ROOT = path.resolve(process.env.VIDEO_STORAGE_ROOT || path.join(__dirname, 'media'));
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
-const MAX_VIDEO_BYTES = 4 * 1024 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 2 * 1024 * 1024 * 1024;
 
 const bunnyApi = axios.create({
   baseURL: 'https://storage.bunnycdn.com',
@@ -54,7 +54,7 @@ async function uploadVideo(videoId, filePath) {
   assertConfigured();
   if (STORAGE_DRIVER === 'local') {
     const fileStats = fs.statSync(filePath);
-    if (fileStats.size > MAX_VIDEO_BYTES) throw new Error('Video exceeds the 4GB upload limit');
+    if (fileStats.size > MAX_VIDEO_BYTES) throw new Error('Video exceeds the 2GB upload limit');
     fs.mkdirSync(LOCAL_STORAGE_ROOT, { recursive: true });
     const target = localPath(videoId);
     const temporaryTarget = `${target}.uploading`;
@@ -65,7 +65,7 @@ async function uploadVideo(videoId, filePath) {
   }
   return withRetry(async () => {
     const fileStats = fs.statSync(filePath);
-    if (fileStats.size > MAX_VIDEO_BYTES) throw new Error('Video exceeds the 4GB upload limit');
+    if (fileStats.size > MAX_VIDEO_BYTES) throw new Error('Video exceeds the 2GB upload limit');
     const response = await bunnyApi.put(`/${objectPath(videoId)}`, fs.createReadStream(filePath), {
       headers: { 'Content-Type': 'video/mp4', 'Content-Length': fileStats.size }, maxContentLength: Infinity, maxBodyLength: Infinity, timeout: 1800000,
     });
@@ -79,10 +79,10 @@ async function uploadVideoFromUrl(videoId, url, tempDir) {
   try {
     const response = await axios({ method: 'GET', url, responseType: 'stream', timeout: 600000, maxContentLength: MAX_VIDEO_BYTES, maxBodyLength: MAX_VIDEO_BYTES, headers: { 'User-Agent': 'NightBox/1.0' } });
     const advertisedLength = Number(response.headers['content-length'] || 0);
-    if (advertisedLength > MAX_VIDEO_BYTES) throw new Error('Remote video exceeds the 4GB upload limit');
+    if (advertisedLength > MAX_VIDEO_BYTES) throw new Error('Remote video exceeds the 2GB upload limit');
     const writer = fs.createWriteStream(tempFilePath);
     let bytes = 0;
-    response.data.on('data', (chunk) => { bytes += chunk.length; if (bytes > MAX_VIDEO_BYTES) response.data.destroy(new Error('Remote video exceeds the 4GB upload limit')); });
+    response.data.on('data', (chunk) => { bytes += chunk.length; if (bytes > MAX_VIDEO_BYTES) response.data.destroy(new Error('Remote video exceeds the 2GB upload limit')); });
     response.data.pipe(writer);
     await new Promise((resolve, reject) => { writer.on('finish', resolve); writer.on('error', reject); response.data.on('error', reject); });
     if (fs.statSync(tempFilePath).size < 1000) throw new Error('Downloaded file too small');

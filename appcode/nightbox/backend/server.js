@@ -37,7 +37,7 @@ const PORT = process.env.PORT || 3000;
 const DOMAIN_URL = process.env.DOMAIN_URL || 'https://video.nightbox.in';
 const PUBLIC_API_URL = String(process.env.PUBLIC_API_URL || 'https://api.nightbox.in').replace(/\/$/, '');
 const CREATOR_DEFAULT_QUOTA_BYTES = 2 * 1024 * 1024 * 1024;
-const CREATOR_MAX_QUOTA_BYTES = 3 * 1024 * 1024 * 1024;
+const CREATOR_MAX_QUOTA_BYTES = CREATOR_DEFAULT_QUOTA_BYTES;
 const BUNNY_STORAGE_PASSWORD = process.env.BUNNY_STORAGE_PASSWORD;
 const BUNNY_STORAGE_ZONE = process.env.BUNNY_STORAGE_ZONE;
 const BUNNY_LOCAL_STORAGE = String(process.env.VIDEO_STORAGE_DRIVER || '').toLowerCase() === 'local';
@@ -899,8 +899,41 @@ app.put('/api/admin/view-rules', requireAdmin, (req, res) => {
 });
 app.get('/api/admin/users', requireAdmin, (req, res) => res.json({ users: store.db.prepare(`SELECT u.id,u.email,u.role,u.status,u.telegram_user_id AS telegramUserId,u.created_at AS createdAt,
   CASE WHEN u.role='creator' THEN COALESCE(l.quota_bytes,?) ELSE 0 END AS storageQuotaBytes,
-  CASE WHEN u.role='creator' THEN COALESCE((SELECT SUM(f.size_bytes) FROM creator_files f WHERE f.owner_id=u.id),0)+COALESCE((SELECT SUM(r.size_bytes) FROM creator_storage_reservations r WHERE r.creator_id=u.id),0) ELSE 0 END AS storageUsedBytes
+  CASE WHEN u.role='creator' THEN COALESCE((SELECT SUM(f.size_bytes) FROM creator_files f WHERE f.owner_id=u.id),0)+COALESCE((SELECT SUM(v.file_size) FROM videos v WHERE v.owner_id=u.id AND v.status <> 'deleted'),0)+COALESCE((SELECT SUM(r.size_bytes) FROM creator_storage_reservations r WHERE r.creator_id=u.id),0) ELSE 0 END AS storageUsedBytes
   FROM users u LEFT JOIN creator_storage_limits l ON l.creator_id=u.id ORDER BY u.created_at DESC`).all(CREATOR_DEFAULT_QUOTA_BYTES) }));
+app.get('/api/admin/creators/:id', requireAdmin, (req, res) => {
+  const creator = store.db.prepare(`SELECT u.id,u.email,u.status,u.telegram_user_id AS telegramUserId,u.created_at AS createdAt,
+    COALESCE(l.quota_bytes,?) AS storageQuotaBytes,
+    COALESCE((SELECT SUM(f.size_bytes) FROM creator_files f WHERE f.owner_id=u.id),0)+COALESCE((SELECT SUM(v.file_size) FROM videos v WHERE v.owner_id=u.id AND v.status <> 'deleted'),0)+COALESCE((SELECT SUM(r.size_bytes) FROM creator_storage_reservations r WHERE r.creator_id=u.id),0) AS storageUsedBytes
+    FROM users u LEFT JOIN creator_storage_limits l ON l.creator_id=u.id WHERE u.id=? AND u.role='creator'`).get(CREATOR_DEFAULT_QUOTA_BYTES, req.params.id);
+  if (!creator) return res.status(404).json({ error: 'Creator not found' });
+  const ranges = { today: "DATE('now','-1 day')", yesterday: "DATE('now','-2 day')", week: "DATE('now','-7 day')", month: "DATE('now','-30 day')" };
+  const earningsFor = (where) => Number(store.db.prepare(`SELECT COALESCE(SUM(amount_micros),0) AS amount FROM earnings WHERE creator_id=? AND ${where}`).get(creator.id).amount);
+  const viewsFor = (where) => Number(store.db.prepare(`SELECT COUNT(*) AS count FROM view_sessions s JOIN creator_links l ON l.id=s.link_id WHERE l.creator_id=? AND s.counted=1 AND ${where}`).get(creator.id).count);
+  const usersFor = (where) => Number(store.db.prepare(`SELECT COUNT(DISTINCT s.viewer_hash) AS count FROM view_sessions s JOIN creator_links l ON l.id=s.link_id WHERE l.creator_id=? AND s.counted=1 AND ${where}`).get(creator.id).count);
+  const lifetimeViews = viewsFor('1=1');
+  const minimumSeconds = Number(store.db.prepare('SELECT minimum_watch_seconds AS value FROM view_rules WHERE id=1').get()?.value || 5);
+  const earningsLifetime = earningsFor('1=1');
+  const paid = Number(store.db.prepare("SELECT COALESCE(SUM(amount_micros),0) AS amount FROM withdrawal_requests WHERE creator_id=? AND status='paid'").get(creator.id).amount);
+  const available = Math.max(0, earningsLifetime - Number(store.db.prepare("SELECT COALESCE(SUM(amount_micros),0) AS amount FROM withdrawal_requests WHERE creator_id=? AND status IN ('pending','approved','paid')").get(creator.id).amount));
+  const files = store.db.prepare("SELECT id,original_name AS name,size_bytes AS sizeBytes,created_at AS createdAt,'file' AS status FROM creator_files WHERE owner_id=? UNION ALL SELECT id,title AS name,COALESCE(file_size,0) AS sizeBytes,created_at AS createdAt,status FROM videos WHERE owner_id=? AND status <> 'deleted' ORDER BY createdAt DESC LIMIT 12").all(creator.id, creator.id);
+  const views = { today: viewsFor(`DATE(s.qualified_at) >= ${ranges.today}`), week: viewsFor(`DATE(s.qualified_at) >= ${ranges.week}`), month: viewsFor(`DATE(s.qualified_at) >= ${ranges.month}`), lifetime: lifetimeViews };
+  const earningsMicros = { today: earningsFor(`DATE(created_at) >= ${ranges.today}`), yesterday: earningsFor("DATE(created_at)=DATE('now','-1 day')"), week: earningsFor(`DATE(created_at) >= ${ranges.week}`), month: earningsFor(`DATE(created_at) >= ${ranges.month}`), lifetime: earningsLifetime, available, paid };
+  const activeUsers = { today: usersFor(`DATE(s.qualified_at) >= ${ranges.today}`), week: usersFor(`DATE(s.qualified_at) >= ${ranges.week}`), month: usersFor(`DATE(s.qualified_at) >= ${ranges.month}`), lifetime: usersFor('1=1') };
+  const watchMinutes = Object.fromEntries(Object.entries(views).map(([key, value]) => [key, Math.round(value * minimumSeconds / 60)]));
+  res.json({ creator, metrics: { views, earningsMicros, activeUsers, watchMinutes }, files });
+});
+app.put('/api/admin/creators/:id', requireAdmin, (req, res) => {
+  const creator = store.db.prepare("SELECT id,email,status,telegram_user_id AS telegramUserId,created_at AS createdAt FROM users WHERE id=? AND role='creator'").get(req.params.id);
+  if (!creator) return res.status(404).json({ error: 'Creator not found' });
+  const email = String(req.body?.email ?? creator.email).trim();
+  const telegramUserId = String(req.body?.telegramUserId ?? creator.telegramUserId ?? '').trim() || null;
+  const status = String(req.body?.status ?? creator.status);
+  if (!email || !email.includes('@') || !['active','suspended'].includes(status)) return res.status(400).json({ error: 'Valid email and status are required' });
+  try { store.db.prepare('UPDATE users SET email=?,telegram_user_id=?,status=? WHERE id=? AND role=\'creator\'').run(email, telegramUserId, status, req.params.id); }
+  catch (error) { if (String(error.message).includes('UNIQUE')) return res.status(409).json({ error: 'That email is already in use' }); throw error; }
+  res.json({ creator: store.db.prepare('SELECT id,email,status,telegram_user_id AS telegramUserId,created_at AS createdAt FROM users WHERE id=?').get(req.params.id) });
+});
 app.put('/api/admin/users/:id', requireAdmin, (req, res) => {
   const status = String(req.body?.status || '');
   if (!['active', 'suspended'].includes(status)) return res.status(400).json({ error: 'Invalid user status' });
@@ -912,7 +945,7 @@ app.put('/api/admin/users/:id/storage-limit', requireAdmin, (req, res) => {
   const creator = store.db.prepare("SELECT id FROM users WHERE id=? AND role='creator'").get(req.params.id);
   if (!creator) return res.status(404).json({ error: 'Creator not found' });
   const quotaBytes = Number(req.body?.quotaBytes);
-  if (![CREATOR_DEFAULT_QUOTA_BYTES, CREATOR_MAX_QUOTA_BYTES].includes(quotaBytes)) return res.status(400).json({ error: 'Storage limit must be 2 GiB or 3 GiB' });
+  if (quotaBytes !== CREATOR_DEFAULT_QUOTA_BYTES) return res.status(400).json({ error: 'Storage limit is fixed at 2 GiB' });
   const storage = creatorStorageUsage(creator.id);
   if (storage.usedBytes + storage.reservedBytes > quotaBytes) return res.status(409).json({ error: 'Creator is currently using more storage than that limit allows', storage });
   if (quotaBytes === CREATOR_DEFAULT_QUOTA_BYTES) {
@@ -1303,7 +1336,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: {
-    fileSize: 4 * 1024 * 1024 * 1024, // 4GB max
+    fileSize: 2 * 1024 * 1024 * 1024, // 2GB max
     files: 1, // Only 1 file at a time
   },
   fileFilter: (req, file, cb) => {
@@ -1319,7 +1352,7 @@ const upload = multer({
 
 const creatorFileUpload = multer({
   storage,
-  limits: { fileSize: 3 * 1024 * 1024 * 1024, files: 1 },
+  limits: { fileSize: 2 * 1024 * 1024 * 1024, files: 1 },
 });
 
 // POST /upload-file
@@ -1475,7 +1508,7 @@ app.post('/upload-from-url', async (req, res) => {
   } catch (error) {
     console.error('URL upload error:', error.message);
     const message = String(error.message || '');
-    const clientError = /invalid remote URL|private network|exceeds the 4GB upload limit/i.test(message);
+    const clientError = /invalid remote URL|private network|exceeds the 2GB upload limit/i.test(message);
     res.status(clientError ? 400 : 502).json({ error: clientError ? message : 'Failed to upload video from URL' });
   } finally {
     activeUploads--;
@@ -1673,7 +1706,7 @@ app.get('/ready', (req, res) => {
 // Error handler
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
-    if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Upload exceeds the 3 GiB per-file maximum or your remaining storage quota.' });
+    if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Upload exceeds the 2 GiB per-file maximum or your remaining storage quota.' });
     return res.status(400).json({ error: err.message });
   }
 

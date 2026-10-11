@@ -263,6 +263,9 @@ db.exec(`
   );
 `);
 
+// Normalize legacy 3 GiB quotas during startup so the 2 GiB product limit is consistent.
+db.prepare('UPDATE creator_storage_limits SET quota_bytes=2147483648, updated_at=? WHERE quota_bytes > 2147483648').run(new Date().toISOString());
+
 db.prepare('INSERT OR IGNORE INTO ads_txt_content (id, content, updated_at) VALUES (1, ?, ?)').run('', new Date().toISOString());
 
 for (const statement of [
