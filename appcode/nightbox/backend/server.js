@@ -45,6 +45,9 @@ const ADMIN_API_KEY = process.env.ADMIN_API_KEY || crypto.randomBytes(32).toStri
 const allowedOrigins = [...new Set([
   ...(process.env.WEB_ORIGINS || 'http://localhost:4173,http://localhost:4174').split(',').map((value) => value.trim()).filter(Boolean),
   'https://nightbox.in',
+  'https://www.nightbox.in',
+  'https://admin.nightbox.in',
+  'https://video.nightbox.in',
 ])];
 
 if (process.env.NODE_ENV === 'production') {
