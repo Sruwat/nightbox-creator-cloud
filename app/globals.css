@@ -1190,3 +1190,13 @@
   .app-shell:not(.sidebar-collapsed) .app-menu{display:none}
   .app-shell.sidebar-collapsed .app-menu{display:grid}
 }
+
+/* Premium creator surfaces: tighter hierarchy and clearer monetization states. */
+.app-shell:not(.admin-app) .metrics .metric{border:1px solid #e2e8f2;box-shadow:0 12px 30px rgba(25,52,94,.045);transition:transform .18s ease,box-shadow .18s ease}
+.app-shell:not(.admin-app) .metrics .metric:hover{transform:translateY(-2px);box-shadow:0 16px 34px rgba(25,52,94,.09)}
+.app-shell:not(.admin-app) .monetization-summary{border-color:#dce6f4;background:linear-gradient(115deg,#fff 0%,#f7faff 100%);box-shadow:0 12px 30px rgba(25,52,94,.045)}
+.app-shell:not(.admin-app) .creator-rate-preview{box-shadow:0 12px 30px rgba(25,52,94,.04)}
+.rate-highlight{display:flex;flex-direction:column;align-items:flex-end;gap:3px;padding:10px 13px;border:1px solid #cfe0ff;border-radius:12px;background:#f1f6ff;color:#1559bd;font-size:18px;white-space:nowrap}
+.rate-highlight small{color:#728097;font-size:9px;font-weight:650}
+.creator-rate-chips>span small{color:#8a96a8;font-size:9px}
+@media(max-width:520px){.rate-highlight{align-self:stretch;align-items:flex-start}.app-shell:not(.admin-app) .metrics .metric:hover{transform:none}}
