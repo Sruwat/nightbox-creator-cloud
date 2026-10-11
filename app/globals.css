@@ -1164,3 +1164,29 @@
     background:transparent!important;
   }
 }
+
+/* Desktop sidebar collapse control; the same button remains the mobile drawer close. */
+@media(min-width:761px){
+  .app-shell{transition:grid-template-columns .2s ease}
+  .app-shell.sidebar-collapsed{grid-template-columns:0 minmax(0,1fr)}
+  .app-shell.sidebar-collapsed>.sidebar{display:none}
+  .app-shell .sidebar-head{position:relative}
+  .app-shell .sidebar-head .drawer-close{
+    display:grid;
+    place-items:center;
+    position:absolute;
+    top:-8px;
+    right:-7px;
+    width:28px;
+    height:28px;
+    border:1px solid #ffffff18!important;
+    border-radius:8px!important;
+    background:#ffffff08!important;
+    color:#b8c7dc!important;
+    font-size:20px;
+    line-height:1;
+  }
+  .app-shell .sidebar-head .drawer-close:hover{background:#ffffff18!important;color:#fff!important}
+  .app-shell:not(.sidebar-collapsed) .app-menu{display:none}
+  .app-shell.sidebar-collapsed .app-menu{display:grid}
+}
