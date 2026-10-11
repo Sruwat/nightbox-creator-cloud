@@ -5,7 +5,7 @@ Accepts video files of ANY size from users, uploads them to the backend,
 and returns a watch link.
 
 Uses Pyrogram (MTProto) instead of Bot API to bypass the 20MB download limit.
-The backend accepts files up to 4 GB; Telegram's own download limit may be
+The backend accepts files up to 2 GB; Telegram's own download limit may be
 lower depending on the account/API path used.
 
 Key features:
@@ -181,7 +181,7 @@ async def start_command(client: Client, message: Message):
     await message.reply_text(
         "🎬 **Prerna Video Upload Bot**\n\n"
         "Send me a video file and I'll upload it to our streaming platform.\n\n"
-        "📹 **Supported:** Any video format; backend limit 4 GB (Telegram source limits may apply)\n"
+        "📹 **Supported:** Any video format; backend limit 2 GB (Telegram source limits may apply)\n"
         "🔐 First connect your creator account with /connect nb_live_...\n\n"
         "Just send or forward a video to get started!",
     )
@@ -229,6 +229,22 @@ async def connect_command(client: Client, message: Message):
         await message.reply_text(f"Connected to creator account {data['user']['email']}.")
     except Exception as error:
         await message.reply_text(f"Connection failed: {str(error)[:200]}")
+
+
+@app.on_message(filters.text & filters.regex(r"^\s*nb_live_[A-Za-z0-9_-]+\s*$"))
+async def pasted_key_command(client: Client, message: Message):
+    """Accept a pasted creator key directly, since users commonly paste the key without /connect."""
+    key = (message.text or "").strip()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{BACKEND_URL}/api/creator/bot-identity", headers={"X-Bot-Key": key}, timeout=15) as response:
+                data = await response.json(content_type=None)
+                if response.status >= 300:
+                    raise RuntimeError(data.get("error", f"HTTP {response.status}"))
+        set_creator_key(message.chat.id, key)
+        await message.reply_text(f"Connected to creator account {data['user']['email']}. Now send your video file.")
+    except Exception as error:
+        await message.reply_text(f"Connection failed: {str(error)[:200]}\nUse /connect nb_live_your_creator_key")
 
 
 @app.on_message(filters.command("disconnect"))
