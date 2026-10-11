@@ -272,6 +272,33 @@ class MainActivity : AppCompatActivity() {
                 intent.action = null
                 setIntent(Intent())
                 openFileInfo(videoId, data.getQueryParameter("link"))
+            } else if (pathSegments.size >= 2 && pathSegments[0] == "l") {
+                val slug = pathSegments[1]
+                deepLinkProcessed = true
+                intent.data = null
+                intent.action = null
+                setIntent(Intent())
+                resolveShareLink(slug)
+            }
+        }
+    }
+
+    private fun resolveShareLink(slug: String) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url("${BuildConfig.BACKEND_URL}/api/links/${Uri.encode(slug)}")
+                    .get()
+                    .build()
+                val response = apiClient.newCall(request).execute()
+                if (!response.isSuccessful) throw IllegalStateException("Share link not found")
+                val link = JSONObject(response.body?.string().orEmpty()).getJSONObject("link")
+                val videoId = link.getString("videoId")
+                withContext(Dispatchers.Main) { openFileInfo(videoId, slug) }
+            } catch (_: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "This NightBox link is not available", Toast.LENGTH_LONG).show()
+                }
             }
         }
     }
