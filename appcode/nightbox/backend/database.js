@@ -96,6 +96,7 @@ db.exec(`
     video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
     creator_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     slug TEXT NOT NULL UNIQUE,
+    canonical INTEGER NOT NULL DEFAULT 1 CHECK (canonical IN (0,1)),
     created_at TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS view_sessions (
@@ -276,6 +277,7 @@ for (const statement of [
   'ALTER TABLE view_rules ADD COLUMN max_views_per_ip_24h INTEGER NOT NULL DEFAULT 5 CHECK (max_views_per_ip_24h >= 1)',
   'ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT \'active\'',
   'ALTER TABLE users ADD COLUMN google_sub TEXT',
+  'ALTER TABLE creator_links ADD COLUMN canonical INTEGER NOT NULL DEFAULT 1 CHECK (canonical IN (0,1))',
 ]) {
   try { db.exec(statement); } catch (error) {
     if (!String(error.message).includes('duplicate column name')) throw error;
@@ -283,6 +285,43 @@ for (const statement of [
 }
 
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub) WHERE google_sub IS NOT NULL');
+
+// A creator should get one reusable earning link per video. Older versions
+// created a fresh slug on every import/upload, so retain those legacy URLs but
+// mark the oldest link for each video/creator pair as the canonical one.
+const duplicateLinkGroups = db.prepare(`
+  SELECT video_id AS videoId, creator_id AS creatorId
+  FROM creator_links
+  GROUP BY video_id, creator_id
+  HAVING COUNT(*) > 1
+`).all();
+if (duplicateLinkGroups.length) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const linksForPair = db.prepare(`
+      SELECT id
+      FROM creator_links
+      WHERE video_id = ? AND creator_id = ?
+      ORDER BY created_at ASC, id ASC
+    `);
+    const setCanonical = db.prepare('UPDATE creator_links SET canonical = ? WHERE id = ?');
+    for (const group of duplicateLinkGroups) {
+      const links = linksForPair.all(group.videoId, group.creatorId);
+      links.forEach((link, index) => setCanonical.run(index === 0 ? 1 : 0, link.id));
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_creator_links_video_creator
+    ON creator_links(video_id, creator_id, created_at ASC);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_creator_links_one_canonical
+    ON creator_links(video_id, creator_id) WHERE canonical = 1;
+`);
 
 try { db.exec('ALTER TABLE earnings RENAME COLUMN amount_cents TO amount_micros'); } catch (error) {
   if (!String(error.message).includes('no such column') && !String(error.message).includes('duplicate column')) throw error;
@@ -376,8 +415,27 @@ module.exports = {
   createVideo(video) { db.prepare('INSERT INTO videos (id,owner_id,title,watch_url,embed_url,content_hash,file_size,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)').run(video.id, video.ownerId || null, video.title, video.watchUrl, video.embedUrl, video.contentHash || null, video.fileSize || null, video.status || 'processing', now()); },
   findVideoByHash(contentHash, ownerId) { return db.prepare('SELECT id,title,watch_url AS watchUrl,embed_url AS embedUrl FROM videos WHERE content_hash = ? AND (owner_id = ? OR owner_id IS NULL) ORDER BY created_at ASC LIMIT 1').get(contentHash, ownerId || null); },
   createLink(videoId, creatorId) {
+    const existing = db.prepare(`
+      SELECT id, slug
+      FROM creator_links
+      WHERE video_id = ? AND creator_id = ? AND canonical = 1
+      ORDER BY created_at ASC, id ASC
+      LIMIT 1
+    `).get(videoId, creatorId);
+    if (existing) return existing;
+
     const link = { id: id(), slug: crypto.randomBytes(8).toString('base64url') };
-    db.prepare('INSERT INTO creator_links (id,video_id,creator_id,slug,created_at) VALUES (?,?,?,?,?)').run(link.id, videoId, creatorId, link.slug, now());
-    return link;
+    db.prepare(`
+      INSERT OR IGNORE INTO creator_links (id,video_id,creator_id,slug,canonical,created_at)
+      VALUES (?,?,?,?,1,?)
+    `).run(link.id, videoId, creatorId, link.slug, now());
+
+    return db.prepare(`
+      SELECT id, slug
+      FROM creator_links
+      WHERE video_id = ? AND creator_id = ? AND canonical = 1
+      ORDER BY created_at ASC, id ASC
+      LIMIT 1
+    `).get(videoId, creatorId) || link;
   },
 };
