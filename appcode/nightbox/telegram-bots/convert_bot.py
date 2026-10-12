@@ -178,10 +178,20 @@ async def download_generic(url, tmp_dir):
     output = os.path.join(tmp_dir, "%(title).80s.%(ext)s")
     cmd = ["yt-dlp", "--no-warnings", "-f", "best[ext=mp4]/best", "-o", output, url]
     try:
-        def _run(): return subprocess.run(cmd, capture_output=True, text=True, timeout=1200)
-        await asyncio.to_thread(_run)
+        def _run():
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=1200)
+
+        result = await asyncio.to_thread(_run)
         files = [f for f in os.listdir(tmp_dir) if not f.endswith((".part", ".ytdl"))]
-        if not files: raise Exception("yt-dlp failed")
+        if result.returncode != 0 or not files:
+            detail = (result.stderr or result.stdout or "").strip().splitlines()
+            reason = detail[-1][:240] if detail else "download returned no media file"
+            if BOT_KIND == "NIGHTHEAST_TO_NIGHTBOX" and "Unsupported URL" in reason:
+                raise Exception(
+                    "Nightheast share pages open in the app and are not direct download URLs. "
+                    "Forward the actual video message to this bot instead."
+                )
+            raise Exception(f"yt-dlp failed: {reason}")
         fpath = os.path.join(tmp_dir, files[0])
         valid, reason = validate_video_file(fpath)
         if not valid: 
@@ -291,30 +301,53 @@ async def handle(c, m):
         return
     text = m.text or m.caption or ""
     urls = URL_PATTERN.findall(text)
-    if not urls: return
-    
-    url = urls[0]
-    status = await m.reply_text("\u23f3 **Processing link...**")
     tmp = tempfile.mkdtemp()
+    has_video_media = bool(m.video or m.document or m.animation)
+    if not urls and not has_video_media:
+        if BOT_KIND == "NIGHTHEAST_TO_NIGHTBOX":
+            await m.reply_text(
+                "Send the Nightheast link with its access code, or forward the actual video message."
+            )
+        return
+
+    status = await m.reply_text(
+        "\u23f3 **Processing forwarded video...**" if has_video_media else "\u23f3 **Processing link...**"
+    )
     
     try:
-        if BOT_KIND == "NIGHTBOX_TO_NIGHTBOX":
+        if has_video_media:
+            file_name = (
+                getattr(m.video, "file_name", None)
+                or getattr(m.document, "file_name", None)
+                or getattr(m.animation, "file_name", None)
+                or f"forwarded_video_{m.id}.mp4"
+            )
+            file_name = re.sub(r"[^A-Za-z0-9._ -]", "_", os.path.basename(file_name))[:120] or f"forwarded_video_{m.id}.mp4"
+            media_path = await m.download(file_name=os.path.join(tmp, file_name))
+            valid, reason = validate_video_file(media_path)
+            if not valid:
+                raise Exception(f"Forwarded media is not a valid video: {reason}")
+            info = {"path": media_path, "title": file_name, "size": os.path.getsize(media_path)}
+        elif BOT_KIND == "NIGHTBOX_TO_NIGHTBOX":
+            url = urls[0]
             res = await import_nightbox_link(url, m.chat.id)
             await status.edit_text(f"✅ **NightBox link added to your dashboard!**\n\n🔗 `{res.get('link', '')}`")
             return
-        async with download_semaphore:
-            if any(x in url.lower() for x in ["terabox", "1024"]) and BOT_KIND == "TERABOX":
-                info = await download_terabox(url, tmp)
-            else:
-                info = await download_generic(url, tmp)
+        else:
+            url = urls[0]
+            async with download_semaphore:
+                if any(x in url.lower() for x in ["terabox", "1024"]) and BOT_KIND == "TERABOX":
+                    info = await download_terabox(url, tmp)
+                else:
+                    info = await download_generic(url, tmp)
             
-            await status.edit_text("\u2601 **Uploading to server...**")
-            res = await upload_video(info["path"], info["title"], m.chat.id)
-            watch = res.get("link") or res.get("watchUrl", "")
+        await status.edit_text("\u2601 **Uploading to server...**")
+        res = await upload_video(info["path"], info["title"], m.chat.id)
+        watch = res.get("link") or res.get("watchUrl", "")
             
-            kb = InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Watch Online", url=watch)]])
-            await m.reply_text(f"\u2705 **Conversion Success!**\n📏 {round(info['size']/1048576,1)} MB\n🔗 **Your earning link:** `{watch}`", reply_markup=kb)
-            await status.delete()
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Watch Online", url=watch)]])
+        await m.reply_text(f"\u2705 **Conversion Success!**\n📏 {round(info['size']/1048576,1)} MB\n🔗 **Your earning link:** `{watch}`", reply_markup=kb)
+        await status.delete()
     except Exception as e:
         logger.error(e)
         await status.edit_text(f"\u274c **Error:** {str(e)}")
