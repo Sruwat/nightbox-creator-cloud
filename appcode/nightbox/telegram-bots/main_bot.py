@@ -24,7 +24,7 @@ services = {
 
 @app.on_message(filters.command("start"))
 async def start(_, message):
-    lines = ["NightBox services", "", "Choose a service bot by username:", "", "Create a creator API key in Bots & API, then send /connect <key> to the selected service bot."]
+    lines = ["NightBox services", "", "Choose a service bot by username:", "", "NightBox-to-NightBox and Nightheast-to-NightBox identify your linked creator account from your Telegram sender ID. Other service bots may still ask for /connect <key>."]
     lines.extend(f"{label}: @{username}" if username else f"{label}: not configured" for label, username in services.items())
     await message.reply_text("\n".join(lines))
 

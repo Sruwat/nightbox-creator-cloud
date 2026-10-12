@@ -13,7 +13,7 @@ import re
 import os
 import asyncio
 import time
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from dotenv import load_dotenv
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
@@ -30,6 +30,14 @@ CREATOR_API_KEY = os.getenv("CREATOR_API_KEY", "")
 BOT_NAME = os.getenv("BOT_NAME", BOT_KIND.lower())
 REQUIRE_CONNECT = os.getenv("TELEGRAM_REQUIRE_CONNECT", "true").lower() == "true"
 STATE_FALLBACK_KEY = os.getenv("CREATOR_API_KEY", "")
+# The two link-conversion bots can resolve the destination creator from the
+# verified Telegram sender ID. Creator API keys remain supported as a legacy
+# fallback, but users no longer need to paste nb_live_* keys into Telegram.
+AUTO_CREATOR_IDENTITY = (
+    os.getenv("TELEGRAM_AUTO_CREATOR_IDENTITY", "true").lower() == "true"
+    and BOT_KIND in {"NIGHTHEAST_TO_NIGHTBOX", "NIGHTBOX_TO_NIGHTBOX"}
+)
+NIGHTBOX_BOT_INTEGRATION_KEY = os.getenv("NIGHTBOX_BOT_INTEGRATION_KEY", "")
 # Keep the bot-specific names, while also accepting the resolver contract's
 # documented names so a shared deployment environment works without renaming
 # the secret on either service.
@@ -77,6 +85,24 @@ app = Client(f"nightbox_{BOT_KIND.lower()}", api_id=int(API_ID), api_hash=API_HA
 
 def creator_key(chat_id):
     return get_creator_key(chat_id) or ("" if REQUIRE_CONNECT else STATE_FALLBACK_KEY)
+
+
+def telegram_user_id(message):
+    """Return the sender identity used to select the linked creator account."""
+    sender = getattr(message, "from_user", None)
+    value = getattr(sender, "id", None)
+    return str(value) if value is not None else ""
+
+
+def backend_headers(chat_id, telegram_id=""):
+    headers = {"X-Bot-Name": BOT_NAME, "X-Bot-External-ID": str(chat_id)}
+    key = creator_key(chat_id)
+    if key:
+        headers["X-Bot-Key"] = key
+    if AUTO_CREATOR_IDENTITY and NIGHTBOX_BOT_INTEGRATION_KEY and telegram_id:
+        headers["X-NightBox-Bot-Key"] = NIGHTBOX_BOT_INTEGRATION_KEY
+        headers["X-Telegram-User-ID"] = str(telegram_id)
+    return headers
 
 
 def extract_creator_key(text):
@@ -241,10 +267,14 @@ async def download_nightheast(url, message_text, tmp_dir):
 
     video_id = extract_nightheast_video_id(url)
     access_code = extract_access_code(message_text)
+    if not access_code:
+        parsed = urlparse(url)
+        query = parse_qs(parsed.query)
+        access_code = (
+            (query.get("accessCode") or query.get("access_code") or query.get("code") or [""])[0]
+        )
     if not video_id:
         raise Exception("Invalid Nightheast video link.")
-    if not access_code:
-        raise Exception("Nightheast access code is required. Send the link with 'Access code: 123456'.")
 
     resolver_url = NIGHTHEAST_API_URL
     if not resolver_url.endswith("/resolve"):
@@ -253,7 +283,12 @@ async def download_nightheast(url, message_text, tmp_dir):
         "X-Nightheast-Integration-Key": NIGHTHEAST_INTEGRATION_KEY,
         "Accept": "application/json",
     }
-    payload = {"videoId": video_id, "accessCode": access_code}
+    # A trusted Nightheast integration may resolve by the share URL alone.
+    # Older resolver deployments still require accessCode and will return a
+    # clear authorization error instead of silently downloading anything.
+    payload = {"videoId": video_id}
+    if access_code:
+        payload["accessCode"] = access_code
 
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
         async with session.post(resolver_url, json=payload, headers=headers) as response:
@@ -268,6 +303,11 @@ async def download_nightheast(url, message_text, tmp_dir):
                 raise Exception("Nightheast resolver returned an invalid response object.")
             if response.status >= 300 or data.get("success") is False:
                 detail = data.get("error") or data.get("message") or f"HTTP {response.status}"
+                if not access_code and response.status in {400, 401, 403}:
+                    detail = (
+                        "Nightheast resolver still requires an access code for this link. "
+                        "Enable trusted URL-only integration on Nightheast, then retry."
+                    )
                 raise Exception(f"Nightheast resolver rejected the link: {str(detail)[:240]}")
 
         nested = data.get("data") if isinstance(data.get("data"), dict) else {}
@@ -331,23 +371,20 @@ async def download_nightheast(url, message_text, tmp_dir):
 
 # ── UPLOAD & PROCESS ──
 
-async def upload_video(fpath, title, chat_id):
+async def upload_video(fpath, title, chat_id, telegram_id=""):
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=1800)) as session:
         data = aiohttp.FormData()
         with open(fpath, 'rb') as video_file:
             data.add_field('video', video_file, filename=os.path.basename(fpath), content_type='video/mp4')
             data.add_field('title', title)
-            headers = {"X-Bot-Name": BOT_NAME, "X-Bot-External-ID": str(chat_id)}
-            key = creator_key(chat_id)
-            if key:
-                headers["X-Bot-Key"] = key
+            headers = backend_headers(chat_id, telegram_id)
             async with session.post(f"{BACKEND_URL}/upload-file", data=data, headers=headers) as resp:
                 if resp.status == 200: return await resp.json()
                 err = await resp.text()
                 raise Exception(f"Upload error: {err[:100]}")
 
-async def import_nightbox_link(url, chat_id):
-    headers = {"X-Bot-Name": BOT_NAME, "X-Bot-External-ID": str(chat_id), "X-Bot-Key": creator_key(chat_id)}
+async def import_nightbox_link(url, chat_id, telegram_id=""):
+    headers = backend_headers(chat_id, telegram_id)
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
         async with session.post(f"{BACKEND_URL}/api/creator/import-link", json={"url": url}, headers=headers) as resp:
             data = await resp.json(content_type=None)
@@ -356,6 +393,12 @@ async def import_nightbox_link(url, chat_id):
 
 @app.on_message(filters.command("start"))
 async def start_command(_, message):
+    if AUTO_CREATOR_IDENTITY:
+        action = "send a NightBox link to create your own earning link" if BOT_KIND == "NIGHTBOX_TO_NIGHTBOX" else "send a Nightheast link (the access code can be included in the message when required)"
+        await message.reply_text(
+            f"{BOT_KIND.replace('_', ' ').title()} is ready. Just {action}."
+        )
+        return
     action = "send a NightBox link to create your own earning link" if BOT_KIND == "NIGHTBOX_TO_NIGHTBOX" else "send a supported share URL"
     await message.reply_text(f"{BOT_KIND.replace('_', ' ').title()} is ready. Connect with /connect nb_live_your_creator_key, then {action}.")
 
@@ -425,8 +468,12 @@ async def disconnect_command(_, message):
 
 @app.on_message((filters.text | filters.media) & ~filters.regex(r"^/"))
 async def handle(c, m):
-    if not creator_key(m.chat.id):
+    telegram_id = telegram_user_id(m)
+    if not AUTO_CREATOR_IDENTITY and not creator_key(m.chat.id):
         await m.reply_text("Connect your creator account first with /connect nb_live_your_creator_key")
+        return
+    if AUTO_CREATOR_IDENTITY and not NIGHTBOX_BOT_INTEGRATION_KEY:
+        await m.reply_text("This bot is not connected to the NightBox creator directory yet. Please contact support.")
         return
     text = m.text or m.caption or ""
     urls = URL_PATTERN.findall(text)
@@ -459,7 +506,7 @@ async def handle(c, m):
             info = {"path": media_path, "title": file_name, "size": os.path.getsize(media_path)}
         elif BOT_KIND == "NIGHTBOX_TO_NIGHTBOX":
             url = urls[0]
-            res = await import_nightbox_link(url, m.chat.id)
+            res = await import_nightbox_link(url, m.chat.id, telegram_id)
             await status.edit_text(f"✅ **NightBox link added to your dashboard!**\n\n🔗 `{res.get('link', '')}`")
             return
         else:
@@ -473,7 +520,7 @@ async def handle(c, m):
                     info = await download_generic(url, tmp)
             
         await status.edit_text("\u2601 **Uploading to server...**")
-        res = await upload_video(info["path"], info["title"], m.chat.id)
+        res = await upload_video(info["path"], info["title"], m.chat.id, telegram_id)
         watch = res.get("link") or res.get("watchUrl", "")
             
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Watch Online", url=watch)]])

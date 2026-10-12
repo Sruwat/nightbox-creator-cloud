@@ -44,6 +44,10 @@ const BUNNY_STORAGE_PASSWORD = process.env.BUNNY_STORAGE_PASSWORD;
 const BUNNY_STORAGE_ZONE = process.env.BUNNY_STORAGE_ZONE;
 const BUNNY_LOCAL_STORAGE = String(process.env.VIDEO_STORAGE_DRIVER || '').toLowerCase() === 'local';
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || crypto.randomBytes(32).toString('hex');
+// Conversion bots can identify a creator by Telegram's verified sender ID.
+// This is deliberately separate from creator API keys: the shared secret
+// authenticates the bot service, while the Telegram ID selects the owner.
+const NIGHTBOX_BOT_INTEGRATION_KEY = process.env.NIGHTBOX_BOT_INTEGRATION_KEY || '';
 const allowedOrigins = [...new Set([
   ...(process.env.WEB_ORIGINS || 'http://localhost:4173,http://localhost:4174').split(',').map((value) => value.trim()).filter(Boolean),
   'https://nightbox.in',
@@ -90,8 +94,27 @@ function apiKeyUser(req) {
   return user?.status === 'suspended' ? null : user;
 }
 
+function telegramBotUser(req) {
+  const supplied = String(req.headers['x-nightbox-bot-key'] || '');
+  if (!NIGHTBOX_BOT_INTEGRATION_KEY || !supplied) return null;
+  const expected = Buffer.from(NIGHTBOX_BOT_INTEGRATION_KEY);
+  const actual = Buffer.from(supplied);
+  if (expected.length !== actual.length || !crypto.timingSafeEqual(expected, actual)) return null;
+
+  const telegramUserId = String(req.headers['x-telegram-user-id'] || '').trim();
+  if (!/^\d{1,32}$/.test(telegramUserId)) return null;
+  const user = store.db.prepare(
+    "SELECT id,email,role,status,telegram_user_id FROM users WHERE telegram_user_id=? AND role='creator'"
+  ).get(telegramUserId);
+  return user?.status === 'suspended' ? null : user;
+}
+
 function uploadOwner(req) {
-  return bearerUser(req) || apiKeyUser(req);
+  return bearerUser(req) || apiKeyUser(req) || telegramBotUser(req);
+}
+
+function isBotRequest(req) {
+  return Boolean(req.headers['x-bot-key'] || req.headers['x-nightbox-bot-key']);
 }
 
 function requestIp(req) {
@@ -789,7 +812,7 @@ app.post('/api/creator/videos/:id/link', requireUser, (req, res) => {
 // valid creator API key.
 app.post('/api/creator/import-link', (req, res) => {
   const owner = uploadOwner(req);
-  if (!owner) return res.status(401).json({ error: 'Valid creator bot key is required' });
+  if (!owner) return res.status(401).json({ error: 'Creator authentication or a linked Telegram creator account is required' });
 
   const rawUrl = String(req.body?.url || '').trim();
   let parsed;
@@ -1412,7 +1435,7 @@ const creatorFileUpload = multer({
 
 // POST /upload-file
 app.post('/upload-file', (req, res, next) => {
-  if (process.env.NODE_ENV === 'production' && !uploadOwner(req)) return res.status(401).json({ error: 'Creator authentication or bot API key is required for uploads' });
+  if (process.env.NODE_ENV === 'production' && !uploadOwner(req)) return res.status(401).json({ error: 'Creator authentication or a linked Telegram creator account is required for uploads' });
   next();
 }, upload.single('video'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No video file provided' });
@@ -1486,7 +1509,7 @@ app.post('/upload-file', (req, res, next) => {
     const existing = store.findVideoByHash(contentHash, owner?.id);
     if (existing) {
       const creatorLink = owner ? store.createLink(existing.id, owner.id) : null;
-      if (owner && req.headers['x-bot-key']) store.db.prepare('INSERT INTO bot_events (id,user_id,bot_name,event_type,external_id,video_id,status,created_at) VALUES (?,?,?,?,?,?,?,?)').run(store.id(), owner.id, botName, 'upload', botExternalId, existing.id, 'duplicate', store.now());
+      if (owner && isBotRequest(req)) store.db.prepare('INSERT INTO bot_events (id,user_id,bot_name,event_type,external_id,video_id,status,created_at) VALUES (?,?,?,?,?,?,?,?)').run(store.id(), owner.id, botName, 'upload', botExternalId, existing.id, 'duplicate', store.now());
       return res.json({ success: true, duplicate: true, videoId: existing.id, watchUrl: existing.watchUrl, embedUrl: existing.embedUrl, link: creatorLink ? `${DOMAIN_URL}/l/${creatorLink.slug}` : null, message: 'Exact duplicate detected; existing video reused.' });
     }
     if (owner) {
@@ -1501,7 +1524,7 @@ app.post('/upload-file', (req, res, next) => {
     releaseCreatorStorageReservation(reservationId);
     reservationId = null;
     const creatorLink = owner ? store.createLink(videoId, owner.id) : null;
-    if (owner && req.headers['x-bot-key']) store.db.prepare('INSERT INTO bot_events (id,user_id,bot_name,event_type,external_id,video_id,status,created_at) VALUES (?,?,?,?,?,?,?,?)').run(store.id(), owner.id, botName, 'upload', botExternalId, videoId, 'created', store.now());
+    if (owner && isBotRequest(req)) store.db.prepare('INSERT INTO bot_events (id,user_id,bot_name,event_type,external_id,video_id,status,created_at) VALUES (?,?,?,?,?,?,?,?)').run(store.id(), owner.id, botName, 'upload', botExternalId, videoId, 'created', store.now());
 
     // Log metadata for recovery purposes
     console.log(JSON.stringify({
@@ -1532,7 +1555,7 @@ app.post('/upload-file', (req, res, next) => {
 
 // POST /upload-from-url
 app.post('/upload-from-url', async (req, res) => {
-  if (process.env.NODE_ENV === 'production' && !uploadOwner(req)) return res.status(401).json({ error: 'Creator authentication or bot API key is required for uploads' });
+  if (process.env.NODE_ENV === 'production' && !uploadOwner(req)) return res.status(401).json({ error: 'Creator authentication or a linked Telegram creator account is required for uploads' });
   const { url, title: rawTitle } = req.body;
   if (!url) return res.status(400).json({ error: 'URL is required' });
   if (!/^https?:\/\/.+/i.test(url)) return res.status(400).json({ error: 'Invalid URL' });
@@ -1551,7 +1574,7 @@ app.post('/upload-from-url', async (req, res) => {
     const owner = uploadOwner(req);
     store.createVideo({ id: videoId, ownerId: owner?.id, title, watchUrl: bunny.getWatchUrl(videoId), embedUrl: bunny.getEmbedUrl(videoId) });
     const creatorLink = owner ? store.createLink(videoId, owner.id) : null;
-    if (owner && req.headers['x-bot-key']) store.db.prepare('INSERT INTO bot_events (id,user_id,bot_name,event_type,external_id,video_id,status,created_at) VALUES (?,?,?,?,?,?,?,?)').run(store.id(), owner.id, botName, 'url_upload', botExternalId, videoId, 'created', store.now());
+    if (owner && isBotRequest(req)) store.db.prepare('INSERT INTO bot_events (id,user_id,bot_name,event_type,external_id,video_id,status,created_at) VALUES (?,?,?,?,?,?,?,?)').run(store.id(), owner.id, botName, 'url_upload', botExternalId, videoId, 'created', store.now());
     res.json({
       success: true,
       videoId,

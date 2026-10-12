@@ -82,6 +82,8 @@ jobs:
           TELEGRAM_BOT_TOKEN_NIGHTBOX_TO_NIGHTBOX: ${{ secrets.NIGHTBOX_BOT_NIGHTBOX_TO_NIGHTBOX_TOKEN }}
           TELEGRAM_BOT_TOKEN_NIGHTHEAST_TO_NIGHTBOX: ${{ secrets.NIGHTBOX_BOT_NIGHTHEAST_TO_NIGHTBOX_TOKEN }}
           TELEGRAM_BOT_TOKEN_UPLOAD: ${{ secrets.NIGHTBOX_BOT_UPLOAD_TOKEN }}
+          NIGHTHEAST_INTEGRATION_KEY: ${{ secrets.NIGHTHEAST_INTEGRATION_KEY }}
+          NIGHTBOX_BOT_INTEGRATION_KEY: ${{ secrets.NIGHTBOX_BOT_INTEGRATION_KEY }}
         run: |
           python3 - <<'PY'
           import json
@@ -108,6 +110,13 @@ jobs:
               if not result.get("ok"):
                   raise SystemExit(f"Telegram rejected the configured {name} bot token")
               print(f"Telegram bot token valid: {name} (@{result['result'].get('username', 'unknown')})")
+          for name, value in {
+              "NIGHTHEAST_INTEGRATION_KEY": os.environ.get("NIGHTHEAST_INTEGRATION_KEY", ""),
+              "NIGHTBOX_BOT_INTEGRATION_KEY": os.environ.get("NIGHTBOX_BOT_INTEGRATION_KEY", ""),
+          }.items():
+              if len(value) < 32:
+                  raise SystemExit(f"{name} secret is missing or too short")
+          print("Nightheast and Telegram creator-identity secrets are configured")
           PY
 
       - name: Upload frontend and backend source
@@ -129,10 +138,27 @@ jobs:
         env:
           VPS_HOST: ${{ secrets.NIGHTBOX_VPS_HOST }}
           VPS_USER: ${{ secrets.NIGHTBOX_VPS_USER }}
+          NIGHTBOX_BOT_INTEGRATION_KEY: ${{ secrets.NIGHTBOX_BOT_INTEGRATION_KEY }}
         run: |
+          set -euo pipefail
+          umask 077
+          BOT_KEY_FILE="$(mktemp)"
+          trap 'rm -f "$BOT_KEY_FILE"' EXIT
+          printf '%s\n' "$NIGHTBOX_BOT_INTEGRATION_KEY" > "$BOT_KEY_FILE"
+          rsync -az -e "ssh -i ~/.ssh/nightbox_deploy" \
+            "$BOT_KEY_FILE" "$VPS_USER@$VPS_HOST:/tmp/nightbox-bot-integration-key"
           ssh -i ~/.ssh/nightbox_deploy "$VPS_USER@$VPS_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           APP=/var/www/nightbox/nightbox-p4/backend
+          # Refresh only the bot-identity secret; all other production env values stay untouched.
+          BOT_INTEGRATION_KEY="$(cat /tmp/nightbox-bot-integration-key)"
+          rm -f /tmp/nightbox-bot-integration-key
+          ENV_TMP="$(mktemp)"
+          trap 'rm -f "$ENV_TMP"' EXIT
+          grep -v '^NIGHTBOX_BOT_INTEGRATION_KEY=' "$APP/.env" > "$ENV_TMP" || true
+          printf 'NIGHTBOX_BOT_INTEGRATION_KEY=%s\n' "$BOT_INTEGRATION_KEY" >> "$ENV_TMP"
+          chmod 600 "$ENV_TMP"
+          mv "$ENV_TMP" "$APP/.env"
           # Keep SPA assets readable by nginx; unreadable asset directories fall back to index.html.
           find /var/www/nightbox/nightbox-p4/web -type d -exec chmod 755 {} +
           find /var/www/nightbox/nightbox-p4/web -type f -exec chmod 644 {} +
@@ -218,8 +244,11 @@ jobs:
           printf 'TELEGRAM_BOT_TOKEN_NIGHTBOX_TO_NIGHTBOX=%s\n' "$TELEGRAM_BOT_TOKEN_NIGHTBOX_TO_NIGHTBOX" >> "$ENV_FILE"
           printf 'TELEGRAM_BOT_TOKEN_NIGHTHEAST_TO_NIGHTBOX=%s\n' "$TELEGRAM_BOT_TOKEN_NIGHTHEAST_TO_NIGHTBOX" >> "$ENV_FILE"
           printf 'TELEGRAM_BOT_TOKEN_UPLOAD=%s\n' "$TELEGRAM_BOT_TOKEN_UPLOAD" >> "$ENV_FILE"
+          printf 'NIGHTHEAST_INTEGRATION_KEY=%s\n' "$NIGHTHEAST_INTEGRATION_KEY" >> "$ENV_FILE"
+          printf 'NIGHTBOX_BOT_INTEGRATION_KEY=%s\n' "$NIGHTBOX_BOT_INTEGRATION_KEY" >> "$ENV_FILE"
           printf 'BACKEND_URL=http://127.0.0.1:3010\n' >> "$ENV_FILE"
           printf 'TELEGRAM_REQUIRE_CONNECT=true\n' >> "$ENV_FILE"
+          printf 'TELEGRAM_AUTO_CREATOR_IDENTITY=true\n' >> "$ENV_FILE"
           printf 'TELEGRAM_STATE_DIR=/var/www/nightbox/nightbox-p4/telegram-bots/state\n' >> "$ENV_FILE"
 
           ssh -i ~/.ssh/nightbox_deploy "$VPS_USER@$VPS_HOST" \
