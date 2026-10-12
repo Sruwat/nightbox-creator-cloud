@@ -58,6 +58,12 @@ app = Client(f"nightbox_{BOT_KIND.lower()}", api_id=int(API_ID), api_hash=API_HA
 def creator_key(chat_id):
     return get_creator_key(chat_id) or ("" if REQUIRE_CONNECT else STATE_FALLBACK_KEY)
 
+
+def extract_creator_key(text):
+    """Extract a creator key from copied text, including surrounding whitespace."""
+    match = re.search(r"nb_live_[A-Za-z0-9_-]+", text or "")
+    return match.group(0) if match else ""
+
 # ── VALIDATION ──
 
 def validate_video_file(file_path):
@@ -217,8 +223,7 @@ async def start_command(_, message):
 
 @app.on_message(filters.command("connect"))
 async def connect_command(_, message):
-    parts = (message.text or "").split(maxsplit=1)
-    key = parts[1].strip() if len(parts) == 2 else ""
+    key = extract_creator_key(message.text or "")
     if not key.startswith("nb_live_"):
         await message.reply_text("Use /connect nb_live_your_creator_key")
         return
@@ -234,10 +239,10 @@ async def connect_command(_, message):
         await message.reply_text(f"Connection failed: {str(error)[:200]}")
 
 
-@app.on_message(filters.text & filters.regex(r"^\s*nb_live_[A-Za-z0-9_-]+\s*$"))
+@app.on_message(filters.text & filters.regex(r"nb_live_[A-Za-z0-9_-]+") & ~filters.command(["start", "status", "connect", "disconnect"]))
 async def pasted_key_command(_, message):
-    """Accept a pasted creator key directly; users often paste it without /connect."""
-    key = (message.text or "").strip()
+    """Accept a pasted creator key, including copied text with labels or whitespace."""
+    key = extract_creator_key(message.text or "")
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(

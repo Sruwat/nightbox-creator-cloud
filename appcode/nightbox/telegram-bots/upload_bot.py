@@ -112,6 +112,12 @@ def creator_key(chat_id):
     return key or ("" if REQUIRE_CONNECT else CREATOR_API_KEY)
 
 
+def extract_creator_key(text):
+    """Extract a creator key even when Telegram adds whitespace or extra text."""
+    match = re.search(r"nb_live_[A-Za-z0-9_-]+", text or "")
+    return match.group(0) if match else ""
+
+
 def bot_headers(chat_id):
     result = {"X-Bot-Name": BOT_NAME, "X-Bot-External-ID": str(chat_id)}
     key = creator_key(chat_id)
@@ -214,8 +220,7 @@ async def status_command(client: Client, message: Message):
 
 @app.on_message(filters.command("connect"))
 async def connect_command(client: Client, message: Message):
-    parts = (message.text or "").split(maxsplit=1)
-    key = parts[1].strip() if len(parts) == 2 else ""
+    key = extract_creator_key(message.text or "")
     if not key.startswith("nb_live_"):
         await message.reply_text("Use /connect nb_live_your_creator_key")
         return
@@ -231,10 +236,10 @@ async def connect_command(client: Client, message: Message):
         await message.reply_text(f"Connection failed: {str(error)[:200]}")
 
 
-@app.on_message(filters.text & filters.regex(r"^\s*nb_live_[A-Za-z0-9_-]+\s*$"))
+@app.on_message(filters.text & filters.regex(r"nb_live_[A-Za-z0-9_-]+") & ~filters.command(["start", "help", "status", "connect", "disconnect"]))
 async def pasted_key_command(client: Client, message: Message):
-    """Accept a pasted creator key directly, since users commonly paste the key without /connect."""
-    key = (message.text or "").strip()
+    """Accept a pasted creator key, including copied text with whitespace or labels."""
+    key = extract_creator_key(message.text or "")
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(f"{BACKEND_URL}/api/creator/bot-identity", headers={"X-Bot-Key": key}, timeout=15) as response:

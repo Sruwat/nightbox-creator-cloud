@@ -780,6 +780,48 @@ app.post('/api/creator/videos/:id/link', requireUser, (req, res) => {
   res.status(201).json({ link: { ...link, url: `${DOMAIN_URL}/l/${link.slug}` } });
 });
 
+// Let the NightBox-to-NightBox bot create a new earning link for an existing
+// NightBox video without copying the media. The source link must be a public
+// NightBox /l/ link, and the destination creator must authenticate with a
+// valid creator API key.
+app.post('/api/creator/import-link', (req, res) => {
+  const owner = uploadOwner(req);
+  if (!owner) return res.status(401).json({ error: 'Valid creator bot key is required' });
+
+  const rawUrl = String(req.body?.url || '').trim();
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return res.status(400).json({ error: 'Enter a valid NightBox link' });
+  }
+
+  const allowedHosts = new Set(['nightbox.in', 'www.nightbox.in', 'api.nightbox.in']);
+  if (!allowedHosts.has(parsed.hostname.toLowerCase())) {
+    return res.status(400).json({ error: 'Only NightBox links can be imported' });
+  }
+  const match = parsed.pathname.match(/^\/l\/([^/]+)$/);
+  if (!match) return res.status(400).json({ error: 'Use a NightBox /l/ link' });
+
+  const source = store.db.prepare(`
+    SELECT v.id, v.status, v.title, v.embed_url AS embedUrl, v.watch_url AS watchUrl
+    FROM creator_links l JOIN videos v ON v.id = l.video_id
+    WHERE l.slug = ? AND v.status <> 'deleted'
+  `).get(match[1]);
+  if (!source) return res.status(404).json({ error: 'NightBox link not found' });
+
+  const link = store.createLink(source.id, owner.id);
+  res.status(201).json({
+    link: `${DOMAIN_URL}/l/${link.slug}`,
+    slug: link.slug,
+    videoId: source.id,
+    title: source.title,
+    watchUrl: source.watchUrl,
+    embedUrl: source.embedUrl,
+    message: 'NightBox link imported successfully.',
+  });
+});
+
 app.get('/api/links/:slug', (req, res) => {
   const link = store.db.prepare(`SELECT l.id, l.slug, v.id AS videoId, v.title, v.embed_url AS embedUrl, v.watch_url AS watchUrl FROM creator_links l JOIN videos v ON v.id = l.video_id WHERE l.slug = ?`).get(req.params.slug);
   if (!link) return res.status(404).json({ error: 'Link not found' });
