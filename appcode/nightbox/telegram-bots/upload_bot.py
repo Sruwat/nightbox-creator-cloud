@@ -34,7 +34,16 @@ from pyrogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
 )
-from creator_keys import get_creator_key, is_full_creator_key, key_help_text, remove_creator_key, set_creator_key
+from creator_keys import (
+    get_creator_key,
+    get_text_preferences,
+    is_full_creator_key,
+    key_help_text,
+    remove_creator_key,
+    set_creator_key,
+    update_text_preferences,
+)
+from text_overlay import apply_text_overlay
 
 load_dotenv()
 
@@ -202,7 +211,72 @@ async def help_command(client: Client, message: Message):
         "2️⃣ Wait for upload to complete\n"
         "3️⃣ Get your streaming link!\n\n"
         "🔗 The link opens directly in our app.\n"
-        "📱 If app is not installed, it redirects to Play Store.",
+        "📱 If app is not installed, it redirects to Play Store.\n\n"
+        "📝 Text overlay commands (for the next uploads):\n"
+        "`/add_header Your header`\n"
+        "`/add_footer Your footer`\n"
+        "`/enable_text` or `/disable_text`\n"
+        "`/text_status`",
+    )
+
+
+def command_text(message):
+    parts = (message.text or "").split(maxsplit=1)
+    return parts[1].strip() if len(parts) == 2 else ""
+
+
+@app.on_message(filters.command("add_header"))
+async def add_header_command(client: Client, message: Message):
+    value = command_text(message)
+    if not value:
+        await message.reply_text("Usage: `/add_header Your header text`")
+        return
+    preferences = update_text_preferences(message.chat.id, header=value)
+    await message.reply_text(
+        f"✅ Header saved for future uploads. Text overlay is currently {'ON' if preferences['enabled'] else 'OFF'}.\n"
+        "Use `/enable_text` to burn it into the video."
+    )
+
+
+@app.on_message(filters.command("add_footer"))
+async def add_footer_command(client: Client, message: Message):
+    value = command_text(message)
+    if not value:
+        await message.reply_text("Usage: `/add_footer Your footer text`")
+        return
+    preferences = update_text_preferences(message.chat.id, footer=value)
+    await message.reply_text(
+        f"✅ Footer saved for future uploads. Text overlay is currently {'ON' if preferences['enabled'] else 'OFF'}.\n"
+        "Use `/enable_text` to burn it into the video."
+    )
+
+
+@app.on_message(filters.command("enable_text"))
+async def enable_text_command(client: Client, message: Message):
+    preferences = get_text_preferences(message.chat.id)
+    if not preferences["header"] and not preferences["footer"]:
+        await message.reply_text("⚠️ Add a header or footer first, then use `/enable_text`.")
+        return
+    update_text_preferences(message.chat.id, enabled=True)
+    await message.reply_text("✅ Text overlay enabled. It will be applied to the next uploaded videos.")
+
+
+@app.on_message(filters.command("disable_text"))
+async def disable_text_command(client: Client, message: Message):
+    update_text_preferences(message.chat.id, enabled=False)
+    await message.reply_text("✅ Text overlay disabled. Existing videos are unchanged.")
+
+
+@app.on_message(filters.command("text_status"))
+async def text_status_command(client: Client, message: Message):
+    preferences = get_text_preferences(message.chat.id)
+    header = preferences["header"] or "(not set)"
+    footer = preferences["footer"] or "(not set)"
+    await message.reply_text(
+        "📝 **Text overlay settings**\n\n"
+        f"Status: {'ON' if preferences['enabled'] else 'OFF'}\n"
+        f"Header: {header}\n"
+        f"Footer: {footer}"
     )
 
 
@@ -371,6 +445,20 @@ async def handle_video(client: Client, message: Message):
             if not validate_video_file(tmp_path):
                 raise Exception("Downloaded file does not appear to be a valid video")
 
+            processed_path, overlay_applied = await apply_text_overlay(
+                tmp_path,
+                os.path.dirname(tmp_path),
+                message.chat.id,
+            )
+            if overlay_applied:
+                await status_msg.edit_text(
+                    "⏳ **Applying text overlay...**\n\n"
+                    f"📁 File: `{safe_file_name}`\n"
+                    "This may take a little longer for large videos."
+                )
+            else:
+                processed_path = tmp_path
+
             # Update status
             await status_msg.edit_text(
                 "⏳ **Uploading your video...**\n\n"
@@ -381,7 +469,8 @@ async def handle_video(client: Client, message: Message):
 
             # Upload to backend (async, non-blocking, with retries)
             title = os.path.splitext(file_name)[0] if file_name else f"Video_{message.id}"
-            data = await upload_to_backend(tmp_path, file_name, title, message.chat.id)
+            upload_name = f"{os.path.splitext(file_name)[0]}.mp4" if overlay_applied else file_name
+            data = await upload_to_backend(processed_path, upload_name, title, message.chat.id)
 
             video_id = data.get("videoId", "")
             watch_url = data.get("link") or data.get("watchUrl", "")
@@ -417,6 +506,12 @@ async def handle_video(client: Client, message: Message):
             try:
                 os.unlink(tmp_path)
                 logger.info(f"Cleaned up: {tmp_path}")
+            except Exception:
+                pass
+        if 'processed_path' in locals() and processed_path != tmp_path and os.path.exists(processed_path):
+            try:
+                os.unlink(processed_path)
+                logger.info(f"Cleaned up overlay file: {processed_path}")
             except Exception:
                 pass
 

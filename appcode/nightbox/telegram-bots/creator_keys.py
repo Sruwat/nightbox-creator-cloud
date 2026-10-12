@@ -39,6 +39,12 @@ def _connection():
     connection.execute(
         "CREATE TABLE IF NOT EXISTS creator_keys (chat_id TEXT PRIMARY KEY, api_key TEXT NOT NULL)"
     )
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS text_preferences ("
+        "chat_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0, "
+        "header TEXT NOT NULL DEFAULT '', footer TEXT NOT NULL DEFAULT ''"
+        ")"
+    )
     connection.commit()
     try:
         DB_PATH.chmod(0o600)
@@ -70,3 +76,32 @@ def remove_creator_key(chat_id):
     with closing(_connection()) as connection:
         with connection:
             connection.execute("DELETE FROM creator_keys WHERE chat_id = ?", (str(chat_id),))
+
+
+def get_text_preferences(chat_id):
+    with closing(_connection()) as connection:
+        row = connection.execute(
+            "SELECT enabled, header, footer FROM text_preferences WHERE chat_id = ?",
+            (str(chat_id),),
+        ).fetchone()
+    if not row:
+        return {"enabled": False, "header": "", "footer": ""}
+    return {"enabled": bool(row[0]), "header": row[1] or "", "footer": row[2] or ""}
+
+
+def update_text_preferences(chat_id, *, enabled=None, header=None, footer=None):
+    current = get_text_preferences(chat_id)
+    values = {
+        "enabled": current["enabled"] if enabled is None else bool(enabled),
+        "header": current["header"] if header is None else str(header),
+        "footer": current["footer"] if footer is None else str(footer),
+    }
+    with closing(_connection()) as connection:
+        with connection:
+            connection.execute(
+                "INSERT INTO text_preferences(chat_id, enabled, header, footer) VALUES(?,?,?,?) "
+                "ON CONFLICT(chat_id) DO UPDATE SET enabled=excluded.enabled, "
+                "header=excluded.header, footer=excluded.footer",
+                (str(chat_id), int(values["enabled"]), values["header"], values["footer"]),
+            )
+    return values

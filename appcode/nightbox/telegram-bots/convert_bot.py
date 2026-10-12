@@ -17,7 +17,16 @@ from urllib.parse import parse_qs, urlparse
 from dotenv import load_dotenv
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from creator_keys import get_creator_key, is_full_creator_key, key_help_text, remove_creator_key, set_creator_key
+from creator_keys import (
+    get_creator_key,
+    get_text_preferences,
+    is_full_creator_key,
+    key_help_text,
+    remove_creator_key,
+    set_creator_key,
+    update_text_preferences,
+)
+from text_overlay import apply_text_overlay
 
 load_dotenv()
 
@@ -400,7 +409,68 @@ async def start_command(_, message):
         )
         return
     action = "send a NightBox link to create your own earning link" if BOT_KIND == "NIGHTBOX_TO_NIGHTBOX" else "send a supported share URL"
-    await message.reply_text(f"{BOT_KIND.replace('_', ' ').title()} is ready. Connect with /connect nb_live_your_creator_key, then {action}.")
+    await message.reply_text(
+        f"{BOT_KIND.replace('_', ' ').title()} is ready. Connect with /connect nb_live_your_creator_key, then {action}.\n\n"
+        "Text overlay: `/add_header text`, `/add_footer text`, `/enable_text`, `/disable_text`."
+    )
+
+
+def command_text(message):
+    parts = (message.text or "").split(maxsplit=1)
+    return parts[1].strip() if len(parts) == 2 else ""
+
+
+@app.on_message(filters.command("add_header"))
+async def add_header_command(_, message):
+    value = command_text(message)
+    if not value:
+        await message.reply_text("Usage: `/add_header Your header text`")
+        return
+    preferences = update_text_preferences(message.chat.id, header=value)
+    await message.reply_text(
+        f"✅ Header saved for future conversions. Text overlay is currently {'ON' if preferences['enabled'] else 'OFF'}.\n"
+        "Use `/enable_text` to burn it into the video."
+    )
+
+
+@app.on_message(filters.command("add_footer"))
+async def add_footer_command(_, message):
+    value = command_text(message)
+    if not value:
+        await message.reply_text("Usage: `/add_footer Your footer text`")
+        return
+    preferences = update_text_preferences(message.chat.id, footer=value)
+    await message.reply_text(
+        f"✅ Footer saved for future conversions. Text overlay is currently {'ON' if preferences['enabled'] else 'OFF'}.\n"
+        "Use `/enable_text` to burn it into the video."
+    )
+
+
+@app.on_message(filters.command("enable_text"))
+async def enable_text_command(_, message):
+    preferences = get_text_preferences(message.chat.id)
+    if not preferences["header"] and not preferences["footer"]:
+        await message.reply_text("⚠️ Add a header or footer first, then use `/enable_text`.")
+        return
+    update_text_preferences(message.chat.id, enabled=True)
+    await message.reply_text("✅ Text overlay enabled for the next converted videos.")
+
+
+@app.on_message(filters.command("disable_text"))
+async def disable_text_command(_, message):
+    update_text_preferences(message.chat.id, enabled=False)
+    await message.reply_text("✅ Text overlay disabled. Existing videos are unchanged.")
+
+
+@app.on_message(filters.command("text_status"))
+async def text_status_command(_, message):
+    preferences = get_text_preferences(message.chat.id)
+    await message.reply_text(
+        "📝 **Text overlay settings**\n\n"
+        f"Status: {'ON' if preferences['enabled'] else 'OFF'}\n"
+        f"Header: {preferences['header'] or '(not set)'}\n"
+        f"Footer: {preferences['footer'] or '(not set)'}"
+    )
 
 
 @app.on_message(filters.command("connect"))
@@ -519,6 +589,16 @@ async def handle(c, m):
                 else:
                     info = await download_generic(url, tmp)
             
+        processed_path, overlay_applied = await apply_text_overlay(
+            info["path"],
+            tmp,
+            m.chat.id,
+        )
+        if overlay_applied:
+            await status.edit_text("\u23f3 **Applying text overlay...**")
+            info["path"] = processed_path
+            info["size"] = os.path.getsize(processed_path)
+
         await status.edit_text("\u2601 **Uploading to server...**")
         res = await upload_video(info["path"], info["title"], m.chat.id, telegram_id)
         watch = res.get("link") or res.get("watchUrl", "")

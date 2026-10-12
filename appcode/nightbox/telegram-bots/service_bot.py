@@ -14,7 +14,15 @@ from pathlib import Path
 import aiohttp
 from dotenv import load_dotenv
 from pyrogram import Client, filters
-from creator_keys import get_creator_key, is_full_creator_key, key_help_text, remove_creator_key, set_creator_key
+from creator_keys import (
+    get_creator_key,
+    get_text_preferences,
+    is_full_creator_key,
+    key_help_text,
+    remove_creator_key,
+    set_creator_key,
+    update_text_preferences,
+)
 
 load_dotenv()
 logging.basicConfig(format="%(asctime)s %(levelname)s %(message)s", level=logging.INFO)
@@ -195,6 +203,64 @@ async def disconnect(_, message):
     await message.reply_text(f"Disconnected from {LABEL}.")
 
 
+def command_text(message):
+    parts = (message.text or "").split(maxsplit=1)
+    return parts[1].strip() if len(parts) == 2 else ""
+
+
+@app.on_message(filters.command("add_header"))
+async def add_header(_, message):
+    value = command_text(message)
+    if not value:
+        await message.reply_text("Usage: `/add_header Your header text`")
+        return
+    preferences = update_text_preferences(message.chat.id, header=value)
+    await message.reply_text(
+        f"✅ Header saved. Text overlay is currently {'ON' if preferences['enabled'] else 'OFF'}.\n"
+        "Use `/enable_text`, then send the video in NightBox Upload."
+    )
+
+
+@app.on_message(filters.command("add_footer"))
+async def add_footer(_, message):
+    value = command_text(message)
+    if not value:
+        await message.reply_text("Usage: `/add_footer Your footer text`")
+        return
+    preferences = update_text_preferences(message.chat.id, footer=value)
+    await message.reply_text(
+        f"✅ Footer saved. Text overlay is currently {'ON' if preferences['enabled'] else 'OFF'}.\n"
+        "Use `/enable_text`, then send the video in NightBox Upload."
+    )
+
+
+@app.on_message(filters.command("enable_text"))
+async def enable_text(_, message):
+    preferences = get_text_preferences(message.chat.id)
+    if not preferences["header"] and not preferences["footer"]:
+        await message.reply_text("⚠️ Add a header or footer first, then use `/enable_text`.")
+        return
+    update_text_preferences(message.chat.id, enabled=True)
+    await message.reply_text("✅ Text overlay enabled for your next uploads/conversions.")
+
+
+@app.on_message(filters.command("disable_text"))
+async def disable_text(_, message):
+    update_text_preferences(message.chat.id, enabled=False)
+    await message.reply_text("✅ Text overlay disabled. Existing videos are unchanged.")
+
+
+@app.on_message(filters.command("text_status"))
+async def text_status(_, message):
+    preferences = get_text_preferences(message.chat.id)
+    await message.reply_text(
+        "📝 **Text overlay settings**\n\n"
+        f"Status: {'ON' if preferences['enabled'] else 'OFF'}\n"
+        f"Header: {preferences['header'] or '(not set)'}\n"
+        f"Footer: {preferences['footer'] or '(not set)'}"
+    )
+
+
 @app.on_message(filters.text & ~filters.command(["start", "status", "connect", "disconnect"]))
 async def remote_upload(_, message):
     if KIND == "CONNECTION":
@@ -203,8 +269,7 @@ async def remote_upload(_, message):
             "Use the matching service bot next:\n"
             "• NightBox Upload — send a video file\n"
             "• NightBox to NightBox — send a NightBox link\n"
-            "• Nightheast to NightBox — send a Nightheast link plus access code\n\n"
-            "Header/footer/text commands are not supported by this connection bot."
+            "• Nightheast to NightBox — send a Nightheast link plus access code"
         )
         return
     if not key_for(message.chat.id):
