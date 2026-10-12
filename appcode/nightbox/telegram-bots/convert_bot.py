@@ -30,6 +30,8 @@ CREATOR_API_KEY = os.getenv("CREATOR_API_KEY", "")
 BOT_NAME = os.getenv("BOT_NAME", BOT_KIND.lower())
 REQUIRE_CONNECT = os.getenv("TELEGRAM_REQUIRE_CONNECT", "true").lower() == "true"
 STATE_FALLBACK_KEY = os.getenv("CREATOR_API_KEY", "")
+NIGHTHEAST_API_URL = os.getenv("NIGHTHEAST_API_URL", "").rstrip("/")
+NIGHTHEAST_INTEGRATION_KEY = os.getenv("NIGHTHEAST_INTEGRATION_KEY", "")
 
 # --- CRITICAL: TERABOX COOKIE ---
 TERABOX_NDUS = os.getenv("TERABOX_NDUS") # Get this from your browser cookies
@@ -40,6 +42,13 @@ MIN_VIDEO_SIZE = 300_000
 
 download_semaphore = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
 URL_PATTERN = re.compile(r'https?://[^\s<>"\')\]]+', re.IGNORECASE)
+NIGHTHEAST_URL_PATTERN = re.compile(
+    r"https?://(?:www\.)?nightheast\.com/video/([A-Za-z0-9_-]+)", re.IGNORECASE
+)
+ACCESS_CODE_PATTERN = re.compile(
+    r"(?:access\s*code|access\s*key|code)\s*[:#-]?\s*([A-Za-z0-9_-]{4,32})",
+    re.IGNORECASE,
+)
 
 BROWSER_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -63,6 +72,16 @@ def extract_creator_key(text):
     """Extract a creator key from copied text, including surrounding whitespace."""
     match = re.search(r"nb_live_[A-Za-z0-9_-]+", text or "")
     return match.group(0) if match else ""
+
+
+def extract_nightheast_video_id(url):
+    match = NIGHTHEAST_URL_PATTERN.search(url or "")
+    return match.group(1) if match else ""
+
+
+def extract_access_code(text):
+    match = ACCESS_CODE_PATTERN.search(text or "")
+    return match.group(1) if match else ""
 
 # ── VALIDATION ──
 
@@ -200,6 +219,105 @@ async def download_generic(url, tmp_dir):
         return {"path": fpath, "title": files[0], "size": os.path.getsize(fpath)}
     except Exception as e: raise Exception(f"yt-dlp error: {e}")
 
+
+async def download_nightheast(url, message_text, tmp_dir):
+    """Resolve a Nightheast app link through the authenticated integration API."""
+    if not NIGHTHEAST_API_URL or not NIGHTHEAST_INTEGRATION_KEY:
+        raise Exception(
+            "Nightheast resolver is not configured on the bot. "
+            "Set NIGHTHEAST_API_URL and NIGHTHEAST_INTEGRATION_KEY on the VPS."
+        )
+
+    video_id = extract_nightheast_video_id(url)
+    access_code = extract_access_code(message_text)
+    if not video_id:
+        raise Exception("Invalid Nightheast video link.")
+    if not access_code:
+        raise Exception("Nightheast access code is required. Send the link with 'Access code: 123456'.")
+
+    resolver_url = NIGHTHEAST_API_URL
+    if not resolver_url.endswith("/resolve"):
+        resolver_url = f"{resolver_url}/resolve"
+    headers = {
+        "X-Nightheast-Integration-Key": NIGHTHEAST_INTEGRATION_KEY,
+        "Accept": "application/json",
+    }
+    payload = {"videoId": video_id, "accessCode": access_code}
+
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
+        async with session.post(resolver_url, json=payload, headers=headers) as response:
+            try:
+                data = await response.json(content_type=None)
+            except (aiohttp.ContentTypeError, json.JSONDecodeError):
+                body = (await response.text())[:240]
+                raise Exception(
+                    f"Nightheast resolver returned an invalid response (HTTP {response.status}): {body}"
+                )
+            if not isinstance(data, dict):
+                raise Exception("Nightheast resolver returned an invalid response object.")
+            if response.status >= 300 or data.get("success") is False:
+                detail = data.get("error") or data.get("message") or f"HTTP {response.status}"
+                raise Exception(f"Nightheast resolver rejected the link: {str(detail)[:240]}")
+
+        nested = data.get("data") if isinstance(data.get("data"), dict) else {}
+        result = data.get("result") if isinstance(data.get("result"), dict) else {}
+        download_url = (
+            data.get("downloadUrl")
+            or data.get("download_url")
+            or data.get("videoUrl")
+            or data.get("video_url")
+            or data.get("mediaUrl")
+            or data.get("media_url")
+            or data.get("url")
+            or nested.get("downloadUrl")
+            or nested.get("download_url")
+            or nested.get("videoUrl")
+            or nested.get("video_url")
+            or nested.get("mediaUrl")
+            or nested.get("media_url")
+            or nested.get("url")
+            or result.get("downloadUrl")
+            or result.get("download_url")
+            or result.get("videoUrl")
+            or result.get("video_url")
+            or result.get("mediaUrl")
+            or result.get("media_url")
+            or result.get("url")
+        )
+        if not download_url or not str(download_url).startswith(("http://", "https://")):
+            raise Exception("Nightheast resolver returned no downloadable video URL.")
+
+        title = str(
+            data.get("title")
+            or nested.get("title")
+            or result.get("title")
+            or f"nightheast_{video_id}.mp4"
+        )
+        title = re.sub(r"[^A-Za-z0-9._ -]", "_", os.path.basename(title))[:120] or f"nightheast_{video_id}.mp4"
+        if "." not in title:
+            title += ".mp4"
+        target = os.path.join(tmp_dir, title)
+        async with session.get(str(download_url), allow_redirects=True) as media:
+            if media.status >= 300:
+                raise Exception(f"Nightheast media download failed (HTTP {media.status}).")
+            content_length = int(media.headers.get("Content-Length") or 0)
+            if content_length > MAX_FILE_SIZE:
+                raise Exception("Nightheast video exceeds the 2 GB upload limit.")
+            written = 0
+            with open(target, "wb") as output:
+                async for chunk in media.content.iter_chunked(1024 * 1024):
+                    written += len(chunk)
+                    if written > MAX_FILE_SIZE:
+                        raise Exception("Nightheast video exceeds the 2 GB upload limit.")
+                    output.write(chunk)
+
+    valid, reason = validate_video_file(target)
+    if not valid:
+        if os.path.exists(target):
+            os.unlink(target)
+        raise Exception(f"Nightheast resolver returned an invalid video: {reason}")
+    return {"path": target, "title": title, "size": os.path.getsize(target)}
+
 # ── UPLOAD & PROCESS ──
 
 async def upload_video(fpath, title, chat_id):
@@ -336,7 +454,9 @@ async def handle(c, m):
         else:
             url = urls[0]
             async with download_semaphore:
-                if any(x in url.lower() for x in ["terabox", "1024"]) and BOT_KIND == "TERABOX":
+                if BOT_KIND == "NIGHTHEAST_TO_NIGHTBOX" and extract_nightheast_video_id(url):
+                    info = await download_nightheast(url, text, tmp)
+                elif any(x in url.lower() for x in ["terabox", "1024"]) and BOT_KIND == "TERABOX":
                     info = await download_terabox(url, tmp)
                 else:
                     info = await download_generic(url, tmp)
