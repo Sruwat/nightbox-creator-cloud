@@ -39,9 +39,16 @@ REQUIRE_CONNECT = os.getenv("TELEGRAM_REQUIRE_CONNECT", "true").lower() == "true
 NIGHTBOX_BOT_INTEGRATION_KEY = os.getenv("NIGHTBOX_BOT_INTEGRATION_KEY", "")
 MAX_URL_LENGTH = 2048
 URL_RE = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+CREATOR_KEY_RE = re.compile(r"nb_live_[A-Za-z0-9_-]+")
 
 if not TOKEN or not API_ID or not API_HASH:
     raise RuntimeError(f"Missing Telegram configuration for {KIND}")
+
+
+def extract_creator_key(text):
+    """Accept a complete key directly or embedded in copied/labelled text."""
+    match = CREATOR_KEY_RE.search(text or "")
+    return match.group(0) if match else ""
 
 app = Client(f"nightbox_{KIND.lower()}", api_id=int(API_ID), api_hash=API_HASH, bot_token=TOKEN)
 
@@ -138,8 +145,7 @@ async def status(_, message):
 
 @app.on_message(filters.command("connect"))
 async def connect(_, message):
-    parts = (message.text or "").split(maxsplit=1)
-    key = parts[1].strip() if len(parts) == 2 else ""
+    key = extract_creator_key(message.text or "")
     if not key:
         await message.reply_text(
             "Send the complete API key in your next message, or use one line:\n"
