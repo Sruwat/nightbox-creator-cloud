@@ -34,7 +34,7 @@ STATE_FALLBACK_KEY = os.getenv("CREATOR_API_KEY", "")
 # verified Telegram sender ID. Creator API keys remain supported as a legacy
 # fallback, but users no longer need to paste nb_live_* keys into Telegram.
 AUTO_CREATOR_IDENTITY = (
-    os.getenv("TELEGRAM_AUTO_CREATOR_IDENTITY", "true").lower() == "true"
+    os.getenv("TELEGRAM_AUTO_CREATOR_IDENTITY", "false").lower() == "true"
     and BOT_KIND in {"NIGHTHEAST_TO_NIGHTBOX", "NIGHTBOX_TO_NIGHTBOX"}
 )
 NIGHTBOX_BOT_INTEGRATION_KEY = os.getenv("NIGHTBOX_BOT_INTEGRATION_KEY", "")
