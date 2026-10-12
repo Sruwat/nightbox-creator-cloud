@@ -314,6 +314,9 @@
 .bot-connect-help code{padding:3px 6px;border-radius:5px;background:#eef3fa;color:var(--navy);font-size:11px;overflow-wrap:anywhere}
 .bot-connect-help small{display:block;margin-top:13px;color:#8994a4;font-size:10px;line-height:1.5}
 .bot-keys-table{min-width:0}
+.bot-keys-table .admin-table-head,.bot-keys-table .admin-table-row{grid-template-columns:minmax(150px,1.45fr) minmax(90px,.8fr) minmax(150px,1.25fr) minmax(80px,.7fr) 78px;min-width:680px}
+.api-key-copy{justify-self:start;padding:7px 10px;border:1px solid #c9d8f0!important;border-radius:8px!important;background:#f5f8ff!important;color:var(--blue)!important;font-size:10px;font-weight:800;white-space:nowrap;transition:background .18s,border-color .18s,color .18s}
+.api-key-copy:hover{background:#eaf1ff!important;border-color:#9db8e8!important}
 .bot-connect-help code,.empty-state code{overflow-wrap:anywhere}
 .empty-state .plan-actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:14px}
 @media(max-width:600px){.telegram-bot-grid{grid-template-columns:1fr}.telegram-bot-card{padding:15px}.telegram-bot-card .btn{width:100%;justify-content:center}.empty-state .plan-actions>*{flex:1 1 100%;text-align:center}}
@@ -497,9 +500,10 @@
   .bot-connect-help p{font-size:11px}
   .bot-connect-help small{font-size:9px}
   .bot-keys-table .admin-table{overflow:visible}
-  .bot-keys-table .admin-table-head,.bot-keys-table .admin-table-row{min-width:0!important;grid-template-columns:1.45fr .8fr .8fr 1fr!important;gap:6px;padding:11px 12px;font-size:9px}
+  .bot-keys-table .admin-table-head,.bot-keys-table .admin-table-row{min-width:0!important;grid-template-columns:minmax(125px,1.35fr) minmax(78px,.8fr) minmax(115px,1.2fr) minmax(66px,.7fr) 62px!important;gap:6px;padding:11px 12px;font-size:9px}
   .bot-keys-table .admin-table-row{font-size:10px;overflow:hidden}
   .bot-keys-table .admin-table-row span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bot-keys-table .api-key-copy{padding:6px 7px;font-size:9px}
 }
 
 @media(max-width:600px){
@@ -1209,6 +1213,149 @@ html,body,#root{max-width:100%;overflow-x:hidden}.public-shell,.app-shell,.admin
 .rate-highlight small{color:#728097;font-size:9px;font-weight:650}
 .creator-rate-chips>span small{color:#8a96a8;font-size:9px}
 @media(max-width:520px){.rate-highlight{align-self:stretch;align-items:flex-start}.app-shell:not(.admin-app) .metrics .metric:hover{transform:none}}
+
+/* Independent workspace scrolling: navigation stays in its own rail while the
+   dashboard content keeps a separate scroll context on every app viewport. */
+@media(min-width:761px){
+  .app-shell{
+    height:100dvh;
+    min-height:0;
+    overflow:hidden;
+  }
+  .app-shell>.sidebar{
+    min-height:0;
+    height:100dvh;
+    overflow:hidden;
+  }
+  .app-shell>.sidebar nav{
+    flex:1 1 auto;
+    min-height:0;
+    overflow-y:auto;
+    overscroll-behavior:contain;
+    scrollbar-width:thin;
+    scrollbar-color:#49698f transparent;
+    padding-right:3px;
+  }
+  .app-shell>.sidebar nav::-webkit-scrollbar{width:6px}
+  .app-shell>.sidebar nav::-webkit-scrollbar-track{background:transparent}
+  .app-shell>.sidebar nav::-webkit-scrollbar-thumb{background:#49698f;border-radius:99px}
+  .app-shell>.sidebar .side-bottom{flex:0 0 auto}
+  .app-shell>.app-main{
+    height:100dvh;
+    min-height:0;
+    overflow-y:auto;
+    overscroll-behavior-y:contain;
+    scrollbar-width:thin;
+    scrollbar-color:#b7c4d8 transparent;
+  }
+}
+
+@media(max-width:760px){
+  .app-shell>.sidebar{
+    overflow:hidden!important;
+  }
+  .app-shell>.sidebar nav{
+    flex:1 1 auto!important;
+    min-height:0!important;
+    overflow-y:auto!important;
+    overscroll-behavior:contain;
+    scrollbar-width:thin;
+    scrollbar-color:#49698f transparent;
+    padding-right:3px!important;
+  }
+  .app-shell>.sidebar nav::-webkit-scrollbar{width:5px}
+  .app-shell>.sidebar nav::-webkit-scrollbar-track{background:transparent}
+  .app-shell>.sidebar nav::-webkit-scrollbar-thumb{background:#49698f;border-radius:99px}
+  .app-shell>.sidebar .side-bottom{flex:0 0 auto!important}
+  .app-shell>.app-main{min-height:100dvh}
+}
+
+/* Mobile hardening: never let the dashboard grid collapse its content column. */
+@media(max-width:760px){
+  .app-shell{
+    display:block!important;
+    width:100%!important;
+    min-width:0!important;
+    grid-template-columns:none!important;
+  }
+  .app-shell.sidebar-collapsed{
+    display:block!important;
+    width:100%!important;
+    grid-template-columns:none!important;
+  }
+  .app-shell>.app-main{
+    display:block!important;
+    width:100%!important;
+    min-width:0!important;
+    max-width:none!important;
+  }
+  .app-shell.sidebar-collapsed>.app-main{
+    width:100%!important;
+    min-width:0!important;
+    max-width:none!important;
+  }
+  .app-shell>.app-main>.topbar{
+    width:100%!important;
+    min-width:0!important;
+    display:grid!important;
+    grid-template-columns:auto minmax(0,1fr) auto!important;
+    align-items:center;
+  }
+  .app-shell>.app-main>.topbar>div:first-of-type{
+    min-width:0!important;
+    margin:0!important;
+    display:flex!important;
+    flex-direction:row!important;
+    align-items:center!important;
+    gap:8px!important;
+  }
+  .app-shell>.app-main>.topbar>div:first-of-type>span{
+    min-width:0;
+    max-width:100%!important;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    font-size:14px!important;
+  }
+  .app-shell>.app-main>.topbar>div:first-of-type>b{
+    flex:0 0 auto;
+    font-size:10px!important;
+    white-space:nowrap;
+  }
+  .app-shell>.app-main>.topbar>.topbar-actions{
+    min-width:0!important;
+    display:flex!important;
+    align-items:center!important;
+    justify-content:flex-end;
+    gap:7px!important;
+  }
+  .app-shell>.app-main>.app-content{
+    display:block!important;
+    width:100%!important;
+    max-width:none!important;
+    min-width:0!important;
+    box-sizing:border-box;
+  }
+  .app-shell .ticket-form,
+  .app-shell .tickets-history,
+  .app-shell .ticket-conversation{
+    width:100%;
+    max-width:none;
+    min-width:0;
+    box-sizing:border-box;
+  }
+}
+
+@media(min-width:761px){
+  .app-shell.sidebar-collapsed>.app-main{
+    width:100%;
+    min-width:0;
+  }
+  .app-shell.sidebar-collapsed>.app-main>.app-content{
+    width:100%;
+    max-width:1500px;
+  }
+}
 
 .overview-analytics-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:0 0 18px}
 .overview-chart{min-width:0;padding:20px 22px;border:1px solid #e2e8f2;box-shadow:0 12px 30px rgba(25,52,94,.045)}

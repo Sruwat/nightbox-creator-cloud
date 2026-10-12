@@ -156,6 +156,7 @@ useEffect(()=>{load()},[token]);const submit=async(e:React.FormEvent)=>{e.preven
 function LiveBots({token,toast}:{token:string;toast:(s:string)=>void}){
   const [keys,setKeys]=useState<Array<{id:string;prefix:string;createdAt:string;lastUsedAt:string|null;revokedAt:string|null}>>([]);
   const [newKey,setNewKey]=useState("");
+  const [copiedKey,setCopiedKey]=useState<string|null>(null);
   const bots=[
     {name:"Connection bot",handle:"nightbox_connbot",description:"Link this Telegram chat to your creator account."},
     {name:"Upload bot",handle:"nightbox_uploadbot",description:"Send supported video or document uploads."},
@@ -168,6 +169,7 @@ function LiveBots({token,toast}:{token:string;toast:(s:string)=>void}){
   const create=async()=>{try{const result=await createCreatorApiKey(token);setNewKey(result.key.value);toast("Key created. Copy it now; it will not be shown again.");load()}catch(error){toast(error instanceof Error?error.message:"Unable to create key")}};
   const copyKey=async()=>{try{await navigator.clipboard.writeText(newKey);toast("API key copied. Keep it private.")}catch{toast("Clipboard unavailable. Copy the key shown on screen.")}};
   const copyConnectCommand=async()=>{try{await navigator.clipboard.writeText(`/connect ${newKey}`);toast("Connect command copied. Paste it in the NightBox connection bot chat.")}catch{toast("Clipboard unavailable. Copy the command shown on screen.")}};
+  const copyKeyPrefix=async(prefix:string)=>{try{if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(prefix)}else{const input=document.createElement("textarea");input.value=prefix;input.setAttribute("readonly","");input.style.position="fixed";input.style.opacity="0";document.body.appendChild(input);input.select();document.execCommand("copy");input.remove()}setCopiedKey(prefix);window.setTimeout(()=>setCopiedKey(current=>current===prefix?null:current),1600);toast("Key prefix copied") }catch{toast("Clipboard unavailable. Select and copy the key prefix manually.")}};
   return <>
     <AppTitle eyebrow="AUTOMATION" title="Bots & API" action={<button className="btn btn-primary" onClick={create}>Create API key</button>}/>
     {newKey&&<div className="card api-key-created"><div><span>ONE-TIME API KEY</span><h2>Your connection key is ready</h2><p>Copy it now. NightBox will not show this secret again. Use the connection command below in Telegram.</p></div><div className="api-key-value"><code>{newKey}</code><button className="btn btn-dark" onClick={copyKey}>Copy key</button></div><div className="api-connect-command"><small>Send this in @nightbox_connbot</small><code>/connect {newKey}</code></div><div className="plan-actions"><button className="btn btn-dark" onClick={copyConnectCommand}>Copy connect command</button><a className="btn btn-primary" href="https://t.me/nightbox_connbot" target="_blank" rel="noreferrer">Open Connection bot ↗</a></div></div>}
@@ -178,7 +180,7 @@ function LiveBots({token,toast}:{token:string;toast:(s:string)=>void}){
       </article>)}
     </section>
     <div className="card bot-connect-help"><span className="bot-help-kicker">QUICK SETUP</span><h2>Connect NightBox to Telegram</h2><p><b>1.</b> Create an API key and open the Connection bot.</p><p><b>2.</b> Send <code>/connect YOUR_API_KEY</code>.</p><p><b>3.</b> Open an upload or converter bot and send <code>/start</code>.</p><small>Keep your API key private. It gives Telegram access to your creator workspace.</small></div>
-    <div className="bot-keys-table"><DataTable headers={["KEY","CREATED","LAST USED","STATUS"]} rows={keys.map(key=>[key.prefix,new Date(key.createdAt).toLocaleDateString(),key.lastUsedAt?new Date(key.lastUsedAt).toLocaleString():"Never",key.revokedAt?"Revoked":"Active"])}/></div>
+    <div className="bot-keys-table"><DataTable headers={["KEY PREFIX","CREATED","LAST USED","STATUS","ACTION"]} rows={keys.map(key=>[key.prefix,new Date(key.createdAt).toLocaleDateString(),key.lastUsedAt?new Date(key.lastUsedAt).toLocaleString():"Never",key.revokedAt?"Revoked":"Active",<button className="api-key-copy" type="button" onClick={()=>void copyKeyPrefix(key.prefix)} aria-label={`Copy key prefix ${key.prefix}`}>{copiedKey===key.prefix?"Copied":"Copy"}</button>])}/></div>
   </>;
 }
 type OverviewPoint = {date:string;views:number;earningsMicros:number};
