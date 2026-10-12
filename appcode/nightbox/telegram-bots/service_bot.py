@@ -82,9 +82,37 @@ async def link_telegram_creator(session, message, key):
     return True
 
 
+async def connected_creator(session, chat_id):
+    """Return the currently linked creator only when the stored key is valid."""
+    key = key_for(chat_id)
+    if not key:
+        return None
+    try:
+        async with session.get(
+            f"{BACKEND_URL}/api/creator/bot-identity",
+            headers={"X-Bot-Key": key},
+            timeout=10,
+        ) as response:
+            if response.status >= 300:
+                return None
+            data = await response.json(content_type=None)
+            return data.get("user")
+    except Exception:
+        return None
+
+
 @app.on_message(filters.command("start"))
 async def start(_, message):
     if KIND == "CONNECTION":
+        async with aiohttp.ClientSession() as session:
+            user = await connected_creator(session, message.chat.id)
+        if user:
+            await message.reply_text(
+                f"✅ Already connected to creator account {user['email']}.\n\n"
+                "Your Telegram account is linked for automatic bot access.\n"
+                "Use the matching NightBox service bot to upload or convert content."
+            )
+            return
         await message.reply_text(f"{LABEL} is ready. Connect your creator account with /connect nb_live_your_creator_key.")
         return
     await message.reply_text(f"{LABEL} is ready. Send a supported remote video URL to create a NightLink.")
