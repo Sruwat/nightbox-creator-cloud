@@ -10,6 +10,8 @@ test -f "$APP/backend/.env"
 
 install -d -m 0755 "$APP/web"
 rsync -a --delete "$RELEASE/web/" "$APP/web/"
+find "$APP/web" -type d -exec chmod 755 {} +
+find "$APP/web" -type f -exec chmod 644 {} +
 rsync -a --delete \
   --exclude='.env' \
   --exclude='data/' \

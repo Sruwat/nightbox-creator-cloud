@@ -121,6 +121,9 @@ jobs:
           ssh -i ~/.ssh/nightbox_deploy "$VPS_USER@$VPS_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           APP=/var/www/nightbox/nightbox-p4/backend
+          # Keep SPA assets readable by nginx; unreadable asset directories fall back to index.html.
+          find /var/www/nightbox/nightbox-p4/web -type d -exec chmod 755 {} +
+          find /var/www/nightbox/nightbox-p4/web -type f -exec chmod 644 {} +
           docker build -t nightbox-p4-backend:local-origin "$APP"
           docker rm -f nightbox-p4-backend >/dev/null 2>&1 || true
           docker run -d --name nightbox-p4-backend --restart unless-stopped \
