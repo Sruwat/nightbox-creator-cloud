@@ -25,6 +25,8 @@ GitHub Actions maps repository secrets into these environment variables on the V
 
 The two link-conversion bots no longer require creators to paste an `nb_live_*` key. They send Telegram's verified sender ID to the backend over the shared bot-integration secret; the backend matches that ID to the creator's `telegram_user_id`. An administrator must set that ID on the creator profile before the first use. The old `/connect` flow remains available as a fallback for other conversion bots.
 
+The connection bot now links the verified Telegram sender to the creator automatically after a successful `/connect`. This lets the two link-conversion bots use sender identity without asking for the key again, while the upload/TeraBox/Diskwala bots continue to use the shared creator-key state. During an `AUTH_SECRET` rotation, set `AUTH_SECRET_PREVIOUS` to the immediately previous value so existing creator API keys remain valid.
+
 Nightheast source authorization is separate from creator identity. If the Nightheast resolver requires an access code, the forwarded message must still contain a valid code. URL-only conversion requires the Nightheast resolver to support trusted integration-key requests without `accessCode`; the bot now sends the URL-only request when no code is present and reports a clear error if the older resolver rejects it.
 
 ## Manual operations

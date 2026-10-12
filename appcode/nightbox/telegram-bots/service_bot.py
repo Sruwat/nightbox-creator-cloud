@@ -28,6 +28,7 @@ API_HASH = os.getenv("TELEGRAM_API_HASH")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:3000").rstrip("/")
 CREATOR_API_KEY = os.getenv("CREATOR_API_KEY", "")
 REQUIRE_CONNECT = os.getenv("TELEGRAM_REQUIRE_CONNECT", "true").lower() == "true"
+NIGHTBOX_BOT_INTEGRATION_KEY = os.getenv("NIGHTBOX_BOT_INTEGRATION_KEY", "")
 MAX_URL_LENGTH = 2048
 URL_RE = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 
@@ -51,6 +52,34 @@ def headers(chat_id):
         result["X-Bot-Key"] = key
     result["X-Bot-External-ID"] = str(chat_id)
     return result
+
+
+def telegram_user_id(message):
+    sender = getattr(message, "from_user", None)
+    value = getattr(sender, "id", None)
+    return str(value) if value is not None else ""
+
+
+async def link_telegram_creator(session, message, key):
+    """Link the verified Telegram sender after the creator key is validated."""
+    if KIND != "CONNECTION" or not NIGHTBOX_BOT_INTEGRATION_KEY:
+        return False
+    telegram_id = telegram_user_id(message)
+    if not telegram_id:
+        return False
+    response = await session.post(
+        f"{BACKEND_URL}/api/creator/telegram-link",
+        headers={
+            "X-Bot-Key": key,
+            "X-NightBox-Bot-Key": NIGHTBOX_BOT_INTEGRATION_KEY,
+            "X-Telegram-User-ID": telegram_id,
+        },
+        timeout=15,
+    )
+    data = await response.json(content_type=None)
+    if response.status >= 300:
+        raise RuntimeError(data.get("error", f"Telegram linking failed (HTTP {response.status})"))
+    return True
 
 
 @app.on_message(filters.command("start"))
@@ -93,8 +122,10 @@ async def connect(_, message):
                     raise RuntimeError(
                         "The key was rejected. Create a fresh API key and use the full one-time value."
                     )
+            linked = await link_telegram_creator(session, message, key)
         set_creator_key(message.chat.id, key)
-        await message.reply_text(f"Connected to creator account {data['user']['email']} for {LABEL}.")
+        suffix = " Telegram account linked for automatic bot access." if linked else ""
+        await message.reply_text(f"Connected to creator account {data['user']['email']} for {LABEL}.{suffix}")
     except Exception as error:
         await message.reply_text(f"Connection failed: {str(error)[:200]}")
 
@@ -119,8 +150,10 @@ async def pasted_key(_, message):
                     raise RuntimeError(
                         "The key was rejected. Create a fresh API key and use the full one-time value."
                     )
+            linked = await link_telegram_creator(session, message, key)
         set_creator_key(message.chat.id, key)
-        await message.reply_text(f"Connected to creator account {data['user']['email']} for {LABEL}.")
+        suffix = " Telegram account linked for automatic bot access." if linked else ""
+        await message.reply_text(f"Connected to creator account {data['user']['email']} for {LABEL}.{suffix}")
     except Exception as error:
         await message.reply_text(
             f"Connection failed: {str(error)[:200]}\n"
@@ -137,7 +170,14 @@ async def disconnect(_, message):
 @app.on_message(filters.text & ~filters.command(["start", "status", "connect", "disconnect"]))
 async def remote_upload(_, message):
     if KIND == "CONNECTION":
-        await message.reply_text("Use /connect to link your creator account. This bot is for account connection only.")
+        await message.reply_text(
+            "This is the account-connection bot. Your /connect is handled here.\n\n"
+            "Use the matching service bot next:\n"
+            "• NightBox Upload — send a video file\n"
+            "• NightBox to NightBox — send a NightBox link\n"
+            "• Nightheast to NightBox — send a Nightheast link plus access code\n\n"
+            "Header/footer/text commands are not supported by this connection bot."
+        )
         return
     if not key_for(message.chat.id):
         await message.reply_text("Connect your creator account first with /connect nb_live_your_creator_key")

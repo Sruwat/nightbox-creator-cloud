@@ -48,6 +48,14 @@ const ADMIN_API_KEY = process.env.ADMIN_API_KEY || crypto.randomBytes(32).toStri
 // This is deliberately separate from creator API keys: the shared secret
 // authenticates the bot service, while the Telegram ID selects the owner.
 const NIGHTBOX_BOT_INTEGRATION_KEY = process.env.NIGHTBOX_BOT_INTEGRATION_KEY || '';
+// Keep API keys valid across an AUTH_SECRET rotation. A dedicated
+// API_KEY_HASH_SECRET can be used as a stable pepper in future deployments;
+// AUTH_SECRET_PREVIOUS provides a safe migration window for existing keys.
+const API_KEY_HASH_SECRETS = [...new Set([
+  process.env.API_KEY_HASH_SECRET,
+  process.env.AUTH_SECRET,
+  process.env.AUTH_SECRET_PREVIOUS,
+].filter(Boolean))];
 const allowedOrigins = [...new Set([
   ...(process.env.WEB_ORIGINS || 'http://localhost:4173,http://localhost:4174').split(',').map((value) => value.trim()).filter(Boolean),
   'https://nightbox.in',
@@ -86,26 +94,33 @@ function requireAdmin(req, res, next) {
 function apiKeyUser(req) {
   const value = String(req.headers['x-bot-key'] || req.headers['x-api-key'] || '');
   if (!value.startsWith('nb_live_')) return null;
-  const keyHash = store.hash(`${value}|${process.env.AUTH_SECRET || 'local-development-secret-change-me'}`);
-  const key = store.db.prepare('SELECT id,user_id FROM creator_api_keys WHERE key_hash=? AND revoked_at IS NULL').get(keyHash);
+  const key = API_KEY_HASH_SECRETS
+    .map((secret) => store.hash(`${value}|${secret}`))
+    .map((keyHash) => store.db.prepare('SELECT id,user_id FROM creator_api_keys WHERE key_hash=? AND revoked_at IS NULL').get(keyHash))
+    .find(Boolean);
   if (!key) return null;
   store.db.prepare('UPDATE creator_api_keys SET last_used_at=? WHERE id=?').run(store.now(), key.id);
   const user = store.findUserById(key.user_id);
   return user?.status === 'suspended' ? null : user;
 }
 
-function telegramBotUser(req) {
+function telegramBotIdentity(req) {
   const supplied = String(req.headers['x-nightbox-bot-key'] || '');
   if (!NIGHTBOX_BOT_INTEGRATION_KEY || !supplied) return null;
   const expected = Buffer.from(NIGHTBOX_BOT_INTEGRATION_KEY);
   const actual = Buffer.from(supplied);
   if (expected.length !== actual.length || !crypto.timingSafeEqual(expected, actual)) return null;
-
   const telegramUserId = String(req.headers['x-telegram-user-id'] || '').trim();
   if (!/^\d{1,32}$/.test(telegramUserId)) return null;
+  return { telegramUserId };
+}
+
+function telegramBotUser(req) {
+  const identity = telegramBotIdentity(req);
+  if (!identity) return null;
   const user = store.db.prepare(
     "SELECT id,email,role,status,telegram_user_id FROM users WHERE telegram_user_id=? AND role='creator'"
-  ).get(telegramUserId);
+  ).get(identity.telegramUserId);
   return user?.status === 'suspended' ? null : user;
 }
 
@@ -450,9 +465,23 @@ app.get('/api/creator/bot-identity', (req, res) => {
   if (!user) return res.status(401).json({ error: 'Valid creator bot key is required' });
   res.json({ user: { id: user.id, email: user.email } });
 });
+app.post('/api/creator/telegram-link', (req, res) => {
+  const user = apiKeyUser(req);
+  const identity = telegramBotIdentity(req);
+  if (!user || !identity) return res.status(401).json({ error: 'Creator key and bot identity are required' });
+
+  const alreadyLinked = store.db.prepare(
+    "SELECT id,email FROM users WHERE telegram_user_id=? AND id<>? AND role='creator'"
+  ).get(identity.telegramUserId, user.id);
+  if (alreadyLinked) return res.status(409).json({ error: 'This Telegram account is already linked to another creator account' });
+
+  store.db.prepare("UPDATE users SET telegram_user_id=? WHERE id=? AND role='creator'").run(identity.telegramUserId, user.id);
+  res.json({ linked: true, user: { id: user.id, email: user.email, telegramUserId: identity.telegramUserId } });
+});
 app.post('/api/creator/api-keys', requireUser, (req, res) => {
   const raw = `nb_live_${crypto.randomBytes(24).toString('base64url')}`;
-  const keyHash = store.hash(`${raw}|${process.env.AUTH_SECRET || 'local-development-secret-change-me'}`);
+  const keyHashSecret = API_KEY_HASH_SECRETS[0] || 'local-development-secret-change-me';
+  const keyHash = store.hash(`${raw}|${keyHashSecret}`);
   const record = { id: store.id(), prefix: raw.slice(0, 16), createdAt: store.now() };
   store.db.prepare('INSERT INTO creator_api_keys (id,user_id,key_hash,key_prefix,created_at) VALUES (?,?,?,?,?)').run(record.id, req.user.id, keyHash, record.prefix, record.createdAt);
   res.status(201).json({ key: { ...record, value: raw } });
