@@ -30,8 +30,19 @@ CREATOR_API_KEY = os.getenv("CREATOR_API_KEY", "")
 BOT_NAME = os.getenv("BOT_NAME", BOT_KIND.lower())
 REQUIRE_CONNECT = os.getenv("TELEGRAM_REQUIRE_CONNECT", "true").lower() == "true"
 STATE_FALLBACK_KEY = os.getenv("CREATOR_API_KEY", "")
-NIGHTHEAST_API_URL = os.getenv("NIGHTHEAST_API_URL", "").rstrip("/")
-NIGHTHEAST_INTEGRATION_KEY = os.getenv("NIGHTHEAST_INTEGRATION_KEY", "")
+# Keep the bot-specific names, while also accepting the resolver contract's
+# documented names so a shared deployment environment works without renaming
+# the secret on either service.
+NIGHTHEAST_API_URL = (
+    os.getenv("NIGHTHEAST_API_URL")
+    or os.getenv("NIGHTHEAST_API_BASE_URL")
+    or "https://api.nightheast.com/api/integrations/nightbox"
+).rstrip("/")
+NIGHTHEAST_INTEGRATION_KEY = (
+    os.getenv("NIGHTHEAST_INTEGRATION_KEY")
+    or os.getenv("NIGHTBOX_INTEGRATION_KEY")
+    or ""
+)
 
 # --- CRITICAL: TERABOX COOKIE ---
 TERABOX_NDUS = os.getenv("TERABOX_NDUS") # Get this from your browser cookies
