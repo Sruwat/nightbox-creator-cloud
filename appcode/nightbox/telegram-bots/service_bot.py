@@ -14,7 +14,7 @@ from pathlib import Path
 import aiohttp
 from dotenv import load_dotenv
 from pyrogram import Client, filters
-from creator_keys import get_creator_key, remove_creator_key, set_creator_key
+from creator_keys import get_creator_key, is_full_creator_key, key_help_text, remove_creator_key, set_creator_key
 
 load_dotenv()
 logging.basicConfig(format="%(asctime)s %(levelname)s %(message)s", level=logging.INFO)
@@ -75,19 +75,57 @@ async def status(_, message):
 async def connect(_, message):
     parts = (message.text or "").split(maxsplit=1)
     key = parts[1].strip() if len(parts) == 2 else ""
-    if not key.startswith("nb_live_"):
-        await message.reply_text("Use /connect nb_live_your_creator_key")
+    if not key:
+        await message.reply_text(
+            "Send the complete API key in your next message, or use one line:\n"
+            "/connect nb_live_your_full_key\n\n"
+            "The KEY PREFIX shown in Bots & API is not enough to connect."
+        )
+        return
+    if not is_full_creator_key(key):
+        await message.reply_text(key_help_text())
         return
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(f"{BACKEND_URL}/api/creator/bot-identity", headers={"X-Bot-Key": key}, timeout=15) as response:
                 data = await response.json(content_type=None)
                 if response.status >= 300:
-                    raise RuntimeError(data.get("error", f"HTTP {response.status}"))
+                    raise RuntimeError(
+                        "The key was rejected. Create a fresh API key and use the full one-time value."
+                    )
         set_creator_key(message.chat.id, key)
         await message.reply_text(f"Connected to creator account {data['user']['email']} for {LABEL}.")
     except Exception as error:
         await message.reply_text(f"Connection failed: {str(error)[:200]}")
+
+
+@app.on_message(filters.text & filters.regex(r"nb_live_[A-Za-z0-9_-]+") & ~filters.command(["start", "status", "connect", "disconnect"]))
+async def pasted_key(_, message):
+    """Accept a full key pasted after a standalone /connect message."""
+    match = re.search(r"nb_live_[A-Za-z0-9_-]+", message.text or "")
+    key = match.group(0) if match else ""
+    if not is_full_creator_key(key):
+        await message.reply_text(key_help_text())
+        return
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{BACKEND_URL}/api/creator/bot-identity",
+                headers={"X-Bot-Key": key},
+                timeout=15,
+            ) as response:
+                data = await response.json(content_type=None)
+                if response.status >= 300:
+                    raise RuntimeError(
+                        "The key was rejected. Create a fresh API key and use the full one-time value."
+                    )
+        set_creator_key(message.chat.id, key)
+        await message.reply_text(f"Connected to creator account {data['user']['email']} for {LABEL}.")
+    except Exception as error:
+        await message.reply_text(
+            f"Connection failed: {str(error)[:200]}\n"
+            "Create a fresh key and send /connect followed by the full one-time API key."
+        )
 
 
 @app.on_message(filters.command("disconnect"))

@@ -314,6 +314,7 @@
 .bot-connect-help code{padding:3px 6px;border-radius:5px;background:#eef3fa;color:var(--navy);font-size:11px;overflow-wrap:anywhere}
 .bot-connect-help small{display:block;margin-top:13px;color:#8994a4;font-size:10px;line-height:1.5}
 .bot-keys-table{min-width:0}
+.api-key-prefix-note{margin:0 0 12px;padding:12px 14px;border:1px solid #f3d6b9;border-radius:10px;background:#fff8ef;color:#87521f;font-size:11px;line-height:1.55}
 .bot-keys-table .admin-table-head,.bot-keys-table .admin-table-row{grid-template-columns:minmax(150px,1.45fr) minmax(90px,.8fr) minmax(150px,1.25fr) minmax(80px,.7fr) 78px;min-width:680px}
 .api-key-copy{justify-self:start;padding:7px 10px;border:1px solid #c9d8f0!important;border-radius:8px!important;background:#f5f8ff!important;color:var(--blue)!important;font-size:10px;font-weight:800;white-space:nowrap;transition:background .18s,border-color .18s,color .18s}
 .api-key-copy:hover{background:#eaf1ff!important;border-color:#9db8e8!important}

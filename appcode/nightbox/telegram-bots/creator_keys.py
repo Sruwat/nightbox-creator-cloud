@@ -1,5 +1,6 @@
 """Shared, permission-restricted creator-key storage for NightBox bots."""
 import os
+import re
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -7,6 +8,24 @@ from pathlib import Path
 
 STATE_DIR = Path(os.getenv("TELEGRAM_STATE_DIR", "./state"))
 DB_PATH = STATE_DIR / "creator_keys.sqlite3"
+FULL_KEY_MIN_LENGTH = 30
+
+
+def is_full_creator_key(value):
+    """Return True for a complete creator secret, not a dashboard prefix."""
+    return bool(
+        value
+        and len(value) >= FULL_KEY_MIN_LENGTH
+        and re.fullmatch(r"nb_live_[A-Za-z0-9_-]+", value)
+    )
+
+
+def key_help_text():
+    return (
+        "This is a key prefix, not the complete API key. Open Bots & API, "
+        "create a new key, then copy the full ONE-TIME API KEY or the full "
+        "Copy connect command."
+    )
 
 
 def _connection():
