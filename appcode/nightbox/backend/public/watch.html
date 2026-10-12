@@ -181,17 +181,32 @@
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js" crossorigin="anonymous"></script>
   <script>
     const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=simple.shayaribygenz";
-    const pathParts = window.location.pathname.split('/');
-    const videoId = pathParts[pathParts.length - 1];
-    
-    const linkSlug = new URLSearchParams(window.location.search).get('link');
-    // Use the public host that served this link so custom production domains work.
-    const intentHost = window.location.host;
-    const intentUrl = `intent://${intentHost}/watch/${videoId}${linkSlug ? `?link=${encodeURIComponent(linkSlug)}` : ''}#Intent;scheme=https;package=simple.shayaribygenz;S.browser_fallback_url=${encodeURIComponent(PLAY_STORE_URL)};end`;
+    const pathParts = window.location.pathname.split('/').filter(Boolean);
+    let videoId = pathParts[0] === 'watch' ? pathParts[1] : null;
+    const pathSlug = pathParts[0] === 'l' ? pathParts[1] : null;
+    const linkSlug = new URLSearchParams(window.location.search).get('link') || pathSlug;
     const browserPlayer = document.getElementById('browserPlayer');
     let viewSessionId = null;
     let viewToken = null;
     let qualified = false;
+
+    async function resolveVideoId() {
+      if (videoId) return videoId;
+      if (!linkSlug) throw new Error('Missing NightBox link');
+      const response = await fetch(`/api/links/${encodeURIComponent(linkSlug)}`);
+      if (!response.ok) throw new Error('Share link not found');
+      const payload = await response.json();
+      videoId = payload?.link?.videoId || null;
+      if (!videoId) throw new Error('Video ID missing');
+      return videoId;
+    }
+
+    function buildIntentUrl() {
+      // Use the public host that served this link so custom production domains work.
+      const intentHost = window.location.host;
+      const targetId = videoId || '';
+      return `intent://${intentHost}/watch/${encodeURIComponent(targetId)}${linkSlug ? `?link=${encodeURIComponent(linkSlug)}` : ''}#Intent;scheme=https;package=simple.shayaribygenz;S.browser_fallback_url=${encodeURIComponent(PLAY_STORE_URL)};end`;
+    }
 
     async function startBrowserView() {
       if (!linkSlug || /android/i.test(navigator.userAgent)) return;
@@ -201,7 +216,8 @@
         const tracking = await response.json();
         viewSessionId = tracking.sessionId;
         viewToken = tracking.viewToken;
-        const metadata = await fetch(`/video/${encodeURIComponent(videoId)}`);
+        const resolvedVideoId = await resolveVideoId();
+        const metadata = await fetch(`/video/${encodeURIComponent(resolvedVideoId)}`);
         if (!metadata.ok) throw new Error('Video metadata unavailable');
         const video = (await metadata.json()).video;
         if (/\.mp4(?:$|\?)/i.test(video.hlsUrl)) {
@@ -230,13 +246,36 @@
       }
     });
 
-    function attemptOpen() {
-      // Direct jump for Android
-      if (/android/i.test(navigator.userAgent)) {
-        window.location.href = intentUrl;
+    let fallbackTimer = null;
+    let appLaunchAttempted = false;
+
+    async function attemptOpen() {
+      if (!/android/i.test(navigator.userAgent)) {
+        document.getElementById('status').innerText = 'Watch in your browser or install the NightBox app.';
+        document.getElementById('loader').style.display = 'none';
+        return;
       }
+      try {
+        await resolveVideoId();
+      } catch (_) {
+        document.getElementById('status').innerText = 'This NightBox link is not available.';
+        document.getElementById('loader').style.display = 'none';
+        return;
+      }
+      appLaunchAttempted = true;
+      document.getElementById('openBtn').href = buildIntentUrl();
+      window.location.href = buildIntentUrl();
+      clearTimeout(fallbackTimer);
+      fallbackTimer = setTimeout(() => {
+        if (document.visibilityState === 'visible') window.location.href = PLAY_STORE_URL;
+      }, 2200);
     }
 
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') clearTimeout(fallbackTimer);
+    });
+
+    document.getElementById('openBtn').href = /android/i.test(navigator.userAgent) ? '#' : PLAY_STORE_URL;
     document.getElementById('openBtn').addEventListener('click', (e) => {
       e.preventDefault();
       attemptOpen();
@@ -245,11 +284,13 @@
     // Auto-attempt on load
     window.onload = () => {
       startBrowserView();
-      setTimeout(attemptOpen, 500);
+      if (/android/i.test(navigator.userAgent)) setTimeout(attemptOpen, 500);
       
       // Update status if it stays on page
       setTimeout(() => {
-        document.getElementById('status').innerText = "If the app didn't open automatically, please click the button below.";
+        if (appLaunchAttempted && document.visibilityState === 'visible') {
+          document.getElementById('status').innerText = "If the app didn't open, tap below to retry or install it.";
+        }
         document.getElementById('loader').style.display = 'none';
       }, 4000);
     };

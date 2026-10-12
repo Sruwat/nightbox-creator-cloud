@@ -51,6 +51,7 @@
                 <data android:scheme="https" />
                 <data android:host="video.prernaupin.in" />
                 <data android:host="video.nightbox.in" android:scheme="https" />
+                <data android:host="api.nightbox.in" android:scheme="https" />
                 <data android:host="nightbox.in" android:scheme="https" />
                 <data android:host="www.nightbox.in" android:scheme="https" />
                 <data android:pathPrefix="/watch/" />

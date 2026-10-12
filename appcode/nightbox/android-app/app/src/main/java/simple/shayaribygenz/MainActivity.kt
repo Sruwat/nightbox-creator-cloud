@@ -196,9 +196,12 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
+            val shareSlug = extractLinkSlug(input)
             val videoId = extractVideoId(input)
-            if (videoId != null) {
-                openFileInfo(videoId, extractLinkSlug(input))
+            if (shareSlug != null && !isWatchPath(input)) {
+                resolveShareLink(shareSlug)
+            } else if (videoId != null) {
+                openFileInfo(videoId, shareSlug)
             } else {
                 Toast.makeText(this, getString(R.string.error_invalid_link), Toast.LENGTH_LONG).show()
             }
@@ -333,9 +336,24 @@ class MainActivity : AppCompatActivity() {
 
     private fun extractLinkSlug(input: String): String? {
         return try {
-            Uri.parse(input).getQueryParameter("link")?.takeIf { it.isNotBlank() }
+            val normalized = if (input.contains("://")) input else "https://$input"
+            val uri = Uri.parse(normalized)
+            val querySlug = uri.getQueryParameter("link")?.takeIf { it.isNotBlank() }
+            if (querySlug != null) return querySlug
+            val segments = uri.pathSegments
+            val linkIndex = segments.indexOfFirst { it.equals("l", ignoreCase = true) }
+            if (linkIndex >= 0) segments.getOrNull(linkIndex + 1)?.takeIf { it.isNotBlank() } else null
         } catch (_: Exception) {
             null
+        }
+    }
+
+    private fun isWatchPath(input: String): Boolean {
+        return try {
+            val normalized = if (input.contains("://")) input else "https://$input"
+            Uri.parse(normalized).pathSegments.firstOrNull()?.equals("watch", ignoreCase = true) == true
+        } catch (_: Exception) {
+            false
         }
     }
 
