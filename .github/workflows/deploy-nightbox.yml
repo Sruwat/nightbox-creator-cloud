@@ -53,12 +53,24 @@ jobs:
       - name: Configure SSH
         env:
           VPS_HOST: ${{ secrets.NIGHTBOX_VPS_HOST }}
+          VPS_USER: ${{ secrets.NIGHTBOX_VPS_USER }}
           VPS_SSH_KEY: ${{ secrets.NIGHTBOX_VPS_SSH_KEY }}
         run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" || { echo "NIGHTBOX_VPS_HOST is missing" >&2; exit 1; }
+          test -n "$VPS_USER" || { echo "NIGHTBOX_VPS_USER is missing" >&2; exit 1; }
+          test -n "$VPS_SSH_KEY" || { echo "NIGHTBOX_VPS_SSH_KEY is missing" >&2; exit 1; }
+          printf '%s\n' "$VPS_SSH_KEY" | grep -Eq 'BEGIN ([A-Z0-9 ]+ )?PRIVATE KEY' || {
+            echo "NIGHTBOX_VPS_SSH_KEY is not a PEM/OpenSSH private key" >&2
+            exit 1
+          }
           install -m 700 -d ~/.ssh
-          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/nightbox_deploy
+          printf '%s\n' "$VPS_SSH_KEY" | sed 's/\r$//' > ~/.ssh/nightbox_deploy
           chmod 600 ~/.ssh/nightbox_deploy
-          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+          ssh-keyscan -T 10 -H "$VPS_HOST" >> ~/.ssh/known_hosts
+          ssh-keygen -y -f ~/.ssh/nightbox_deploy >/dev/null
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/nightbox_deploy \
+            "$VPS_USER@$VPS_HOST" 'printf "SSH authentication succeeded\\n"'
 
       - name: Validate Telegram bot secrets
         env:
