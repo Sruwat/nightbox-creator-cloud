@@ -174,38 +174,61 @@ export default function CreatorFileManager({ token, toast }: { token: string; to
     }
   }
 
+  const usedBytes = (storage?.usedBytes || 0) + (storage?.reservedBytes || 0);
+  const quotaBytes = storage?.quotaBytes || 1;
+  const usagePercent = Math.min(100, usedBytes / quotaBytes * 100);
+  const availableBytes = Math.max(0, quotaBytes - usedBytes);
+
   return <section className="card creator-storage">
-    <div className="card-head">
-      <div><b>Cloud files</b><span>2 GiB included storage · maximum file size 2 GiB</span></div>
-      <label className="btn btn-primary creator-storage-upload">{busy ? "Uploading…" : "Upload files"}<input type="file" multiple disabled={busy} onChange={uploadFiles} /></label>
+    <div className="creator-storage-hero">
+      <div className="creator-storage-heading">
+        <span className="creator-storage-kicker">PRIVATE CLOUD LIBRARY</span>
+        <h2>My files</h2>
+        <p>Keep your uploads organised, private, and ready to share from one calm workspace.</p>
+      </div>
+      <label className="btn btn-primary creator-storage-upload">
+        <span className="creator-storage-upload-icon" aria-hidden="true">↑</span>
+        <span>{busy ? "Uploading…" : "Upload files"}</span>
+        <input type="file" multiple disabled={busy} onChange={uploadFiles} />
+      </label>
     </div>
-    {storage && <div className="creator-storage-usage" aria-label="Storage usage">
-      <div><b>{prettySize(storage.usedBytes + storage.reservedBytes)} used</b><span>{prettySize(storage.quotaBytes)} quota</span></div>
-      <i><em style={{ width: `${Math.min(100, (storage.usedBytes + storage.reservedBytes) / storage.quotaBytes * 100)}%` }} /></i>
+
+    {storage && <div className="creator-storage-overview" aria-label="Storage summary">
+      <div className="creator-storage-stat creator-storage-stat-wide">
+        <div className="creator-storage-stat-top"><span>Storage used</span><b>{prettySize(usedBytes)} <small>of {prettySize(quotaBytes)}</small></b></div>
+        <div className="creator-storage-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(usagePercent)} aria-label={`${Math.round(usagePercent)} percent of storage used`}><i style={{ width: `${usagePercent}%` }} /></div>
+        <small>{prettySize(availableBytes)} remaining</small>
+      </div>
+      <div className="creator-storage-stat"><span>Files here</span><b>{files.length}</b><small>stored uploads</small></div>
+      <div className="creator-storage-stat"><span>Folders here</span><b>{visibleFolders.length}</b><small>organise your work</small></div>
     </div>}
+
     <div className="creator-storage-toolbar">
-      <nav aria-label="Folder path"><button onClick={() => setFolderId(null)}>My files</button>{breadcrumbs.map((folder) => <button key={folder.id} onClick={() => setFolderId(folder.id)}>› {folder.name}</button>)}</nav>
-      <form onSubmit={createFolder}><input aria-label="New folder name" value={folderName} onChange={(event) => setFolderName(event.target.value)} placeholder="New folder name" maxLength={100}/><button className="btn btn-dark" type="submit">Create folder</button></form>
+      <div className="creator-storage-location">
+        <span className="creator-storage-location-label">LOCATION</span>
+        <nav aria-label="Folder path"><button onClick={() => setFolderId(null)}>My files</button>{breadcrumbs.map((folder) => <button key={folder.id} onClick={() => setFolderId(folder.id)}>› {folder.name}</button>)}</nav>
+      </div>
+      <form onSubmit={createFolder} className="creator-storage-folder-form"><input aria-label="New folder name" value={folderName} onChange={(event) => setFolderName(event.target.value)} placeholder="New folder name" maxLength={100}/><button className="btn btn-dark" type="submit">+ Create folder</button></form>
     </div>
-    {error && <p className="empty-copy" role="status">{error}</p>}
-    <div className="creator-storage-list">
-      {visibleFolders.map((folder) => <article key={folder.id}>
-        <button className="creator-storage-open" onClick={() => setFolderId(folder.id)}><span aria-hidden="true">▰</span><b>{folder.name}</b></button>
-        <button onClick={() => void renameFolder(folder)}>Rename</button>
-        <button onClick={() => void removeFolder(folder)}>Delete</button>
+
+    {error && <div className="creator-storage-error" role="status"><span aria-hidden="true">!</span><div><b>Storage could not be loaded</b><small>{error}</small></div><button onClick={() => void load()}>Try again</button></div>}
+    <div className="creator-storage-list" aria-live="polite">
+      {(visibleFolders.length > 0 || files.length > 0) && <div className="creator-storage-list-label"><span>NAME</span><span>ACTIONS</span></div>}
+      {visibleFolders.map((folder) => <article className="creator-storage-item creator-storage-folder" key={folder.id}>
+        <button className="creator-storage-open" onClick={() => setFolderId(folder.id)}><span className="creator-storage-item-icon folder" aria-hidden="true">▰</span><span className="creator-storage-item-copy"><b>{folder.name}</b><small>Folder · open to view contents</small></span></button>
+        <div className="creator-storage-actions"><button onClick={() => void renameFolder(folder)}>Rename</button><button className="storage-danger" onClick={() => void removeFolder(folder)}>Delete</button></div>
       </article>)}
-      {files.map((file) => <article key={file.id}>
-        <span className="creator-storage-name"><span aria-hidden="true">▤</span><b title={file.name}>{file.name}<small>{prettySize(file.sizeBytes)} · {file.mimeType}</small></b></span>
-        <select aria-label={`Move ${file.name}`} value={file.folderId || ""} onChange={(event) => void moveFile(file, event.target.value)}>
-          <option value="">Root</option>
-          {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
-        </select>
-        <button onClick={() => void shareFile(file)}>{file.shareUrl ? "Copy share link" : "Create share link"}</button>
-        {file.shareUrl && <><a href={file.shareUrl}>Download</a><button onClick={() => void revokeShare(file)}>Revoke link</button></>}
-        <button onClick={() => void removeFile(file)}>Delete</button>
+      {files.map((file) => <article className="creator-storage-item creator-storage-file" key={file.id}>
+        <span className="creator-storage-name"><span className="creator-storage-item-icon file" aria-hidden="true">▤</span><span className="creator-storage-item-copy"><b title={file.name}>{file.name}</b><small>{prettySize(file.sizeBytes)} · {file.mimeType}</small></span></span>
+        <div className="creator-storage-actions">
+          <select aria-label={`Move ${file.name}`} value={file.folderId || ""} onChange={(event) => void moveFile(file, event.target.value)}><option value="">Move to root</option>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select>
+          <button onClick={() => void shareFile(file)}>{file.shareUrl ? "Copy link" : "Share file"}</button>
+          {file.shareUrl && <><a href={file.shareUrl}>Download</a><button onClick={() => void revokeShare(file)}>Revoke</button></>}
+          <button className="storage-danger" onClick={() => void removeFile(file)}>Delete</button>
+        </div>
       </article>)}
-      {!visibleFolders.length && !files.length && !error && <p className="empty-copy">This folder is empty. Upload a file or create a folder to get started.</p>}
+      {!visibleFolders.length && !files.length && !error && <div className="creator-storage-empty"><span className="creator-storage-empty-icon" aria-hidden="true">▤</span><h3>This folder is ready for its first upload</h3><p>Upload a file or create a folder to start building your private library.</p><label className="btn btn-outline">Choose files<input type="file" multiple disabled={busy} onChange={uploadFiles} /></label></div>}
     </div>
-    <small className="creator-storage-private">Files are private until you create a share link. Anyone with a share link can access that file. Each file is limited by your remaining quota, up to 2 GiB.</small>
+    <div className="creator-storage-private"><span aria-hidden="true">◉</span><small>Files stay private until you create a share link. Each file can be up to 2 GiB and uses your remaining quota.</small></div>
   </section>;
 }
