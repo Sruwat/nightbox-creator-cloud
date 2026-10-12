@@ -164,6 +164,9 @@ const startTime = Date.now();
 app.use(helmet({
   contentSecurityPolicy: false,
   crossOriginEmbedderPolicy: false,
+  // Google Identity Services uses a popup and window.postMessage during sign-in.
+  // Allow that popup flow without disabling the isolation policy entirely.
+  crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
 }));
 
 // Compression for performance
