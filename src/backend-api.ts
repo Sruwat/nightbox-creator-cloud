@@ -56,12 +56,25 @@ export type CreatorRewardMilestone = { id: string; title: string; description: s
 export type RewardMilestone = Omit<CreatorRewardMilestone, "claimStatus" | "eligible"> & { active: number; createdAt?: string; updatedAt?: string };
 export type RewardClaim = { id: string; milestoneId: string; creatorId: string; creatorEmail: string; milestoneTitle: string; thresholdViews: number; rewardNote: string; status: string; creatorNote: string | null; adminNote: string | null; createdAt: string; updatedAt: string };
 
-async function parseResponse<T>(response: Response): Promise<T> {
+type AuthScope = "creator" | "admin";
+
+function notifyUnauthorized(scope?: AuthScope) {
+  if (typeof window !== "undefined" && scope) {
+    window.dispatchEvent(new CustomEvent("nightbox-auth-expired", { detail: { scope } }));
+  }
+}
+
+async function parseResponse<T>(response: Response, scope?: AuthScope): Promise<T> {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
+    if (response.status === 401) notifyUnauthorized(scope);
     throw new Error(body.error || `Backend request failed (${response.status})`);
   }
   return body as T;
+}
+
+async function parseCreatorResponse<T>(response: Response): Promise<T> {
+  return parseResponse<T>(response, "creator");
 }
 
 export async function getBackendHealth() {
@@ -124,15 +137,15 @@ function authHeaders(token: string) {
 
 export async function getCreatorVideos(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/creator/videos`, { headers: authHeaders(token) });
-  return parseResponse<{ videos: Array<{ id: string; title: string; status: string; fileSize: number | null; watchUrl: string; embedUrl: string; createdAt: string; link: string | null; eligibleViews: number; earningsMicros: number }> }>(response);
+  return parseCreatorResponse<{ videos: Array<{ id: string; title: string; status: string; fileSize: number | null; watchUrl: string; embedUrl: string; createdAt: string; link: string | null; eligibleViews: number; earningsMicros: number }> }>(response);
 }
 export async function deleteCreatorVideo(token: string, videoId: string) {
   const response = await fetch(`${BACKEND_URL}/api/creator/videos/${encodeURIComponent(videoId)}`, { method: "DELETE", headers: authHeaders(token) });
-  return parseResponse<{ deleted: boolean }>(response);
+  return parseCreatorResponse<{ deleted: boolean }>(response);
 }
 export async function createCreatorVideoLink(token: string, videoId: string) {
   const response = await fetch(`${BACKEND_URL}/api/creator/videos/${encodeURIComponent(videoId)}/link`, { method: "POST", headers: authHeaders(token) });
-  return parseResponse<{ link: { slug: string; url: string } }>(response);
+  return parseCreatorResponse<{ link: { slug: string; url: string } }>(response);
 }
 
 export type CreatorFolder = { id: string; name: string; parentId: string | null; createdAt: string };
@@ -140,57 +153,57 @@ export type CreatorStoredFile = { id: string; folderId: string | null; name: str
 export type CreatorStorageUsage = { usedBytes: number; reservedBytes: number; quotaBytes: number; maximumBytes: number };
 export async function getCreatorFolders(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/creator/folders`, { headers: authHeaders(token) });
-  return parseResponse<{ folders: CreatorFolder[] }>(response);
+  return parseCreatorResponse<{ folders: CreatorFolder[] }>(response);
 }
 export async function createCreatorFolder(token: string, name: string, parentId: string | null = null) {
   const response = await fetch(`${BACKEND_URL}/api/creator/folders`, { method: "POST", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify({ name, parentId }) });
-  return parseResponse<{ folder: CreatorFolder }>(response);
+  return parseCreatorResponse<{ folder: CreatorFolder }>(response);
 }
 export async function renameCreatorFolder(token: string, folderId: string, name: string) {
   const response = await fetch(`${BACKEND_URL}/api/creator/folders/${encodeURIComponent(folderId)}`, { method: "PATCH", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
-  return parseResponse<{ folder: CreatorFolder }>(response);
+  return parseCreatorResponse<{ folder: CreatorFolder }>(response);
 }
 export async function deleteCreatorFolder(token: string, folderId: string) {
   const response = await fetch(`${BACKEND_URL}/api/creator/folders/${encodeURIComponent(folderId)}`, { method: "DELETE", headers: authHeaders(token) });
-  return parseResponse<{ deleted: boolean }>(response);
+  return parseCreatorResponse<{ deleted: boolean }>(response);
 }
 export async function getCreatorFiles(token: string, folderId: string | null = null) {
   const query = folderId ? `?folderId=${encodeURIComponent(folderId)}` : "";
   const response = await fetch(`${BACKEND_URL}/api/creator/files${query}`, { headers: authHeaders(token) });
-  return parseResponse<{ files: CreatorStoredFile[]; storage: CreatorStorageUsage }>(response);
+  return parseCreatorResponse<{ files: CreatorStoredFile[]; storage: CreatorStorageUsage }>(response);
 }
 export async function uploadCreatorFile(token: string, file: File, folderId: string | null = null) {
   const form = new FormData();
   form.append("file", file);
   if (folderId) form.append("folderId", folderId);
   const response = await fetch(`${BACKEND_URL}/api/creator/files`, { method: "POST", headers: authHeaders(token), body: form });
-  return parseResponse<{ file: CreatorStoredFile }>(response);
+  return parseCreatorResponse<{ file: CreatorStoredFile }>(response);
 }
 export async function moveCreatorFile(token: string, fileId: string, folderId: string | null) {
   const response = await fetch(`${BACKEND_URL}/api/creator/files/${encodeURIComponent(fileId)}/move`, { method: "PATCH", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify({ folderId }) });
-  return parseResponse<{ moved: boolean; folderId: string | null }>(response);
+  return parseCreatorResponse<{ moved: boolean; folderId: string | null }>(response);
 }
 export async function shareCreatorFile(token: string, fileId: string) {
   const response = await fetch(`${BACKEND_URL}/api/creator/files/${encodeURIComponent(fileId)}/share`, { method: "POST", headers: authHeaders(token) });
-  return parseResponse<{ shareUrl: string }>(response);
+  return parseCreatorResponse<{ shareUrl: string }>(response);
 }
 export async function revokeCreatorFileShare(token: string, fileId: string) {
   const response = await fetch(`${BACKEND_URL}/api/creator/files/${encodeURIComponent(fileId)}/share`, { method: "DELETE", headers: authHeaders(token) });
-  return parseResponse<{ revoked: boolean }>(response);
+  return parseCreatorResponse<{ revoked: boolean }>(response);
 }
 export async function deleteCreatorFile(token: string, fileId: string) {
   const response = await fetch(`${BACKEND_URL}/api/creator/files/${encodeURIComponent(fileId)}`, { method: "DELETE", headers: authHeaders(token) });
-  return parseResponse<{ deleted: boolean }>(response);
+  return parseCreatorResponse<{ deleted: boolean }>(response);
 }
 
 export async function getCreatorAnalytics(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/creator/analytics`, { headers: authHeaders(token) });
-  return parseResponse<{ summary: { views: number; earningsMicros: number }; countries: Array<{ country: string; views: number; earningsMicros: number; cpmCents: number }>; rates: Array<{ country: string; cpmCents: number }> }>(response);
+  return parseCreatorResponse<{ summary: { views: number; earningsMicros: number }; countries: Array<{ country: string; views: number; earningsMicros: number; cpmCents: number }>; rates: Array<{ country: string; cpmCents: number }> }>(response);
 }
 
 export async function getCreatorOverview(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/creator/overview`, { headers: authHeaders(token) });
-  return parseResponse<{ dailyActivity: Array<{ date: string; views: number; earningsMicros: number }> }>(response);
+  return parseCreatorResponse<{ dailyActivity: Array<{ date: string; views: number; earningsMicros: number }> }>(response);
 }
 
 export async function getPublicCpm() {
@@ -312,11 +325,11 @@ export async function updateAdminViewRules(token: string, rules: { eligiblePerce
 
 export async function getCreatorApiKeys(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/creator/api-keys`, { headers: authHeaders(token) });
-  return parseResponse<{ keys: Array<{ id: string; prefix: string; createdAt: string; lastUsedAt: string | null; revokedAt: string | null }> }>(response);
+  return parseCreatorResponse<{ keys: Array<{ id: string; prefix: string; createdAt: string; lastUsedAt: string | null; revokedAt: string | null }> }>(response);
 }
 export async function createCreatorApiKey(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/creator/api-keys`, { method: "POST", headers: authHeaders(token) });
-  return parseResponse<{ key: { id: string; prefix: string; value: string } }>(response);
+  return parseCreatorResponse<{ key: { id: string; prefix: string; value: string } }>(response);
 }
 
 export async function getPlans() {
@@ -349,11 +362,11 @@ export async function updatePassword(token: string, currentPassword: string, new
 }
 export async function getCreatorTickets(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/creator/tickets`, { headers: authHeaders(token) });
-  return parseResponse<{ tickets: Array<{ id: string; subject: string; message: string; status: string; adminNote: string | null; createdAt: string; updatedAt: string }> }>(response);
+  return parseCreatorResponse<{ tickets: Array<{ id: string; subject: string; message: string; status: string; adminNote: string | null; createdAt: string; updatedAt: string }> }>(response);
 }
 export async function createCreatorTicket(token: string, subject: string, message: string) {
   const response = await fetch(`${BACKEND_URL}/api/creator/tickets`, { method: "POST", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify({ subject, message }) });
-  return parseResponse(response);
+  return parseCreatorResponse(response);
 }
 export async function getAdminTickets(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/tickets`, { headers: authHeaders(token) });
@@ -374,8 +387,8 @@ export async function getAdminAdsTxt(token: string) { const response = await fet
 export async function updateAdminAdsTxt(token: string, content: string) { const response = await fetch(`${BACKEND_URL}/api/admin/ads-txt`, { method: "PUT", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify({ content }) }); return parseResponse<{ content: string; updatedAt: string }>(response); }
 export async function getAdminEvents(token: string) { const response = await fetch(`${BACKEND_URL}/api/admin/events`, { headers: authHeaders(token) }); return parseResponse<{ events: PlatformEvent[] }>(response); }
 export async function getEvents() { const response = await fetch(`${BACKEND_URL}/api/events`); return parseResponse<{ events: PlatformEvent[] }>(response); }
-export async function getCreatorRewards(token: string) { const response = await fetch(`${BACKEND_URL}/api/creator/rewards`, { headers: authHeaders(token) }); return parseResponse<{ eligibleViews: number; milestones: CreatorRewardMilestone[] }>(response); }
-export async function claimCreatorReward(token: string, milestoneId: string) { const response = await fetch(`${BACKEND_URL}/api/creator/rewards/${encodeURIComponent(milestoneId)}/claim`, { method: "POST", headers: authHeaders(token) }); return parseResponse<{ claim: { id: string; milestoneId: string; status: string; createdAt: string } }>(response); }
+export async function getCreatorRewards(token: string) { const response = await fetch(`${BACKEND_URL}/api/creator/rewards`, { headers: authHeaders(token) }); return parseCreatorResponse<{ eligibleViews: number; milestones: CreatorRewardMilestone[] }>(response); }
+export async function claimCreatorReward(token: string, milestoneId: string) { const response = await fetch(`${BACKEND_URL}/api/creator/rewards/${encodeURIComponent(milestoneId)}/claim`, { method: "POST", headers: authHeaders(token) }); return parseCreatorResponse<{ claim: { id: string; milestoneId: string; status: string; createdAt: string } }>(response); }
 export async function getAdminRewardMilestones(token: string) { const response = await fetch(`${BACKEND_URL}/api/admin/milestones`, { headers: authHeaders(token) }); return parseResponse<{ milestones: RewardMilestone[] }>(response); }
 export async function createAdminRewardMilestone(token: string, milestone: { title: string; description: string; thresholdViews: number; rewardNote: string }) { const response = await fetch(`${BACKEND_URL}/api/admin/milestones`, { method: "POST", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify(milestone) }); return parseResponse<{ milestone: RewardMilestone }>(response); }
 export async function updateAdminRewardMilestone(token: string, milestone: RewardMilestone) { const response = await fetch(`${BACKEND_URL}/api/admin/milestones/${encodeURIComponent(milestone.id)}`, { method: "PUT", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify(milestone) }); return parseResponse<{ updated: boolean }>(response); }
@@ -388,12 +401,12 @@ export async function submitDmcaReport(payload: { name: string; email: string; v
 
 export async function getCreatorWithdrawals(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/creator/withdrawals`, { headers: authHeaders(token) });
-  return parseResponse<{ balanceMicros: number; minimumMicros: number; withdrawals: Array<{ id: string; amountMicros: number; currency: string; method: string; status: string; requestedAt: string }> }>(response);
+  return parseCreatorResponse<{ balanceMicros: number; minimumMicros: number; withdrawals: Array<{ id: string; amountMicros: number; currency: string; method: string; status: string; requestedAt: string }> }>(response);
 }
 
 export async function createWithdrawal(token: string, amountMicros: number, method: string) {
   const response = await fetch(`${BACKEND_URL}/api/creator/withdrawals`, { method: "POST", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify({ amountMicros, method }) });
-  return parseResponse<{ balanceMicros: number; withdrawal: { id: string; amountMicros: number; method: string; status: string } }>(response);
+  return parseCreatorResponse<{ balanceMicros: number; withdrawal: { id: string; amountMicros: number; method: string; status: string } }>(response);
 }
 
 export async function getAdminWithdrawals(token: string) {

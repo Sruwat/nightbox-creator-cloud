@@ -37,6 +37,25 @@ function toastGlobal(message:string){if(typeof window!=="undefined")window.alert
 
 export default function NightBoxApp(){
   const [route,setRoute]=useState(()=>{const initial=routeNow();return initial.startsWith("/user")&&typeof window!=="undefined"&&!localStorage.getItem("nightbox-token")?"/auth/login":initial}); const [toasts,setToasts]=useState<Toast[]>([]); const [files,setFiles]=useState<FileItem[]>([]); const [token,setToken]=useState(()=>typeof window!=="undefined"?localStorage.getItem("nightbox-token")||"":""); const [profile,setProfile]=useState<AccountProfile|null>(()=>{if(typeof window==="undefined")return null;try{return JSON.parse(localStorage.getItem("nightbox-profile")||"null") as AccountProfile|null}catch{return null}}); const [adminAuth,setAdminAuth]=useState(()=>typeof window!=="undefined"&&sessionStorage.getItem("nightbox-admin")==="1"); const [menu,setMenu]=useState(false);
+  useEffect(()=>{
+    let handled=false;
+    const onAuthExpired=(event:Event)=>{
+      const scope=(event as CustomEvent<{scope?:string}>).detail?.scope;
+      if(scope!=="creator"||handled)return;
+      handled=true;
+      localStorage.removeItem("nightbox-token");
+      localStorage.removeItem("nightbox-profile");
+      setToken("");
+      setProfile(null);
+      const next="/auth/login";
+      history.replaceState({},"",next);
+      setRoute(next);
+      setMenu(false);
+      setToasts(current=>[...current,{id:Date.now(),text:"Your session expired. Please sign in again."}]);
+    };
+    window.addEventListener("nightbox-auth-expired",onAuthExpired);
+    return()=>window.removeEventListener("nightbox-auth-expired",onAuthExpired);
+  },[]);
   useEffect(()=>{const h=()=>{const next=routeNow();setRoute(next.startsWith("/user")&&!localStorage.getItem("nightbox-token")?"/auth/login":next);setMenu(false)};window.addEventListener("popstate",h);return()=>window.removeEventListener("popstate",h)},[]);
   
 // eslint-disable-next-line react-hooks/set-state-in-effect
