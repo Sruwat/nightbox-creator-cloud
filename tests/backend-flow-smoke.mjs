@@ -10,6 +10,7 @@ let userId;
 let videoId;
 let previousRate;
 let previousUkRate;
+let previousMinimumWatchSeconds;
 
 async function json(url, options) {
   const response = await fetch(`${baseUrl}${url}`, options);
@@ -81,12 +82,13 @@ try {
 
   previousRate = store.db.prepare("SELECT cpm_cents AS cpmCents FROM cpm_rates WHERE country='IN'").get();
   previousUkRate = store.db.prepare("SELECT cpm_cents AS cpmCents FROM cpm_rates WHERE country='GB'").get();
+  previousMinimumWatchSeconds = store.db.prepare("SELECT minimum_watch_seconds AS minimumWatchSeconds FROM view_rules WHERE id=1").get().minimumWatchSeconds;
   store.db.prepare("INSERT INTO cpm_rates(country,cpm_cents,updated_at) VALUES('IN',1000,?) ON CONFLICT(country) DO UPDATE SET cpm_cents=excluded.cpm_cents,updated_at=excluded.updated_at").run(store.now());
   store.db.prepare("INSERT INTO cpm_rates(country,cpm_cents,updated_at) VALUES('GB',1500,?) ON CONFLICT(country) DO UPDATE SET cpm_cents=excluded.cpm_cents,updated_at=excluded.updated_at").run(store.now());
 
   const started = await json(`/api/links/${link.slug}/view/start`, {
     method: "POST",
-    headers: { "x-country-code": "IN", "user-agent": "NightBox backend smoke test" },
+    headers: { "cf-ipcountry": "IN", "x-real-ip": "198.51.100.10", "user-agent": "NightBox backend smoke test" },
   });
   const storedSession = store.db.prepare("SELECT viewer_hash AS viewerHash, ip_hash AS ipHash, view_token_hash AS tokenHash, country FROM view_sessions WHERE id=?").get(started.sessionId);
   assert.match(storedSession.viewerHash, /^[a-f0-9]{64}$/);
@@ -110,6 +112,9 @@ try {
   assert.equal(qualified.cpmCents, 1000);
   assert.equal(qualified.amountMicros, 10000);
 
+  // Keep the remaining cap checks fast while preserving the real minimum-watch assertion above.
+  store.db.prepare("UPDATE view_rules SET minimum_watch_seconds=1 WHERE id=1").run();
+
   // Replaying the same signed qualification must not create another ledger row.
   const replay = await json(`/api/views/${started.sessionId}/qualify`, {
     method: "POST",
@@ -118,24 +123,40 @@ try {
   });
   assert.equal(replay.counted, true);
 
-  const secondSession = await json(`/api/links/${link.slug}/view/start`, {
+  const maxViewsPerIp24h = Number(store.db.prepare("SELECT max_views_per_ip_24h AS maxViews FROM view_rules WHERE id=1").get().maxViews);
+  assert.ok(maxViewsPerIp24h >= 1, "IP view cap must allow at least one eligible view");
+  for (let attempt = 2; attempt <= maxViewsPerIp24h; attempt += 1) {
+    const repeatSession = await json(`/api/links/${link.slug}/view/start`, {
+      method: "POST",
+      headers: { "cf-ipcountry": "IN", "x-real-ip": "198.51.100.10", "user-agent": "NightBox backend smoke test" },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const repeat = await json(`/api/views/${repeatSession.sessionId}/qualify`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ viewToken: repeatSession.viewToken }),
+    });
+    assert.equal(repeat.counted, true, `same IP view ${attempt} should remain eligible below the configured cap`);
+  }
+
+  const cappedSession = await json(`/api/links/${link.slug}/view/start`, {
     method: "POST",
-    headers: { "x-country-code": "IN", "user-agent": "NightBox backend smoke test" },
+    headers: { "cf-ipcountry": "IN", "x-real-ip": "198.51.100.10", "user-agent": "NightBox backend smoke test" },
   });
-  await new Promise((resolve) => setTimeout(resolve, 5100));
-  const duplicate = await json(`/api/views/${secondSession.sessionId}/qualify`, {
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  const duplicate = await json(`/api/views/${cappedSession.sessionId}/qualify`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ viewToken: secondSession.viewToken }),
+    body: JSON.stringify({ viewToken: cappedSession.viewToken }),
   });
   assert.equal(duplicate.counted, false);
   assert.equal(duplicate.duplicate, true);
 
   const ukSession = await json(`/api/links/${link.slug}/view/start`, {
     method: "POST",
-    headers: { "x-country-code": "GB", "user-agent": "NightBox second-viewer smoke test" },
+    headers: { "cf-ipcountry": "GB", "x-real-ip": "198.51.100.11", "user-agent": "NightBox second-viewer smoke test" },
   });
-  await new Promise((resolve) => setTimeout(resolve, 5100));
+  await new Promise((resolve) => setTimeout(resolve, 1100));
   const ukQualified = await json(`/api/views/${ukSession.sessionId}/qualify`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -149,8 +170,8 @@ try {
   const analytics = await json("/api/creator/analytics", {
     headers: { authorization: `Bearer ${registered.token}` },
   });
-  assert.equal(analytics.summary.views, 2);
-  assert.equal(analytics.summary.earningsMicros, 25000);
+  assert.equal(analytics.summary.views, maxViewsPerIp24h + 1);
+  assert.equal(analytics.summary.earningsMicros, (maxViewsPerIp24h * 10000) + 15000);
   assert.deepEqual(analytics.countries.map((row) => row.country).sort(), ["GB", "IN"]);
   console.log("backend-flow-smoke: passed (5s qualification, duplicate filter, country CPM, ledger, analytics)");
 } finally {
@@ -164,5 +185,8 @@ try {
     store.db.prepare("UPDATE cpm_rates SET cpm_cents=?,updated_at=? WHERE country='GB'").run(previousUkRate.cpmCents, store.now());
   } else {
     store.db.prepare("DELETE FROM cpm_rates WHERE country='GB'").run();
+  }
+  if (previousMinimumWatchSeconds !== undefined) {
+    store.db.prepare("UPDATE view_rules SET minimum_watch_seconds=? WHERE id=1").run(previousMinimumWatchSeconds);
   }
 }

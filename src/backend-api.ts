@@ -219,6 +219,7 @@ export type AdminCreatorDetail = {
   creator: { id: string; email: string; status: string; telegramUserId: string | null; createdAt: string; storageQuotaBytes: number; storageUsedBytes: number };
   metrics: { views: { today: number; week: number; month: number; lifetime: number }; earningsMicros: { today: number; yesterday: number; week: number; month: number; lifetime: number; available: number; paid: number }; activeUsers: { today: number; week: number; month: number; lifetime: number }; watchMinutes: { today: number; week: number; month: number; lifetime: number } };
   files: Array<{ id: string; name: string; sizeBytes: number; createdAt: string; status: string }>;
+  payouts: Array<{ id: string; amountMicros: number; currency: string; method: string; status: string; requestedAt: string; paidAt: string | null }>;
 };
 export async function getAdminCreator(token: string, id: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/creators/${encodeURIComponent(id)}`, { headers: authHeaders(token) });
@@ -251,7 +252,7 @@ export async function getAdminOverview(token: string, start?: string, end?: stri
   return parseResponse<{
     users: number; creators: number; videos: number; qualifiedViews: number; earningsMicros: number; pendingWithdrawals: number; updatedAt: string;
     dailyActivity: Array<{ date: string; qualifiedViews: number; earningsMicros: number; activeCreators: number }>;
-    recentCreators: Array<{ id: string; email: string; createdAt: string; videos: number; qualifiedViews: number; earningsMicros: number }>;
+    recentCreators: Array<{ id: string; email: string; createdAt: string; videos: number; qualifiedViews: number; todayEarningsMicros: number; earningsMicros: number }>;
   }>(response);
 }
 
@@ -411,11 +412,14 @@ export async function createWithdrawal(token: string, amountMicros: number, meth
 
 export async function getAdminWithdrawals(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/withdrawals`, { headers: authHeaders(token) });
-  return parseResponse<{ withdrawals: Array<{ id: string; creatorId: string; email: string; amountMicros: number; currency: string; method: string; status: string; requestedAt: string }> }>(response);
+  return parseResponse<{ withdrawals: Array<{ id: string; creatorId: string; email: string; amountMicros: number; currency: string; method: string; status: string; note: string | null; requestedAt: string; reviewedAt: string | null; paidAt: string | null }> }>(response);
 }
 
-export async function updateAdminWithdrawal(token: string, id: string, status: "approved" | "paid" | "rejected") {
-  const response = await fetch(`${BACKEND_URL}/api/admin/withdrawals/${encodeURIComponent(id)}`, { method: "PUT", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
+export type AdminWithdrawalUpdate = { status?: "pending" | "approved" | "paid" | "rejected"; amountMicros?: number; method?: string; note?: string };
+
+export async function updateAdminWithdrawal(token: string, id: string, changes: AdminWithdrawalUpdate | "approved" | "paid" | "rejected") {
+  const body = typeof changes === "string" ? { status: changes } : changes;
+  const response = await fetch(`${BACKEND_URL}/api/admin/withdrawals/${encodeURIComponent(id)}`, { method: "PUT", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify(body) });
   return parseResponse(response);
 }
 

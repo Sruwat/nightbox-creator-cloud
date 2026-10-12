@@ -990,11 +990,12 @@ app.get('/api/admin/creators/:id', requireAdmin, (req, res) => {
   const paid = Number(store.db.prepare("SELECT COALESCE(SUM(amount_micros),0) AS amount FROM withdrawal_requests WHERE creator_id=? AND status='paid'").get(creator.id).amount);
   const available = Math.max(0, earningsLifetime - Number(store.db.prepare("SELECT COALESCE(SUM(amount_micros),0) AS amount FROM withdrawal_requests WHERE creator_id=? AND status IN ('pending','approved','paid')").get(creator.id).amount));
   const files = store.db.prepare("SELECT id,original_name AS name,size_bytes AS sizeBytes,created_at AS createdAt,'file' AS status FROM creator_files WHERE owner_id=? UNION ALL SELECT id,title AS name,COALESCE(file_size,0) AS sizeBytes,created_at AS createdAt,status FROM videos WHERE owner_id=? AND status <> 'deleted' ORDER BY createdAt DESC LIMIT 12").all(creator.id, creator.id);
+  const payouts = store.db.prepare("SELECT id,amount_micros AS amountMicros,currency,method,status,requested_at AS requestedAt,paid_at AS paidAt FROM withdrawal_requests WHERE creator_id=? ORDER BY requested_at DESC LIMIT 12").all(creator.id);
   const views = { today: viewsFor(`DATE(s.qualified_at) >= ${ranges.today}`), week: viewsFor(`DATE(s.qualified_at) >= ${ranges.week}`), month: viewsFor(`DATE(s.qualified_at) >= ${ranges.month}`), lifetime: lifetimeViews };
   const earningsMicros = { today: earningsFor(`DATE(created_at) >= ${ranges.today}`), yesterday: earningsFor("DATE(created_at)=DATE('now','-1 day')"), week: earningsFor(`DATE(created_at) >= ${ranges.week}`), month: earningsFor(`DATE(created_at) >= ${ranges.month}`), lifetime: earningsLifetime, available, paid };
   const activeUsers = { today: usersFor(`DATE(s.qualified_at) >= ${ranges.today}`), week: usersFor(`DATE(s.qualified_at) >= ${ranges.week}`), month: usersFor(`DATE(s.qualified_at) >= ${ranges.month}`), lifetime: usersFor('1=1') };
   const watchMinutes = Object.fromEntries(Object.entries(views).map(([key, value]) => [key, Math.round(value * minimumSeconds / 60)]));
-  res.json({ creator, metrics: { views, earningsMicros, activeUsers, watchMinutes }, files });
+  res.json({ creator, metrics: { views, earningsMicros, activeUsers, watchMinutes }, files, payouts });
 });
 app.put('/api/admin/creators/:id', requireAdmin, (req, res) => {
   const creator = store.db.prepare("SELECT id,email,status,telegram_user_id AS telegramUserId,created_at AS createdAt FROM users WHERE id=? AND role='creator'").get(req.params.id);
@@ -1061,6 +1062,7 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
     SELECT u.id,u.email,u.created_at AS createdAt,
       (SELECT COUNT(*) FROM videos v WHERE v.owner_id=u.id) AS videos,
       (SELECT COUNT(*) FROM view_sessions s JOIN creator_links l ON l.id=s.link_id WHERE l.creator_id=u.id AND s.counted=1) AS qualifiedViews,
+      (SELECT COALESCE(SUM(e.amount_micros),0) FROM earnings e WHERE e.creator_id=u.id AND DATE(e.created_at)=DATE('now')) AS todayEarningsMicros,
       (SELECT COALESCE(SUM(e.amount_micros),0) FROM earnings e WHERE e.creator_id=u.id) AS earningsMicros
     FROM users u WHERE u.role='creator' ORDER BY u.created_at DESC LIMIT 20
   `).all();
@@ -1296,14 +1298,30 @@ app.put('/api/admin/ads-txt', requireAdmin, (req, res) => {
   res.json({ content, updatedAt });
 });
 app.put('/api/admin/withdrawals/:id', requireAdmin, (req, res) => {
-  const status = String(req.body?.status || '');
-  if (!['approved', 'paid', 'rejected'].includes(status)) return res.status(400).json({ error: 'Invalid withdrawal status' });
-  const current = store.db.prepare('SELECT status FROM withdrawal_requests WHERE id=?').get(req.params.id);
+  const requestedStatus = req.body?.status === undefined ? null : String(req.body.status || '');
+  if (requestedStatus !== null && !['pending', 'approved', 'paid', 'rejected'].includes(requestedStatus)) return res.status(400).json({ error: 'Invalid withdrawal status' });
+  const current = store.db.prepare('SELECT id,creator_id AS creatorId,amount_micros AS amountMicros,method,status,note FROM withdrawal_requests WHERE id=?').get(req.params.id);
   if (!current) return res.status(404).json({ error: 'Withdrawal not found' });
-  const allowed = { pending: ['approved', 'rejected'], approved: ['paid', 'rejected'], paid: [], rejected: [] };
+  const editable = ['pending', 'approved'].includes(current.status);
+  const hasAmount = req.body?.amountMicros !== undefined;
+  const hasMethod = req.body?.method !== undefined;
+  const hasNote = req.body?.note !== undefined;
+  if (!editable && (hasAmount || hasMethod || hasNote)) return res.status(409).json({ error: `Cannot edit a ${current.status} withdrawal` });
+  const status = requestedStatus || current.status;
+  const allowed = { pending: ['pending', 'approved', 'rejected'], approved: ['approved', 'paid', 'rejected'], paid: ['paid'], rejected: ['rejected'] };
   if (!allowed[current.status].includes(status)) return res.status(409).json({ error: `Cannot move withdrawal from ${current.status} to ${status}` });
+  const amountMicros = hasAmount ? Number(req.body.amountMicros) : Number(current.amountMicros);
+  const method = hasMethod ? sanitizeInput(req.body.method) : current.method;
+  const note = hasNote ? sanitizeInput(req.body.note) : current.note;
+  const minimumMicros = Number(process.env.MIN_WITHDRAWAL_USD_MICROS || 10000000);
+  if (editable && (!Number.isSafeInteger(amountMicros) || amountMicros < minimumMicros || !method)) return res.status(400).json({ error: 'Provide a valid payout amount above the configured minimum and payout method' });
+  if (editable && ['pending', 'approved'].includes(status)) {
+    const earned = Number(store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS amount FROM earnings WHERE creator_id=?').get(current.creatorId).amount);
+    const reservedOther = Number(store.db.prepare("SELECT COALESCE(SUM(amount_micros),0) AS amount FROM withdrawal_requests WHERE creator_id=? AND status IN ('pending','approved','paid') AND id<>?").get(current.creatorId, current.id).amount);
+    if (amountMicros > Math.max(0, earned - reservedOther)) return res.status(409).json({ error: 'Withdrawal exceeds the available creator balance', balanceMicros: Math.max(0, earned - reservedOther) });
+  }
   const timestamp = store.now();
-  store.db.prepare('UPDATE withdrawal_requests SET status=?,note=?,reviewed_at=COALESCE(reviewed_at,?),paid_at=? WHERE id=?').run(status, sanitizeInput(req.body?.note), timestamp, status === 'paid' ? timestamp : null, req.params.id);
+  store.db.prepare('UPDATE withdrawal_requests SET amount_micros=?,method=?,status=?,note=?,reviewed_at=CASE WHEN ? IN (\'approved\',\'paid\',\'rejected\') THEN COALESCE(reviewed_at,?) ELSE reviewed_at END,paid_at=CASE WHEN ?=\'paid\' THEN COALESCE(paid_at,?) ELSE NULL END WHERE id=?').run(amountMicros, method, status, note, status, timestamp, status, timestamp, req.params.id);
   res.json({ withdrawal: store.db.prepare('SELECT id,amount_micros AS amountMicros,currency,method,status,note,requested_at AS requestedAt,reviewed_at AS reviewedAt,paid_at AS paidAt FROM withdrawal_requests WHERE id=?').get(req.params.id) });
 });
 app.post('/api/subscriptions/checkout', requireUser, async (req, res) => {
@@ -1520,7 +1538,7 @@ app.post('/upload-file', (req, res, next) => {
     const videoData = await bunny.createVideo(title);
     const videoId = videoData.guid;
     await bunny.uploadVideo(videoId, filePath);
-    store.createVideo({ id: videoId, ownerId: owner?.id, title, contentHash, fileSize, watchUrl: bunny.getWatchUrl(videoId), embedUrl: bunny.getEmbedUrl(videoId) });
+    store.createVideo({ id: videoId, ownerId: owner?.id, title, contentHash, fileSize, status: 'active', watchUrl: bunny.getWatchUrl(videoId), embedUrl: bunny.getEmbedUrl(videoId) });
     releaseCreatorStorageReservation(reservationId);
     reservationId = null;
     const creatorLink = owner ? store.createLink(videoId, owner.id) : null;
@@ -1541,7 +1559,8 @@ app.post('/upload-file', (req, res, next) => {
       watchUrl: bunny.getWatchUrl(videoId),
       embedUrl: bunny.getEmbedUrl(videoId),
       link: creatorLink ? `${DOMAIN_URL}/l/${creatorLink.slug}` : null,
-      message: 'Video uploaded. Processing may take a few minutes.',
+      status: 'active',
+      message: 'Video uploaded and active.',
     });
   } catch (error) {
     console.error('Upload error:', error.message);
@@ -1572,7 +1591,7 @@ app.post('/upload-from-url', async (req, res) => {
     const videoId = videoData.guid;
     await bunny.uploadVideoFromUrl(videoId, safeUrl, TEMP_DIR);
     const owner = uploadOwner(req);
-    store.createVideo({ id: videoId, ownerId: owner?.id, title, watchUrl: bunny.getWatchUrl(videoId), embedUrl: bunny.getEmbedUrl(videoId) });
+    store.createVideo({ id: videoId, ownerId: owner?.id, title, status: 'active', watchUrl: bunny.getWatchUrl(videoId), embedUrl: bunny.getEmbedUrl(videoId) });
     const creatorLink = owner ? store.createLink(videoId, owner.id) : null;
     if (owner && isBotRequest(req)) store.db.prepare('INSERT INTO bot_events (id,user_id,bot_name,event_type,external_id,video_id,status,created_at) VALUES (?,?,?,?,?,?,?,?)').run(store.id(), owner.id, botName, 'url_upload', botExternalId, videoId, 'created', store.now());
     res.json({
@@ -1581,7 +1600,8 @@ app.post('/upload-from-url', async (req, res) => {
       watchUrl: bunny.getWatchUrl(videoId),
       embedUrl: bunny.getEmbedUrl(videoId),
       link: creatorLink ? `${DOMAIN_URL}/l/${creatorLink.slug}` : null,
-      message: 'Video uploaded from URL. Processing may take a few minutes.',
+      status: 'active',
+      message: 'Video uploaded from URL and active.',
     });
   } catch (error) {
     console.error('URL upload error:', error.message);
