@@ -45,7 +45,9 @@ android {
             // Resource shrinking stalls on the current Windows/AGP toolchain;
             // keep R8 code shrinking enabled for the production artifact.
             isShrinkResources = false
-            buildConfigField("String", "BACKEND_URL", "\"${releaseBackendUrl ?: ""}\"")
+            // Keep production APKs usable even when the build runner does not
+            // provide an override. CI can still pass -PBACKEND_URL for staging.
+            buildConfigField("String", "BACKEND_URL", "\"${releaseBackendUrl ?: "https://api.nightbox.in"}\"")
             if (System.getenv("RELEASE_STORE_FILE") != null || providers.gradleProperty("RELEASE_STORE_FILE").isPresent) {
                 signingConfig = signingConfigs.getByName("release")
             }

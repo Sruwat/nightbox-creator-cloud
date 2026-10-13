@@ -1660,14 +1660,64 @@ app.get('/video/:id', async (req, res) => {
         duration: v.length, size: v.storageSize, views: v.views,
         dateUploaded: v.dateUploaded,
           thumbnailUrl: v.thumbnailFileName ? `https://${process.env.BUNNY_CDN_HOST}/${String(process.env.BUNNY_STORAGE_PREFIX || 'nightbox').replace(/^\/+|\/+$/g, '')}/${v.guid}/${v.thumbnailFileName}` : null,
-        embedUrl: bunny.getEmbedUrl(videoId),
-        hlsUrl: bunny.getDirectPlayUrl(videoId),
+        // Local VPS storage must be delivered by this server. Returning the
+        // Bunny URL while VIDEO_STORAGE_DRIVER=local makes clients receive a
+        // 403 from a pull zone that does not contain the local object.
+        embedUrl: BUNNY_LOCAL_STORAGE ? `${PUBLIC_API_URL}/video/${videoId}/stream` : bunny.getEmbedUrl(videoId),
+        hlsUrl: BUNNY_LOCAL_STORAGE ? `${PUBLIC_API_URL}/video/${videoId}/stream` : bunny.getDirectPlayUrl(videoId),
         watchUrl: bunny.getWatchUrl(videoId),
         downloadUrl: `${DOMAIN_URL}/download/${videoId}`,
       },
     });
   } catch (error) {
     res.status(404).json({ error: 'Video not found' });
+  }
+});
+
+// GET /video/:id/stream — range-capable playback for local VPS storage.
+// ExoPlayer and browser video elements both use byte ranges, so sendFile is
+// intentionally used here instead of buffering the whole MP4 in memory.
+app.get('/video/:id/stream', async (req, res) => {
+  const videoId = req.params.id;
+  if (!videoId || !/^[a-f0-9-]+$/i.test(videoId)) {
+    return res.status(400).json({ error: 'Invalid video ID' });
+  }
+
+  if (BUNNY_LOCAL_STORAGE) {
+    const localPath = bunny.getLocalPath(videoId);
+    if (!localPath || !fs.existsSync(localPath)) return res.status(404).json({ error: 'Video not found' });
+    res.setHeader('Content-Type', 'video/mp4');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    return res.sendFile(localPath, { acceptRanges: true, cacheControl: false }, (error) => {
+      if (error && !res.headersSent) res.status(error.statusCode || 500).json({ error: 'Video stream unavailable' });
+    });
+  }
+
+  try {
+    const upstream = await axios.get(bunny.getDirectPlayUrl(videoId), {
+      responseType: 'stream',
+      timeout: 30000,
+      headers: req.headers.range ? { Range: req.headers.range } : {},
+      validateStatus: (status) => status >= 200 && status < 500,
+    });
+    if (upstream.status !== 200 && upstream.status !== 206) {
+      upstream.data.destroy();
+      return res.status(upstream.status === 404 ? 404 : 502).json({ error: 'Video stream unavailable' });
+    }
+    if (upstream.status === 206) res.status(206);
+    res.setHeader('Content-Type', upstream.headers['content-type'] || 'video/mp4');
+    res.setHeader('Accept-Ranges', 'bytes');
+    if (upstream.headers['content-range']) res.setHeader('Content-Range', upstream.headers['content-range']);
+    if (upstream.headers['content-length']) res.setHeader('Content-Length', upstream.headers['content-length']);
+    upstream.data.on('error', (error) => {
+      console.error('[Video stream] Upstream failed:', error.message);
+      if (!res.headersSent) res.status(502).end(); else res.destroy(error);
+    });
+    return upstream.data.pipe(res);
+  } catch (error) {
+    console.error('[Video stream] Failed:', error.message);
+    return res.status(502).json({ error: 'Video stream unavailable' });
   }
 });
 

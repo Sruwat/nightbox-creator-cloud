@@ -265,7 +265,8 @@ class VideoPlayerActivity : AppCompatActivity() {
             // Local files always use ExoPlayer
             initExoPlayerLocal()
         } else {
-            // Bunny.net streams — try ExoPlayer HLS first
+            // The API returns a range-capable MP4 stream for local VPS storage
+            // and the Bunny CDN URL when the Bunny driver is enabled.
             initExoPlayerHls()
         }
     }
@@ -339,7 +340,7 @@ class VideoPlayerActivity : AppCompatActivity() {
         player?.prepare()
         player?.playWhenReady = true
 
-        // Listen for errors — if HLS fails, fallback to WebView embed
+        // Listen for errors — if native playback fails, fallback to WebView.
         player?.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) qualifyAfterFiveSeconds()
@@ -364,8 +365,8 @@ class VideoPlayerActivity : AppCompatActivity() {
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                Log.e(TAG, "ExoPlayer HLS failed: ${error.message}, falling back to WebView")
-                // ExoPlayer HLS failed — fallback to WebView iframe embed
+                Log.e(TAG, "ExoPlayer playback failed: ${error.message}, falling back to WebView")
+                // Native playback failed — fallback to the same range-capable stream.
                 releasePlayer()
                 fallbackToWebView()
             }
