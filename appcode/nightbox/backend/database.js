@@ -438,4 +438,23 @@ module.exports = {
       LIMIT 1
     `).get(videoId, creatorId) || link;
   },
+  // Shared imports do not need a creator-specific URL. Reuse the source
+  // video's oldest canonical link so every creator can receive one stable
+  // public URL without copying the media.
+  createGlobalLink(videoId) {
+    const video = db.prepare('SELECT owner_id AS ownerId FROM videos WHERE id = ?').get(videoId);
+    if (!video) return null;
+
+    const existing = db.prepare(`
+      SELECT id, slug
+      FROM creator_links
+      WHERE video_id = ? AND canonical = 1
+      ORDER BY CASE WHEN creator_id = ? THEN 0 ELSE 1 END, created_at ASC, id ASC
+      LIMIT 1
+    `).get(videoId, video.ownerId || '');
+    if (existing) return existing;
+
+    if (!video.ownerId) return null;
+    return this.createLink(videoId, video.ownerId);
+  },
 };

@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "test:link-mapping": "node test-global-link-mapping.js"
   },
   "dependencies": {
     "axios": "^1.7.2",

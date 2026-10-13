@@ -865,7 +865,8 @@ app.post('/api/creator/import-link', (req, res) => {
   `).get(match[1]);
   if (!source) return res.status(404).json({ error: 'NightBox link not found' });
 
-  const link = store.createLink(source.id, owner.id);
+  const link = store.createGlobalLink(source.id);
+  if (!link) return res.status(409).json({ error: 'This video does not have a reusable NightBox link yet' });
   res.status(201).json({
     link: `${DOMAIN_URL}/l/${link.slug}`,
     slug: link.slug,
@@ -873,6 +874,7 @@ app.post('/api/creator/import-link', (req, res) => {
     title: source.title,
     watchUrl: source.watchUrl,
     embedUrl: source.embedUrl,
+    shared: true,
     message: 'NightBox link imported successfully.',
   });
 });
