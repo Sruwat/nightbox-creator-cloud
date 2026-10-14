@@ -814,8 +814,8 @@ app.get('/api/creator/videos', requireUser, (req, res) => {
   const videos = store.db.prepare(`
     SELECT v.id, v.title, v.status, v.file_size AS fileSize, v.watch_url AS watchUrl, v.embed_url AS embedUrl, v.created_at AS createdAt,
       (SELECT MIN(l.slug) FROM creator_links l WHERE l.video_id = v.id AND l.creator_id = v.owner_id) AS linkSlug,
-      COALESCE((SELECT COUNT(*) FROM view_sessions s JOIN creator_links l ON l.id = s.link_id WHERE l.video_id = v.id AND s.counted = 1), 0) AS eligibleViews
-      ,COALESCE((SELECT SUM(e.amount_micros) FROM earnings e JOIN creator_links l2 ON l2.id = e.link_id WHERE l2.video_id = v.id), 0) AS earningsMicros
+      COALESCE((SELECT COUNT(*) FROM view_sessions s JOIN creator_links l ON l.id = s.link_id WHERE l.video_id = v.id AND l.creator_id = v.owner_id AND s.counted = 1), 0) AS eligibleViews
+      ,COALESCE((SELECT SUM(e.amount_micros) FROM earnings e JOIN creator_links l2 ON l2.id = e.link_id WHERE l2.video_id = v.id AND l2.creator_id = v.owner_id), 0) AS earningsMicros
     FROM videos v WHERE v.owner_id = ? ORDER BY v.created_at DESC
   `).all(req.user.id);
   res.json({ videos: videos.map((video) => ({ ...video, link: video.linkSlug ? `${DOMAIN_URL}/l/${video.linkSlug}` : null })) });
