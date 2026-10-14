@@ -865,7 +865,11 @@ app.post('/api/creator/import-link', (req, res) => {
   `).get(match[1]);
   if (!source) return res.status(404).json({ error: 'NightBox link not found' });
 
-  const link = store.createGlobalLink(source.id);
+  // Reuse the existing video/media row, but keep a canonical earning link
+  // for the authenticated creator. A global link belongs to its original
+  // owner, so using it here would hide qualified views from the importing
+  // creator's dashboard and ledger.
+  const link = store.createLink(source.id, owner.id);
   if (!link) return res.status(409).json({ error: 'This video does not have a reusable NightBox link yet' });
   res.status(201).json({
     link: `${DOMAIN_URL}/l/${link.slug}`,
@@ -875,7 +879,7 @@ app.post('/api/creator/import-link', (req, res) => {
     watchUrl: source.watchUrl,
     embedUrl: source.embedUrl,
     shared: true,
-    message: 'NightBox link imported successfully.',
+    message: 'NightBox link imported successfully. Media reused; creator view tracking is linked to this account.',
   });
 });
 
@@ -937,7 +941,11 @@ app.get('/api/creator/analytics', requireUser, (req, res) => {
   const summary = store.db.prepare(`SELECT COUNT(s.id) AS views, COALESCE(SUM(e.amount_micros),0) AS earningsMicros FROM view_sessions s JOIN creator_links l ON l.id=s.link_id LEFT JOIN earnings e ON e.view_id=s.id WHERE l.creator_id = ? AND s.counted = 1`).get(req.user.id);
   const countries = store.db.prepare(`SELECT s.country, COUNT(s.id) AS views, COALESCE(SUM(e.amount_micros),0) AS earningsMicros, COALESCE(MAX(e.cpm_cents),0) AS cpmCents FROM view_sessions s JOIN creator_links l ON l.id=s.link_id LEFT JOIN earnings e ON e.view_id=s.id WHERE l.creator_id = ? AND s.counted = 1 GROUP BY s.country ORDER BY views DESC`).all(req.user.id);
   const rates = store.db.prepare(`SELECT country,cpm_cents AS cpmCents FROM cpm_rates ORDER BY CASE WHEN country='ZZ' THEN 1 ELSE 0 END,country`).all();
-  res.json({ summary, countries, rates });
+  res.json({
+    summary: { views: Number(summary?.views || 0), earningsMicros: Number(summary?.earningsMicros || 0) },
+    countries: countries.map((row) => ({ ...row, views: Number(row.views || 0), earningsMicros: Number(row.earningsMicros || 0), cpmCents: Number(row.cpmCents || 0) })),
+    rates,
+  });
 });
 
 app.get('/api/creator/overview', requireUser, (req, res) => {
@@ -952,7 +960,7 @@ app.get('/api/creator/overview', requireUser, (req, res) => {
     GROUP BY DATE(s.qualified_at)
     ORDER BY DATE(s.qualified_at) ASC
   `).all(req.user.id);
-  res.json({ dailyActivity });
+  res.json({ dailyActivity: dailyActivity.map((row) => ({ ...row, views: Number(row.views || 0), earningsMicros: Number(row.earningsMicros || 0) })) });
 });
 
 app.get('/api/cpm', (_req, res) => {

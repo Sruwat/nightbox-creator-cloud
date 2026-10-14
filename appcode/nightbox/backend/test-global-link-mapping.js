@@ -10,12 +10,16 @@ const store = require('./database');
 
 try {
   const creatorA = 'creator-a';
+  const creatorB = 'creator-b';
   const videoId = 'video-global-link-test';
   const createdAt = store.now();
 
   store.db.prepare(
     "INSERT INTO users (id,email,role,status,created_at) VALUES (?,?,?,?,?)",
   ).run(creatorA, 'creator-a@example.test', 'creator', 'active', createdAt);
+  store.db.prepare(
+    "INSERT INTO users (id,email,role,status,created_at) VALUES (?,?,?,?,?)",
+  ).run(creatorB, 'creator-b@example.test', 'creator', 'active', createdAt);
   store.db.prepare(
     "INSERT INTO videos (id,owner_id,title,watch_url,embed_url,status,created_at) VALUES (?,?,?,?,?,?,?)",
   ).run(videoId, creatorA, 'Test video', 'https://watch.test/video', 'https://embed.test/video', 'active', createdAt);
@@ -35,6 +39,18 @@ try {
     store.db.prepare('SELECT COUNT(*) AS count FROM creator_links WHERE video_id = ?').get(videoId).count,
     1,
     'global import must not create another link row',
+  );
+  const creatorBLink = store.createLink(videoId, creatorB);
+  assert.notEqual(creatorBLink.slug, original.slug, 'each creator needs an independent earning link');
+  assert.equal(
+    store.db.prepare('SELECT COUNT(*) AS count FROM videos WHERE id = ?').get(videoId).count,
+    1,
+    'creator-specific mapping must still reuse the same media row',
+  );
+  assert.equal(
+    store.db.prepare('SELECT COUNT(*) AS count FROM creator_links WHERE video_id = ?').get(videoId).count,
+    2,
+    'creator-specific mapping should add only the earning link row',
   );
   console.log('global link mapping test: ok');
 } finally {
