@@ -188,7 +188,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Watch button click — navigate to FileInfoActivity
+        // Watch button click — resolve and play NightBox links immediately.
         btnWatch.setOnClickListener {
             val input = etPasteLink.text.toString().trim()
             if (input.isEmpty()) {
@@ -201,7 +201,7 @@ class MainActivity : AppCompatActivity() {
             if (shareSlug != null && !isWatchPath(input)) {
                 resolveShareLink(shareSlug)
             } else if (videoId != null) {
-                openFileInfo(videoId, shareSlug)
+                openVideoPlayer(videoId, shareSlug)
             } else {
                 Toast.makeText(this, getString(R.string.error_invalid_link), Toast.LENGTH_LONG).show()
             }
@@ -274,7 +274,7 @@ class MainActivity : AppCompatActivity() {
                 intent.data = null
                 intent.action = null
                 setIntent(Intent())
-                openFileInfo(videoId, data.getQueryParameter("link"))
+                openVideoPlayer(videoId, data.getQueryParameter("link"))
             } else if (pathSegments.size >= 2 && pathSegments[0] == "l") {
                 val slug = pathSegments[1]
                 deepLinkProcessed = true
@@ -297,7 +297,7 @@ class MainActivity : AppCompatActivity() {
                 if (!response.isSuccessful) throw IllegalStateException("Share link not found")
                 val link = JSONObject(response.body?.string().orEmpty()).getJSONObject("link")
                 val videoId = link.getString("videoId")
-                withContext(Dispatchers.Main) { openFileInfo(videoId, slug) }
+                withContext(Dispatchers.Main) { openVideoPlayer(videoId, slug) }
             } catch (_: Exception) {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@MainActivity, "This NightBox link is not available", Toast.LENGTH_LONG).show()
@@ -361,6 +361,20 @@ class MainActivity : AppCompatActivity() {
         val intent = Intent(this, FileInfoActivity::class.java)
         intent.putExtra("video_id", videoId)
         linkSlug?.let { intent.putExtra("link_slug", it) }
+        intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        startActivity(intent)
+    }
+
+    /**
+     * External share links should open the player directly. The old flow
+     * opened FileInfoActivity first, fetched metadata twice, and enforced a
+     * seven-second gate before playback could begin.
+     */
+    private fun openVideoPlayer(videoId: String, linkSlug: String? = null) {
+        val intent = Intent(this, VideoPlayerActivity::class.java)
+        intent.putExtra("video_id", videoId)
+        linkSlug?.let { intent.putExtra("link_slug", it) }
+        intent.putExtra("show_vast_ad", false)
         intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
         startActivity(intent)
     }
