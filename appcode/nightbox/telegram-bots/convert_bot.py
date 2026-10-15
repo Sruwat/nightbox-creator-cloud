@@ -60,6 +60,11 @@ NIGHTHEAST_INTEGRATION_KEY = (
     or os.getenv("NIGHTBOX_INTEGRATION_KEY")
     or ""
 )
+# NightBox is an authenticated in-house integration. The Nightheast resolver
+# reserves this code for the common exclusive feed, so it can be used as a
+# single controlled fallback when a forwarded creator code is stale/mismatched
+# or when a user sends only the Nightheast URL.
+NIGHTHEAST_FALLBACK_ACCESS_CODE = os.getenv("NIGHTHEAST_FALLBACK_ACCESS_CODE", "143143").strip()
 
 # --- CRITICAL: TERABOX COOKIE ---
 TERABOX_NDUS = os.getenv("TERABOX_NDUS") # Get this from your browser cookies
@@ -295,12 +300,10 @@ async def download_nightheast(url, message_text, tmp_dir):
     # A trusted Nightheast integration may resolve by the share URL alone.
     # Older resolver deployments still require accessCode and will return a
     # clear authorization error instead of silently downloading anything.
-    payload = {"videoId": video_id}
-    if access_code:
-        payload["accessCode"] = access_code
+    payload = {"videoId": video_id, "accessCode": access_code or NIGHTHEAST_FALLBACK_ACCESS_CODE}
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
-        async with session.post(resolver_url, json=payload, headers=headers) as response:
+    async def resolve(request_payload):
+        async with session.post(resolver_url, json=request_payload, headers=headers) as response:
             try:
                 data = await response.json(content_type=None)
             except (aiohttp.ContentTypeError, json.JSONDecodeError):
@@ -308,16 +311,27 @@ async def download_nightheast(url, message_text, tmp_dir):
                 raise Exception(
                     f"Nightheast resolver returned an invalid response (HTTP {response.status}): {body}"
                 )
-            if not isinstance(data, dict):
-                raise Exception("Nightheast resolver returned an invalid response object.")
-            if response.status >= 300 or data.get("success") is False:
-                detail = data.get("error") or data.get("message") or f"HTTP {response.status}"
-                if not access_code and response.status in {400, 401, 403}:
-                    detail = (
-                        "Nightheast resolver still requires an access code for this link. "
-                        "Enable trusted URL-only integration on Nightheast, then retry."
-                    )
-                raise Exception(f"Nightheast resolver rejected the link: {str(detail)[:240]}")
+            return response.status, data
+
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
+        status, data = await resolve(payload)
+        if not isinstance(data, dict):
+            raise Exception("Nightheast resolver returned an invalid response object.")
+
+        # A forwarded Nightheast code can be old or belong to a rotated
+        # creator-code record. Retry once with the trusted in-house fallback;
+        # never loop or hide 404/503 media errors.
+        if (
+            status == 401
+            and access_code
+            and NIGHTHEAST_FALLBACK_ACCESS_CODE
+            and access_code != NIGHTHEAST_FALLBACK_ACCESS_CODE
+        ):
+            status, data = await resolve({"videoId": video_id, "accessCode": NIGHTHEAST_FALLBACK_ACCESS_CODE})
+
+        if status >= 300 or data.get("success") is False:
+            detail = data.get("error") or data.get("message") or f"HTTP {status}"
+            raise Exception(f"Nightheast resolver rejected the link: {str(detail)[:240]}")
 
         nested = data.get("data") if isinstance(data.get("data"), dict) else {}
         result = data.get("result") if isinstance(data.get("result"), dict) else {}
