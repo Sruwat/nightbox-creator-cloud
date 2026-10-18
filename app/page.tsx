@@ -179,10 +179,12 @@ function LiveBots({token,toast}:{token:string;toast:(s:string)=>void}){
   const [newKey,setNewKey]=useState("");
   const [copiedKey,setCopiedKey]=useState<string|null>(null);
   const bots=[
-    {name:"Connection bot",handle:"nightbox_connbot",description:"Link this Telegram chat to your creator account."},
-    {name:"Upload bot",handle:"nightbox_uploadbot",description:"Send supported video or document uploads."},
-    {name:"TeraBox converter",handle:"tb_to_nb_bot",description:"Submit a supported TeraBox video link."},
-    {name:"NightBox converter",handle:"dw_to_nb_bot",description:"Submit a supported video link."},
+    {name:"Nightbox connection",handle:"nightbox_connbot",description:"Link this Telegram chat to your creator account.",comingSoon:false},
+    {name:"Nightbox Files upload bot",handle:"nightbox_uploadbot",description:"Send supported video or document uploads.",comingSoon:false},
+    {name:"NIghtheast to nightbox converter",handle:"nh_to_nb_bot",description:"Submit a supported Nightheast video link.",comingSoon:true},
+    {name:"Nightbox to Nightbox",handle:"nb_to_nbbot",description:"Submit a supported video link.",comingSoon:true},
+    {name:"TB to Nightbox converter",handle:"tb_to_nb_bot",description:"Submit a supported TeraBox video link.",comingSoon:false},
+    {name:"DW to Nightbox converter",handle:"dw_to_nb_bot",description:"Submit a supported Diskwala video link.",comingSoon:false},
   ];
   const load=()=>getCreatorApiKeys(token).then(x=>setKeys(x.keys)).catch(()=>setKeys([]));
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -197,7 +199,7 @@ function LiveBots({token,toast}:{token:string;toast:(s:string)=>void}){
     <section className="telegram-bot-grid" aria-label="NightBox Telegram bots">
       {bots.map(bot=><article className="telegram-bot-card" key={bot.handle}>
         <div><span>TELEGRAM BOT</span><h2>{bot.name}</h2><p>@{bot.handle}</p><small>{bot.description}</small></div>
-        <a className="btn btn-dark" href={`https://t.me/${bot.handle}`} target="_blank" rel="noreferrer">Open in Telegram ↗</a>
+        {bot.comingSoon?<button className="btn btn-dark btn-coming-soon" type="button" disabled aria-disabled="true" title="This bot will be available soon">Coming soon</button>:<a className="btn btn-dark" href={`https://t.me/${bot.handle}`} target="_blank" rel="noreferrer">Open in Telegram ↗</a>}
       </article>)}
     </section>
     <div className="card bot-connect-help"><span className="bot-help-kicker">QUICK SETUP</span><h2>Connect NightBox to Telegram</h2><p><b>1.</b> Create an API key and open the Connection bot.</p><p><b>2.</b> Send <code>/connect YOUR_API_KEY</code>.</p><p><b>3.</b> Open an upload or converter bot and send <code>/start</code>.</p><small>Keep your API key private. It gives Telegram access to your creator workspace.</small></div>

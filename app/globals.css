@@ -294,6 +294,8 @@
 .telegram-bot-card p{margin:0;color:var(--blue);font-size:12px}
 .telegram-bot-card small{display:block;margin-top:10px;color:#8994a4;font-size:11px;line-height:1.5}
 .telegram-bot-card .btn{align-self:flex-start;text-decoration:none}
+.telegram-bot-card .btn-coming-soon{cursor:not-allowed;opacity:.62;filter:none}
+.telegram-bot-card .btn-coming-soon:hover{transform:none;filter:none}
 .api-key-created{position:relative;display:grid;gap:14px;margin:-8px 0 16px;padding:22px 24px;background:linear-gradient(135deg,#07152f,#123f85);border:1px solid #2f66b9;color:#fff;overflow:hidden}
 .api-key-created:after{content:"KEY";position:absolute;right:18px;top:5px;font-size:68px;font-weight:900;letter-spacing:-5px;color:#ffffff0b;pointer-events:none}
 .api-key-created>div:first-child{position:relative;z-index:1}
