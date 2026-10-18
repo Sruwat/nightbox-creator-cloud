@@ -890,7 +890,7 @@ app.get('/api/links/:slug', (req, res) => {
 });
 
 app.post('/api/links/:slug/view/start', async (req, res) => {
-  const link = store.db.prepare('SELECT id FROM creator_links WHERE slug = ?').get(req.params.slug);
+  const link = store.db.prepare('SELECT id, creator_id AS creatorId FROM creator_links WHERE slug = ?').get(req.params.slug);
   if (!link) return res.status(404).json({ error: 'Link not found' });
   if (await viewerIsBlocked(req)) return res.status(403).json({ error: 'Viewer did not pass traffic quality checks' });
   const ip = requestIp(req);
@@ -914,45 +914,33 @@ app.post('/api/views/:id/qualify', (req, res) => {
   const elapsed = (Date.now() - Date.parse(session.started_at)) / 1000;
   if (elapsed < rules.minimum_watch_seconds) return res.status(400).json({ error: `Watch at least ${rules.minimum_watch_seconds} seconds` });
   const ipRule = store.db.prepare('SELECT max_views_per_ip_24h AS maxViews FROM view_rules WHERE id=1').get();
-  const recent = store.db.prepare("SELECT COUNT(*) AS count FROM view_sessions WHERE link_id = ? AND ip_hash = ? AND started_at >= datetime('now', '-24 hours') AND counted = 1").get(session.link_id, session.ip_hash);
-  if (recent.count >= ipRule.maxViews) {
-    store.db.prepare('UPDATE view_sessions SET qualified_at = ?, counted = 0 WHERE id = ?').run(store.now(), session.id);
-    return res.json({ counted: false, duplicate: true });
-  }
-  // A creator-specific link must not allow the same viewer to earn repeatedly
-  // for the same underlying video through another creator's link. The viewer
-  // hash is privacy-preserving and combines the request IP, user agent, and a
-  // server-side secret; the video id is shared by creator-specific links.
-  const duplicateViewerVideo = store.db.prepare(`
+  const link = store.db.prepare('SELECT creator_id AS creatorId FROM creator_links WHERE id = ?').get(session.link_id);
+  if (!link) return res.status(404).json({ error: 'Link not found' });
+  const recent = store.db.prepare(`
     SELECT COUNT(*) AS count
     FROM view_sessions existing
     JOIN creator_links existingLink ON existingLink.id = existing.link_id
-    WHERE existingLink.video_id = ?
-      AND existing.viewer_hash = ?
+    WHERE existingLink.creator_id = ?
+      AND existing.ip_hash = ?
+      AND existing.started_at >= datetime('now', '-24 hours')
       AND existing.counted = 1
-      AND existing.id <> ?
-  `).get(
-    store.db.prepare('SELECT video_id FROM creator_links WHERE id = ?').get(session.link_id).video_id,
-    session.viewer_hash,
-    session.id,
-  );
-  if (duplicateViewerVideo.count > 0) {
+  `).get(link.creatorId, session.ip_hash);
+  if (recent.count >= ipRule.maxViews) {
     store.db.prepare('UPDATE view_sessions SET qualified_at = ?, counted = 0 WHERE id = ?').run(store.now(), session.id);
-    return res.json({ counted: false, duplicate: true, reason: 'viewer_video_already_counted' });
+    return res.json({ counted: false, duplicate: true });
   }
   const bucket = parseInt(store.hash(session.id).slice(0, 8), 16) % 100;
   if (bucket >= rules.eligible_percent) {
     store.db.prepare('UPDATE view_sessions SET qualified_at = ?, counted = 0 WHERE id = ?').run(store.now(), session.id);
     return res.json({ counted: false, filtered: true });
   }
-  const link = store.db.prepare('SELECT creator_id FROM creator_links WHERE id = ?').get(session.link_id);
   const rate = store.db.prepare('SELECT cpm_cents FROM cpm_rates WHERE country = ?').get(session.country) || store.db.prepare("SELECT cpm_cents FROM cpm_rates WHERE country = 'ZZ'").get();
   const cpmCents = rate?.cpm_cents || 0;
   const amountMicros = cpmCents * 10;
   store.db.exec('BEGIN');
   try {
     store.db.prepare('UPDATE view_sessions SET qualified_at = ?, counted = 1 WHERE id = ?').run(store.now(), session.id);
-    if (amountMicros > 0) store.db.prepare('INSERT INTO earnings (id,creator_id,link_id,view_id,country,cpm_cents,amount_micros,created_at) VALUES (?,?,?,?,?,?,?,?)').run(store.id(), link.creator_id, session.link_id, session.id, session.country, cpmCents, amountMicros, store.now());
+    if (amountMicros > 0) store.db.prepare('INSERT INTO earnings (id,creator_id,link_id,view_id,country,cpm_cents,amount_micros,created_at) VALUES (?,?,?,?,?,?,?,?)').run(store.id(), link.creatorId, session.link_id, session.id, session.country, cpmCents, amountMicros, store.now());
     store.db.exec('COMMIT');
   } catch (error) { store.db.exec('ROLLBACK'); throw error; }
   res.json({ counted: true, country: session.country, cpmCents, amountMicros });
