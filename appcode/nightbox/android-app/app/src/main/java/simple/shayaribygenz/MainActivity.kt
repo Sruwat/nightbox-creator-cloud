@@ -21,7 +21,6 @@ import com.google.android.gms.ads.AdSize
 import com.google.android.gms.ads.AdView
 import com.google.android.gms.ads.MobileAds
 import android.app.Dialog
-import android.app.AlertDialog
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.text.SpannableString
@@ -41,7 +40,6 @@ import com.google.android.play.core.install.model.AppUpdateType
 import com.google.android.play.core.install.model.UpdateAvailability
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import java.io.File
-import java.util.Locale
 import org.json.JSONObject
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
@@ -49,8 +47,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.MediaType.Companion.toMediaType
 
 class MainActivity : AppCompatActivity() {
 
@@ -63,7 +59,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnSettings: ImageView
     private lateinit var prefs: SharedPreferences
     private var nativeAd: NativeAd? = null
-    private var allAdsRemoved = false
     private var deepLinkProcessed = false
     private val apiClient = OkHttpClient()
     private lateinit var feedAdapter: FeedAdapter
@@ -77,13 +72,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvFeedEmpty: TextView
     private lateinit var navHome: LinearLayout
     private lateinit var navFeed: LinearLayout
-    private lateinit var navSubscription: LinearLayout
     private lateinit var ivNavHome: ImageView
     private lateinit var ivNavFeed: ImageView
     private lateinit var tvNavHome: TextView
     private lateinit var tvNavFeed: TextView
-    private lateinit var ivNavSubscription: ImageView
-    private lateinit var tvNavSubscription: TextView
 
     companion object {
         private const val PREFS_NAME = "nightbox_prefs"
@@ -122,13 +114,10 @@ class MainActivity : AppCompatActivity() {
         tvFeedEmpty = findViewById(R.id.tvFeedEmpty)
         navHome = findViewById(R.id.navHome)
         navFeed = findViewById(R.id.navFeed)
-        navSubscription = findViewById(R.id.navSubscription)
         ivNavHome = findViewById(R.id.ivNavHome)
         ivNavFeed = findViewById(R.id.ivNavFeed)
-        ivNavSubscription = findViewById(R.id.ivNavSubscription)
         tvNavHome = findViewById(R.id.tvNavHome)
         tvNavFeed = findViewById(R.id.tvNavFeed)
-        tvNavSubscription = findViewById(R.id.tvNavSubscription)
 
         // Feed content is loaded from the connected backend, not bundled demo links.
         feedAdapter = FeedAdapter(emptyList())
@@ -138,7 +127,6 @@ class MainActivity : AppCompatActivity() {
         // Set Navigation Listeners
         navHome.setOnClickListener { showHome() }
         navFeed.setOnClickListener { showFeed() }
-        navSubscription.setOnClickListener { showSubscriptionDialog() }
 
         // Check for first launch
         if (prefs.getBoolean("first_launch", true)) {
@@ -146,7 +134,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Load banner ad — wait for AdMob SDK init to complete first
-        refreshPremiumAndLoadBanner()
+        loadAds()
 
 
         // Settings Bottom Sheet
@@ -236,7 +224,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         SecurityUtil.checkVpn(this)
-        refreshPremiumAndLoadBanner()
+        loadAds()
         
         // Resume update if it was already in progress
         appUpdateManager.appUpdateInfo.addOnSuccessListener { appUpdateInfo ->
@@ -274,7 +262,7 @@ class MainActivity : AppCompatActivity() {
                 intent.data = null
                 intent.action = null
                 setIntent(Intent())
-                openVideoPlayer(videoId, data.getQueryParameter("link"))
+                openFileInfo(videoId, data.getQueryParameter("link"))
             } else if (pathSegments.size >= 2 && pathSegments[0] == "l") {
                 val slug = pathSegments[1]
                 deepLinkProcessed = true
@@ -297,7 +285,7 @@ class MainActivity : AppCompatActivity() {
                 if (!response.isSuccessful) throw IllegalStateException("Share link not found")
                 val link = JSONObject(response.body?.string().orEmpty()).getJSONObject("link")
                 val videoId = link.getString("videoId")
-                withContext(Dispatchers.Main) { openVideoPlayer(videoId, slug) }
+                withContext(Dispatchers.Main) { openFileInfo(videoId, slug) }
             } catch (_: Exception) {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@MainActivity, "This NightBox link is not available", Toast.LENGTH_LONG).show()
@@ -437,10 +425,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadBannerAdWhenReady() {
-        if (allAdsRemoved) {
-            adBannerContainer.visibility = View.GONE
-            return
-        }
         if (NightBoxApp.adsInitialized) {
             loadBannerAd()
         } else {
@@ -452,7 +436,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadBannerAd() {
-        if (allAdsRemoved) return
         val adView = AdView(this)
         
         // Calculate adaptive banner size
@@ -558,80 +541,12 @@ class MainActivity : AppCompatActivity() {
             bottomSheet.dismiss()
         }
 
-        view.findViewById<LinearLayout>(R.id.btnAccount).setOnClickListener {
-            bottomSheet.dismiss()
-            showAccountDialog()
-        }
-
         bottomSheet.show()
     }
 
-    private fun refreshPremiumAndLoadBanner() {
-        lifecycleScope.launch {
-            allAdsRemoved = PremiumAccess.entitlement(this@MainActivity).allAdsRemoved
-            if (allAdsRemoved) {
-                adBannerContainer.removeAllViews()
-                adBannerContainer.visibility = View.GONE
-            } else {
-                adBannerContainer.visibility = View.VISIBLE
-                loadBannerAdWhenReady()
-            }
-        }
-    }
-
-    private fun showAccountDialog() {
-        val form = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(48, 8, 48, 0)
-        }
-        val email = EditText(this).apply {
-            hint = "Email address"
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
-        }
-        val password = EditText(this).apply {
-            hint = "Password"
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-        }
-        form.addView(email)
-        form.addView(password)
-        val dialog = android.app.AlertDialog.Builder(this)
-            .setTitle("Sync account & Premium")
-            .setMessage("Sign in to apply your server-verified Premium benefits in the app.")
-            .setView(form)
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Sign in", null)
-            .create()
-        dialog.setOnShowListener {
-            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val address = email.text.toString().trim()
-                val secret = password.text.toString()
-                if (address.isBlank() || secret.isBlank()) {
-                    Toast.makeText(this, "Enter your email and password", Toast.LENGTH_SHORT).show()
-                    return@setOnClickListener
-                }
-                lifecycleScope.launch(Dispatchers.IO) {
-                    try {
-                        val body = org.json.JSONObject().put("email", address).put("password", secret).toString()
-                            .toRequestBody("application/json".toMediaType())
-                        val request = Request.Builder().url("${BuildConfig.BACKEND_URL}/api/auth/login").post(body).build()
-                        apiClient.newCall(request).execute().use { response ->
-                            if (!response.isSuccessful) throw IllegalStateException("Sign in failed")
-                            val token = org.json.JSONObject(response.body?.string().orEmpty()).optString("token")
-                            if (token.isBlank()) throw IllegalStateException("No account token returned")
-                            PremiumAccess.saveToken(this@MainActivity, token)
-                        }
-                        withContext(Dispatchers.Main) {
-                            dialog.dismiss()
-                            refreshPremiumAndLoadBanner()
-                            Toast.makeText(this@MainActivity, "Account synced with NightBox", Toast.LENGTH_SHORT).show()
-                        }
-                    } catch (_: Exception) {
-                        withContext(Dispatchers.Main) { Toast.makeText(this@MainActivity, "Unable to sign in", Toast.LENGTH_SHORT).show() }
-                    }
-                }
-            }
-        }
-        dialog.show()
+    private fun loadAds() {
+        adBannerContainer.visibility = View.VISIBLE
+        loadBannerAdWhenReady()
     }
 
     private fun openWebLink(url: String) {
@@ -736,9 +651,6 @@ class MainActivity : AppCompatActivity() {
         ivNavFeed.setColorFilter(getColor(R.color.text_secondary_dark))
         tvNavFeed.setTextColor(getColor(R.color.text_secondary_dark))
         tvNavFeed.setTypeface(null, android.graphics.Typeface.NORMAL)
-        ivNavSubscription.setColorFilter(getColor(R.color.text_secondary_dark))
-        tvNavSubscription.setTextColor(getColor(R.color.text_secondary_dark))
-        tvNavSubscription.setTypeface(null, android.graphics.Typeface.NORMAL)
     }
 
     private fun showFeed() {
@@ -753,51 +665,8 @@ class MainActivity : AppCompatActivity() {
         ivNavHome.setColorFilter(getColor(R.color.text_secondary_dark))
         tvNavHome.setTextColor(getColor(R.color.text_secondary_dark))
         tvNavHome.setTypeface(null, android.graphics.Typeface.NORMAL)
-        ivNavSubscription.setColorFilter(getColor(R.color.text_secondary_dark))
-        tvNavSubscription.setTextColor(getColor(R.color.text_secondary_dark))
-        tvNavSubscription.setTypeface(null, android.graphics.Typeface.NORMAL)
-    }
-
-    private fun showSubscriptionDialog() {
-        ivNavSubscription.setColorFilter(getColor(R.color.accent_violet))
-        tvNavSubscription.setTextColor(getColor(R.color.accent_violet))
-        tvNavSubscription.setTypeface(null, android.graphics.Typeface.BOLD)
-        lifecycleScope.launch {
-            val plans = withContext(Dispatchers.IO) {
-                runCatching {
-                    val request = Request.Builder().url("${BuildConfig.BACKEND_URL}/api/plans").get().build()
-                    apiClient.newCall(request).execute().use { response ->
-                        if (!response.isSuccessful) return@runCatching emptyList<String>()
-                        val array = JSONObject(response.body?.string().orEmpty()).optJSONArray("plans")
-                            ?: return@runCatching emptyList()
-                        (0 until array.length()).mapNotNull { index ->
-                            val plan = array.optJSONObject(index) ?: return@mapNotNull null
-                            val name = plan.optString("name").takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                            val price = plan.optInt("price_minor") / 100.0
-                            "$name - ${plan.optString("currency", "INR")} ${"%.2f".format(Locale.US, price)}"
-                        }
-                    }
-                }.getOrDefault(emptyList())
-            }
-            val message = if (plans.isEmpty()) {
-                "Subscription plans are currently unavailable. Please try again later."
-            } else {
-                "Choose a plan from the NightBox website to activate Premium benefits:\n\n${plans.joinToString("\n")}"
-            }
-            AlertDialog.Builder(this@MainActivity)
-                .setTitle("NightBox Premium")
-                .setMessage(message)
-                .setNegativeButton("Close", null)
-                .setPositiveButton("Open website") { _, _ -> openUrl("https://nightbox.in/user/premium") }
-                .show()
-        }
     }
 
     // Deprecated Downloads feature removed.
 
-    private fun openUrl(url: String) {
-        try {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-        } catch (_: Exception) {}
-    }
 }

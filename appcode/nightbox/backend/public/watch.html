@@ -202,10 +202,11 @@
     }
 
     function buildIntentUrl() {
-      // Use the public host that served this link so custom production domains work.
+      // Keep the share slug when possible. The app can resolve /l/:slug
+      // itself, which avoids waiting for the browser to resolve metadata first.
       const intentHost = window.location.host;
-      const targetId = videoId || '';
-      return `intent://${intentHost}/watch/${encodeURIComponent(targetId)}${linkSlug ? `?link=${encodeURIComponent(linkSlug)}` : ''}#Intent;scheme=https;package=simple.shayaribygenz;S.browser_fallback_url=${encodeURIComponent(PLAY_STORE_URL)};end`;
+      const targetPath = linkSlug ? `/l/${encodeURIComponent(linkSlug)}` : `/watch/${encodeURIComponent(videoId || '')}`;
+      return `intent://${intentHost}${targetPath}#Intent;scheme=https;package=simple.shayaribygenz;S.browser_fallback_url=${encodeURIComponent(PLAY_STORE_URL)};end`;
     }
 
     async function startBrowserView() {
@@ -255,9 +256,7 @@
         document.getElementById('loader').style.display = 'none';
         return;
       }
-      try {
-        await resolveVideoId();
-      } catch (_) {
+      if (!linkSlug && !videoId) {
         document.getElementById('status').innerText = 'This NightBox link is not available.';
         document.getElementById('loader').style.display = 'none';
         return;

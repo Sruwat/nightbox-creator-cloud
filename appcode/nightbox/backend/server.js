@@ -1689,11 +1689,10 @@ app.get('/video/:id', async (req, res) => {
         duration: v.length, size: v.storageSize, views: v.views,
         dateUploaded: v.dateUploaded,
           thumbnailUrl: v.thumbnailFileName ? `https://${process.env.BUNNY_CDN_HOST}/${String(process.env.BUNNY_STORAGE_PREFIX || 'nightbox').replace(/^\/+|\/+$/g, '')}/${v.guid}/${v.thumbnailFileName}` : null,
-        // Local VPS storage must be delivered by this server. Returning the
-        // Bunny URL while VIDEO_STORAGE_DRIVER=local makes clients receive a
-        // 403 from a pull zone that does not contain the local object.
-        embedUrl: BUNNY_LOCAL_STORAGE ? `${PUBLIC_API_URL}/video/${videoId}/stream` : bunny.getEmbedUrl(videoId),
-        hlsUrl: BUNNY_LOCAL_STORAGE ? `${PUBLIC_API_URL}/video/${videoId}/stream` : bunny.getDirectPlayUrl(videoId),
+        // Prefer Bunny CDN when the object is available, while retaining the
+        // VPS range-stream fallback for local-only objects.
+        embedUrl: BUNNY_LOCAL_STORAGE ? (await bunny.getCdnUrlIfAvailable(videoId)) || `${PUBLIC_API_URL}/video/${videoId}/stream` : bunny.getEmbedUrl(videoId),
+        hlsUrl: BUNNY_LOCAL_STORAGE ? (await bunny.getCdnUrlIfAvailable(videoId)) || `${PUBLIC_API_URL}/video/${videoId}/stream` : bunny.getDirectPlayUrl(videoId),
         watchUrl: bunny.getWatchUrl(videoId),
         downloadUrl: `${DOMAIN_URL}/download/${videoId}`,
       },

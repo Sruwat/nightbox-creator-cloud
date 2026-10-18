@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const STORAGE_ZONE = process.env.BUNNY_STORAGE_ZONE;
 const STORAGE_PASSWORD = process.env.BUNNY_STORAGE_PASSWORD;
 const CDN_HOST = process.env.BUNNY_CDN_HOST;
+const CDN_FALLBACK_HOST = process.env.BUNNY_CDN_FALLBACK_HOST || 'nightbox.b-cdn.net';
 const STORAGE_PREFIX = String(process.env.BUNNY_STORAGE_PREFIX || 'nightbox').replace(/^\/+|\/+$/g, '');
 const STORAGE_DRIVER = String(process.env.VIDEO_STORAGE_DRIVER || 'bunny').toLowerCase();
 const LOCAL_STORAGE_ROOT = path.resolve(process.env.VIDEO_STORAGE_ROOT || path.join(__dirname, 'media'));
@@ -118,6 +119,25 @@ async function deleteVideo(videoId) {
 
 function getDirectPlayUrl(videoId) { assertConfigured(); return `https://${CDN_HOST}/${STORAGE_PREFIX}/${videoId}.mp4`; }
 function getEmbedUrl(videoId) { return getDirectPlayUrl(videoId); }
+const cdnAvailability = new Map();
+async function getCdnUrlIfAvailable(videoId) {
+  if (!CDN_HOST && !CDN_FALLBACK_HOST) return null;
+  const cached = cdnAvailability.get(videoId);
+  if (cached && cached.expiresAt > Date.now()) return cached.available ? cached.url : null;
+  const hosts = [...new Set([CDN_HOST, CDN_FALLBACK_HOST].filter(Boolean))];
+  for (const host of hosts) {
+    const url = `https://${host}/${STORAGE_PREFIX}/${videoId}.mp4`;
+    try {
+      const response = await axios.head(url, { timeout: 4000, validateStatus: () => true });
+      if (response.status >= 200 && response.status < 400) {
+        cdnAvailability.set(videoId, { available: true, url, expiresAt: Date.now() + 60_000 });
+        return url;
+      }
+    } catch (_) { /* Try the next configured CDN host. */ }
+  }
+  cdnAvailability.set(videoId, { available: false, url: null, expiresAt: Date.now() + 15_000 });
+  return null;
+}
 // Share links are public-facing URLs. Keep the API origin configurable for
 // legacy deployments, but default new links to the main NightBox domain.
 function getWatchUrl(videoId) {
@@ -126,4 +146,4 @@ function getWatchUrl(videoId) {
 }
 function cleanupTempFile(filePath) { try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (error) { console.error('[Cleanup] Failed:', error.message); } }
 
-module.exports = { createVideo, uploadVideo, uploadVideoFromUrl, getVideo, deleteVideo, getEmbedUrl, getDirectPlayUrl, getWatchUrl, cleanupTempFile, getLocalPath: (videoId) => STORAGE_DRIVER === 'local' ? localPath(videoId) : null, isLocalStorage: () => STORAGE_DRIVER === 'local' };
+module.exports = { createVideo, uploadVideo, uploadVideoFromUrl, getVideo, deleteVideo, getEmbedUrl, getDirectPlayUrl, getCdnUrlIfAvailable, getWatchUrl, cleanupTempFile, getLocalPath: (videoId) => STORAGE_DRIVER === 'local' ? localPath(videoId) : null, isLocalStorage: () => STORAGE_DRIVER === 'local' };
