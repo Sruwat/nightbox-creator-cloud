@@ -919,6 +919,27 @@ app.post('/api/views/:id/qualify', (req, res) => {
     store.db.prepare('UPDATE view_sessions SET qualified_at = ?, counted = 0 WHERE id = ?').run(store.now(), session.id);
     return res.json({ counted: false, duplicate: true });
   }
+  // A creator-specific link must not allow the same viewer to earn repeatedly
+  // for the same underlying video through another creator's link. The viewer
+  // hash is privacy-preserving and combines the request IP, user agent, and a
+  // server-side secret; the video id is shared by creator-specific links.
+  const duplicateViewerVideo = store.db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM view_sessions existing
+    JOIN creator_links existingLink ON existingLink.id = existing.link_id
+    WHERE existingLink.video_id = ?
+      AND existing.viewer_hash = ?
+      AND existing.counted = 1
+      AND existing.id <> ?
+  `).get(
+    store.db.prepare('SELECT video_id FROM creator_links WHERE id = ?').get(session.link_id).video_id,
+    session.viewer_hash,
+    session.id,
+  );
+  if (duplicateViewerVideo.count > 0) {
+    store.db.prepare('UPDATE view_sessions SET qualified_at = ?, counted = 0 WHERE id = ?').run(store.now(), session.id);
+    return res.json({ counted: false, duplicate: true, reason: 'viewer_video_already_counted' });
+  }
   const bucket = parseInt(store.hash(session.id).slice(0, 8), 16) % 100;
   if (bucket >= rules.eligible_percent) {
     store.db.prepare('UPDATE view_sessions SET qualified_at = ?, counted = 0 WHERE id = ?').run(store.now(), session.id);
