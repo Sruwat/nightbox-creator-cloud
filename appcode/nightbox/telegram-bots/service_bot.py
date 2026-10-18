@@ -23,6 +23,7 @@ from creator_keys import (
     set_creator_key,
     update_text_preferences,
 )
+from bot_menu import register_bot_menu, service_commands
 
 load_dotenv()
 logging.basicConfig(format="%(asctime)s %(levelname)s %(message)s", level=logging.INFO)
@@ -302,4 +303,5 @@ async def remote_upload(_, message):
 
 
 if __name__ == "__main__":
+    register_bot_menu(TOKEN, service_commands(KIND))
     app.run()

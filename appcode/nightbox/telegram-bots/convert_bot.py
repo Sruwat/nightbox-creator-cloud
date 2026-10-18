@@ -27,6 +27,7 @@ from creator_keys import (
     update_text_preferences,
 )
 from text_overlay import apply_text_overlay
+from bot_menu import convert_commands, register_bot_menu
 
 load_dotenv()
 
@@ -628,4 +629,5 @@ async def handle(c, m):
 
 if __name__ == "__main__":
     logger.info("Premium Convert Bot starting...")
+    register_bot_menu(BOT_TOKEN, convert_commands())
     app.run()

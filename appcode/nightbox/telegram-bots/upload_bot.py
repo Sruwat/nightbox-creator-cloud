@@ -44,6 +44,7 @@ from creator_keys import (
     update_text_preferences,
 )
 from text_overlay import apply_text_overlay
+from bot_menu import register_bot_menu, upload_commands
 
 load_dotenv()
 
@@ -540,6 +541,7 @@ def main():
     logger.info("🤖 Upload Bot starting (Pyrogram/MTProto + aiohttp)...")
     logger.info(f"   Backend: {BACKEND_URL}")
     logger.info(f"   Max concurrent uploads: {MAX_CONCURRENT_UPLOADS} (Queuing enabled)")
+    register_bot_menu(BOT_TOKEN, upload_commands())
     app.run()
 
 
