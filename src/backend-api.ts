@@ -150,7 +150,7 @@ export async function createCreatorVideoLink(token: string, videoId: string) {
 
 export type CreatorFolder = { id: string; name: string; parentId: string | null; createdAt: string };
 export type CreatorStoredFile = { id: string; folderId: string | null; name: string; mimeType: string; sizeBytes: number; shareUrl: string | null; createdAt: string };
-export type CreatorStorageUsage = { usedBytes: number; reservedBytes: number; quotaBytes: number; maximumBytes: number };
+export type CreatorStorageUsage = { usedBytes: number; reservedBytes: number; quotaBytes: number | null; maximumBytes: number | null };
 export async function getCreatorFolders(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/creator/folders`, { headers: authHeaders(token) });
   return parseCreatorResponse<{ folders: CreatorFolder[] }>(response);
@@ -213,10 +213,10 @@ export async function getPublicCpm() {
 
 export async function getAdminUsers(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/users`, { headers: authHeaders(token) });
-  return parseResponse<{ users: Array<{ id: string; email: string; role: string; status: string; telegramUserId: string | null; createdAt: string; storageQuotaBytes: number; storageUsedBytes: number }> }>(response);
+  return parseResponse<{ users: Array<{ id: string; email: string; role: string; status: string; telegramUserId: string | null; createdAt: string; storageQuotaBytes: number | null; storageUsedBytes: number }> }>(response);
 }
 export type AdminCreatorDetail = {
-  creator: { id: string; email: string; status: string; telegramUserId: string | null; createdAt: string; storageQuotaBytes: number; storageUsedBytes: number };
+  creator: { id: string; email: string; status: string; telegramUserId: string | null; createdAt: string; storageQuotaBytes: number | null; storageUsedBytes: number };
   metrics: { views: { today: number; week: number; month: number; lifetime: number }; earningsMicros: { today: number; yesterday: number; week: number; month: number; lifetime: number; available: number; paid: number }; activeUsers: { today: number; week: number; month: number; lifetime: number }; watchMinutes: { today: number; week: number; month: number; lifetime: number } };
   files: Array<{ id: string; name: string; sizeBytes: number; createdAt: string; status: string }>;
   payouts: Array<{ id: string; amountMicros: number; currency: string; method: string; status: string; requestedAt: string; paidAt: string | null }>;
@@ -231,7 +231,7 @@ export async function updateAdminCreator(token: string, id: string, patch: { ema
 }
 export async function updateAdminStorageQuota(token: string, id: string, quotaBytes: number) {
   const response = await fetch(`${BACKEND_URL}/api/admin/users/${encodeURIComponent(id)}/storage-limit`, { method: "PUT", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify({ quotaBytes }) });
-  return parseResponse<{ creatorId: string; quotaBytes: number }>(response);
+  return parseResponse<{ creatorId: string; quotaBytes: number | null; unlimited: boolean }>(response);
 }
 export async function updateAdminUser(token: string, id: string, status: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/users/${encodeURIComponent(id)}`, { method: "PUT", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify({ status }) });

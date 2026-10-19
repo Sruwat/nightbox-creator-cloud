@@ -175,9 +175,8 @@ export default function CreatorFileManager({ token, toast }: { token: string; to
   }
 
   const usedBytes = (storage?.usedBytes || 0) + (storage?.reservedBytes || 0);
-  const quotaBytes = storage?.quotaBytes || 1;
-  const usagePercent = Math.min(100, usedBytes / quotaBytes * 100);
-  const availableBytes = Math.max(0, quotaBytes - usedBytes);
+  const quotaBytes = storage?.quotaBytes;
+  const usagePercent = quotaBytes ? Math.min(100, usedBytes / quotaBytes * 100) : 0;
 
   return <section className="card creator-storage">
     <div className="creator-storage-hero">
@@ -195,7 +194,7 @@ export default function CreatorFileManager({ token, toast }: { token: string; to
 
     {storage && <div className="creator-storage-overview" aria-label="Storage summary">
       <div className="creator-storage-stat creator-storage-stat-wide">
-        <div className="creator-storage-stat-top"><span>Storage used</span><b>{prettySize(usedBytes)} <small>of {prettySize(quotaBytes)}</small></b></div>
+        <div className="creator-storage-stat-top"><span>Storage used</span><b>{prettySize(usedBytes)} <small>{quotaBytes ? `of ${prettySize(quotaBytes)}` : "· Unlimited total storage"}</small></b></div>
         <div className="creator-storage-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(usagePercent)} aria-label={`${Math.round(usagePercent)} percent of storage used`}><i style={{ width: `${usagePercent}%` }} /></div>
         <small>{prettySize(availableBytes)} remaining</small>
       </div>
@@ -229,6 +228,6 @@ export default function CreatorFileManager({ token, toast }: { token: string; to
       </article>)}
       {!visibleFolders.length && !files.length && !error && <div className="creator-storage-empty"><span className="creator-storage-empty-icon" aria-hidden="true">▤</span><h3>This folder is ready for its first upload</h3><p>Upload a file or create a folder to start building your private library.</p><label className="btn btn-outline">Choose files<input type="file" multiple disabled={busy} onChange={uploadFiles} /></label></div>}
     </div>
-    <div className="creator-storage-private"><span aria-hidden="true">◉</span><small>Files stay private until you create a share link. Each file can be up to 2 GiB and uses your remaining quota.</small></div>
+    <div className="creator-storage-private"><span aria-hidden="true">◉</span><small>Files stay private until you create a share link. Each file can be up to 2 GiB; total creator storage is unlimited subject to available platform capacity.</small></div>
   </section>;
 }

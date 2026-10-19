@@ -45,6 +45,11 @@ def _connection():
         "header TEXT NOT NULL DEFAULT '', footer TEXT NOT NULL DEFAULT ''"
         ")"
     )
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS pending_text_preferences ("
+        "chat_id TEXT PRIMARY KEY, field TEXT NOT NULL"
+        ")"
+    )
     connection.commit()
     try:
         DB_PATH.chmod(0o600)
@@ -105,3 +110,27 @@ def update_text_preferences(chat_id, *, enabled=None, header=None, footer=None):
                 (str(chat_id), int(values["enabled"]), values["header"], values["footer"]),
             )
     return values
+
+
+def set_pending_text(chat_id, field):
+    if field not in {"header", "footer"}:
+        raise ValueError("pending text field must be header or footer")
+    with closing(_connection()) as connection:
+        with connection:
+            connection.execute(
+                "INSERT INTO pending_text_preferences(chat_id, field) VALUES(?,?) "
+                "ON CONFLICT(chat_id) DO UPDATE SET field=excluded.field",
+                (str(chat_id), field),
+            )
+
+
+def consume_pending_text(chat_id):
+    with closing(_connection()) as connection:
+        with connection:
+            row = connection.execute(
+                "SELECT field FROM pending_text_preferences WHERE chat_id=?",
+                (str(chat_id),),
+            ).fetchone()
+            if row:
+                connection.execute("DELETE FROM pending_text_preferences WHERE chat_id=?", (str(chat_id),))
+    return row[0] if row else ""

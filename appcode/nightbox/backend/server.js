@@ -38,8 +38,10 @@ app.set('trust proxy', process.env.TRUST_PROXY === 'true' ? 1 : false);
 const PORT = process.env.PORT || 3000;
 const DOMAIN_URL = String(process.env.PUBLIC_SITE_URL || 'https://nightbox.in').replace(/\/$/, '');
 const PUBLIC_API_URL = String(process.env.PUBLIC_API_URL || 'https://api.nightbox.in').replace(/\/$/, '');
-const CREATOR_DEFAULT_QUOTA_BYTES = 2 * 1024 * 1024 * 1024;
-const CREATOR_MAX_QUOTA_BYTES = CREATOR_DEFAULT_QUOTA_BYTES;
+// Aggregate creator storage is unlimited. Individual uploads still have the
+// 2 GiB per-file limit enforced by multer/Bunny below.
+const CREATOR_DEFAULT_QUOTA_BYTES = null;
+const CREATOR_MAX_QUOTA_BYTES = null;
 const BUNNY_STORAGE_PASSWORD = process.env.BUNNY_STORAGE_PASSWORD;
 const BUNNY_STORAGE_ZONE = process.env.BUNNY_STORAGE_ZONE;
 const BUNNY_LOCAL_STORAGE = String(process.env.VIDEO_STORAGE_DRIVER || '').toLowerCase() === 'local';
@@ -341,7 +343,7 @@ function requireApiKey(req, res, next) {
 }
 
 function creatorStorageQuota(creatorId) {
-  return Number(store.db.prepare('SELECT quota_bytes AS quotaBytes FROM creator_storage_limits WHERE creator_id=?').get(creatorId)?.quotaBytes || CREATOR_DEFAULT_QUOTA_BYTES);
+  return null;
 }
 
 function creatorStorageUsage(creatorId) {
@@ -359,7 +361,7 @@ function reserveCreatorStorage(creatorId, sizeBytes) {
   store.db.exec('BEGIN IMMEDIATE');
   try {
     const storage = creatorStorageUsage(creatorId);
-    if (storage.usedBytes + storage.reservedBytes + sizeBytes > storage.quotaBytes) {
+    if (storage.quotaBytes !== null && storage.usedBytes + storage.reservedBytes + sizeBytes > storage.quotaBytes) {
       store.db.exec('ROLLBACK');
       return { allowed: false, storage };
     }
@@ -566,7 +568,7 @@ app.post('/api/creator/files', uploadLimiter, requireUser, creatorFileUploadMidd
     const id = store.id();
     storageKey = `files/${req.user.id}/${id}${extension ? `.${extension}` : ''}`;
     const reservation = reserveCreatorStorage(req.user.id, req.file.size);
-    if (!reservation.allowed) return res.status(413).json({ error: 'Creator storage quota exceeded', storage: reservation.storage });
+    if (!reservation.allowed) return res.status(413).json({ error: 'Creator storage capacity exceeded', storage: reservation.storage });
     reservationId = reservation.reservationId;
     const contentHash = await fileSha256(filePath);
     await bunny.uploadCreatorFile(storageKey, filePath, req.file.mimetype);
@@ -1019,14 +1021,14 @@ app.put('/api/admin/view-rules', requireAdmin, (req, res) => {
   res.json({ eligiblePercent, maxViewsPerIp24h: maxViews, minimumWatchSeconds: minimum });
 });
 app.get('/api/admin/users', requireAdmin, (req, res) => res.json({ users: store.db.prepare(`SELECT u.id,u.email,u.role,u.status,u.telegram_user_id AS telegramUserId,u.created_at AS createdAt,
-  CASE WHEN u.role='creator' THEN COALESCE(l.quota_bytes,?) ELSE 0 END AS storageQuotaBytes,
+  CASE WHEN u.role='creator' THEN NULL ELSE 0 END AS storageQuotaBytes,
   CASE WHEN u.role='creator' THEN COALESCE((SELECT SUM(f.size_bytes) FROM creator_files f WHERE f.owner_id=u.id),0)+COALESCE((SELECT SUM(v.file_size) FROM videos v WHERE v.owner_id=u.id AND v.status <> 'deleted'),0)+COALESCE((SELECT SUM(r.size_bytes) FROM creator_storage_reservations r WHERE r.creator_id=u.id),0) ELSE 0 END AS storageUsedBytes
-  FROM users u LEFT JOIN creator_storage_limits l ON l.creator_id=u.id ORDER BY u.created_at DESC`).all(CREATOR_DEFAULT_QUOTA_BYTES) }));
+  FROM users u LEFT JOIN creator_storage_limits l ON l.creator_id=u.id ORDER BY u.created_at DESC`).all() }));
 app.get('/api/admin/creators/:id', requireAdmin, (req, res) => {
   const creator = store.db.prepare(`SELECT u.id,u.email,u.status,u.telegram_user_id AS telegramUserId,u.created_at AS createdAt,
-    COALESCE(l.quota_bytes,?) AS storageQuotaBytes,
+    NULL AS storageQuotaBytes,
     COALESCE((SELECT SUM(f.size_bytes) FROM creator_files f WHERE f.owner_id=u.id),0)+COALESCE((SELECT SUM(v.file_size) FROM videos v WHERE v.owner_id=u.id AND v.status <> 'deleted'),0)+COALESCE((SELECT SUM(r.size_bytes) FROM creator_storage_reservations r WHERE r.creator_id=u.id),0) AS storageUsedBytes
-    FROM users u LEFT JOIN creator_storage_limits l ON l.creator_id=u.id WHERE u.id=? AND u.role='creator'`).get(CREATOR_DEFAULT_QUOTA_BYTES, req.params.id);
+    FROM users u LEFT JOIN creator_storage_limits l ON l.creator_id=u.id WHERE u.id=? AND u.role='creator'`).get(req.params.id);
   if (!creator) return res.status(404).json({ error: 'Creator not found' });
   const ranges = { today: "DATE('now','-1 day')", yesterday: "DATE('now','-2 day')", week: "DATE('now','-7 day')", month: "DATE('now','-30 day')" };
   const earningsFor = (where) => Number(store.db.prepare(`SELECT COALESCE(SUM(amount_micros),0) AS amount FROM earnings WHERE creator_id=? AND ${where}`).get(creator.id).amount);
@@ -1066,16 +1068,8 @@ app.put('/api/admin/users/:id', requireAdmin, (req, res) => {
 app.put('/api/admin/users/:id/storage-limit', requireAdmin, (req, res) => {
   const creator = store.db.prepare("SELECT id FROM users WHERE id=? AND role='creator'").get(req.params.id);
   if (!creator) return res.status(404).json({ error: 'Creator not found' });
-  const quotaBytes = Number(req.body?.quotaBytes);
-  if (quotaBytes !== CREATOR_DEFAULT_QUOTA_BYTES) return res.status(400).json({ error: 'Storage limit is fixed at 2 GiB' });
-  const storage = creatorStorageUsage(creator.id);
-  if (storage.usedBytes + storage.reservedBytes > quotaBytes) return res.status(409).json({ error: 'Creator is currently using more storage than that limit allows', storage });
-  if (quotaBytes === CREATOR_DEFAULT_QUOTA_BYTES) {
-    store.db.prepare('DELETE FROM creator_storage_limits WHERE creator_id=?').run(creator.id);
-  } else {
-    store.db.prepare('INSERT INTO creator_storage_limits (creator_id,quota_bytes,updated_at) VALUES (?,?,?) ON CONFLICT(creator_id) DO UPDATE SET quota_bytes=excluded.quota_bytes,updated_at=excluded.updated_at').run(creator.id, quotaBytes, store.now());
-  }
-  res.json({ creatorId: creator.id, quotaBytes });
+  store.db.prepare('DELETE FROM creator_storage_limits WHERE creator_id=?').run(creator.id);
+  res.json({ creatorId: creator.id, quotaBytes: null, unlimited: true });
 });
 app.get('/api/admin/videos', requireAdmin, (req, res) => res.json({ videos: store.db.prepare(`SELECT v.id,v.title,v.status,v.owner_id AS ownerId,v.created_at AS createdAt,COALESCE(SUM(CASE WHEN s.counted = 1 THEN 1 ELSE 0 END),0) AS eligibleViews FROM videos v LEFT JOIN creator_links l ON l.video_id = v.id LEFT JOIN view_sessions s ON s.link_id = l.id GROUP BY v.id ORDER BY v.created_at DESC`).all() }));
 app.get('/api/admin/bot-events', requireAdmin, (req, res) => {
@@ -1580,7 +1574,7 @@ app.post('/upload-file', (req, res, next) => {
     }
     if (owner) {
       const reservation = reserveCreatorStorage(owner.id, fileSize);
-      if (!reservation.allowed) return res.status(413).json({ error: 'Creator storage quota exceeded', storage: reservation.storage });
+      if (!reservation.allowed) return res.status(413).json({ error: 'Creator storage capacity exceeded', storage: reservation.storage });
       reservationId = reservation.reservationId;
     }
     const videoData = await bunny.createVideo(title);
@@ -1901,7 +1895,7 @@ app.get('/ready', (req, res) => {
 // Error handler
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
-    if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Upload exceeds the 2 GiB per-file maximum or your remaining storage quota.' });
+    if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Upload exceeds the 2 GiB per-file maximum or available server capacity.' });
     return res.status(400).json({ error: err.message });
   }
 

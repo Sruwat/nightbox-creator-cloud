@@ -21,6 +21,8 @@ from creator_keys import (
     key_help_text,
     remove_creator_key,
     set_creator_key,
+    set_pending_text,
+    consume_pending_text,
     update_text_preferences,
 )
 from bot_menu import register_bot_menu, service_commands
@@ -219,7 +221,8 @@ def command_text(message):
 async def add_header(_, message):
     value = command_text(message)
     if not value:
-        await message.reply_text("Usage: `/add_header Your header text`")
+        set_pending_text(message.chat.id, "header")
+        await message.reply_text("Send the header text in your next message. No command needed.")
         return
     preferences = update_text_preferences(message.chat.id, header=value)
     await message.reply_text(
@@ -232,7 +235,8 @@ async def add_header(_, message):
 async def add_footer(_, message):
     value = command_text(message)
     if not value:
-        await message.reply_text("Usage: `/add_footer Your footer text`")
+        set_pending_text(message.chat.id, "footer")
+        await message.reply_text("Send the footer text in your next message. No command needed.")
         return
     preferences = update_text_preferences(message.chat.id, footer=value)
     await message.reply_text(
@@ -270,6 +274,11 @@ async def text_status(_, message):
 
 @app.on_message(filters.text & ~filters.command(["start", "status", "connect", "disconnect"]))
 async def remote_upload(_, message):
+    pending = consume_pending_text(message.chat.id)
+    if pending:
+        update_text_preferences(message.chat.id, **{pending: (message.text or "").strip()})
+        await message.reply_text(f"✅ {pending.title()} saved. Use `/enable_text` to apply it to future uploads.")
+        return
     if KIND == "CONNECTION":
         await message.reply_text(
             "This is the account-connection bot. Your /connect is handled here.\n\n"
