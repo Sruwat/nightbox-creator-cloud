@@ -56,8 +56,6 @@ class FileInfoActivity : AppCompatActivity() {
     private var downloadUrl: String? = null
     private var nativeAd1: NativeAd? = null
     private var nativeAd2: NativeAd? = null
-    private var premium = PremiumEntitlement()
-    
     private val handler = Handler(Looper.getMainLooper())
     private var timerRunnable: Runnable? = null
 
@@ -98,10 +96,6 @@ class FileInfoActivity : AppCompatActivity() {
 
         // Open Video button
         btnOpenVideo.setOnClickListener {
-            if (premium.videoAdsRemoved) {
-                openVideoPlayer(false)
-                return@setOnClickListener
-            }
             val prefs = getSharedPreferences("nightbox_prefs", MODE_PRIVATE)
             var currentCount = prefs.getInt("open_video_count", 0)
             currentCount++
@@ -143,18 +137,10 @@ class FileInfoActivity : AppCompatActivity() {
         SecurityUtil.checkVpn(this)
         
         lifecycleScope.launch {
-            premium = PremiumAccess.entitlement(this@FileInfoActivity)
-            if (premium.allAdsRemoved) {
-                adBannerContainerTop.visibility = View.GONE
-                adBannerContainerBottom.visibility = View.GONE
-                nativeAdContainer1.visibility = View.GONE
-                nativeAdContainer2.visibility = View.GONE
-            } else {
-                loadBannerAdWhenReady(adBannerContainerTop)
-                loadBannerAdWhenReady(adBannerContainerBottom)
-                loadNativeAd(nativeAdContainer1, { nativeAd1?.destroy(); nativeAd1 = it })
-                loadNativeAd(nativeAdContainer2, { nativeAd2?.destroy(); nativeAd2 = it })
-            }
+            loadBannerAdWhenReady(adBannerContainerTop)
+            loadBannerAdWhenReady(adBannerContainerBottom)
+            loadNativeAd(nativeAdContainer1, { nativeAd1?.destroy(); nativeAd1 = it })
+            loadNativeAd(nativeAdContainer2, { nativeAd2?.destroy(); nativeAd2 = it })
         }
         
         // Start 7-second timer for Open Video button
@@ -230,7 +216,6 @@ class FileInfoActivity : AppCompatActivity() {
     }
 
     private fun loadBannerAdWhenReady(container: FrameLayout) {
-        if (premium.allAdsRemoved) return
         if (NightBoxApp.adsInitialized) {
             loadBannerAd(container)
         } else {
@@ -241,7 +226,6 @@ class FileInfoActivity : AppCompatActivity() {
     }
 
     private fun loadBannerAd(container: FrameLayout) {
-        if (premium.allAdsRemoved) return
         val adView = AdView(this)
         
         // Calculate adaptive banner size
@@ -259,7 +243,6 @@ class FileInfoActivity : AppCompatActivity() {
     }
 
     private fun loadNativeAd(container: FrameLayout, onLoaded: (NativeAd) -> Unit) {
-        if (premium.allAdsRemoved) return
         val adLoader = AdLoader.Builder(this, "ca-app-pub-2964717174761820/2042116691") // Real Native ID
             .forNativeAd { ad: NativeAd ->
                 onLoaded(ad)

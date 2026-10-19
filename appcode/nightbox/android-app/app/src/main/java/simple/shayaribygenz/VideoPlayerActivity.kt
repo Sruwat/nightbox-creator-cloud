@@ -72,8 +72,6 @@ class VideoPlayerActivity : AppCompatActivity() {
     private lateinit var adBannerContainerTop: FrameLayout
     private lateinit var nativeAdContainerBottom: FrameLayout
     private var nativeAd: NativeAd? = null
-    private var premium = PremiumEntitlement()
-
     private var imaAdsLoader: ImaAdsLoader? = null
 
     private var player: ExoPlayer? = null
@@ -153,7 +151,7 @@ class VideoPlayerActivity : AppCompatActivity() {
             tvVideoMetaDetails.text = videoTitle
         }
 
-        loadPremiumAndStart(showVastAd)
+        loadVideoAndAds(showVastAd)
 
         // Back button
         btnBackOverlay.setOnClickListener { finish() }
@@ -183,24 +181,16 @@ class VideoPlayerActivity : AppCompatActivity() {
 
     }
 
-    private fun loadPremiumAndStart(requestedVastAd: Boolean) {
+    private fun loadVideoAndAds(requestedVastAd: Boolean) {
         lifecycleScope.launch {
-            premium = PremiumAccess.entitlement(this@VideoPlayerActivity)
-            if (requestedVastAd && !premium.videoAdsRemoved) {
+            if (requestedVastAd) {
                 imaAdsLoader = ImaAdsLoader.Builder(this@VideoPlayerActivity).build()
             }
             if (videoId != null && localVideoUri == null) loadRemoteVideoMetadata() else initializePlayer()
-            if (premium.allAdsRemoved) {
-                adBannerContainerTop.visibility = View.GONE
-                adBannerContainerSticky.visibility = View.GONE
-                adBannerContainerPlayer.visibility = View.GONE
-                nativeAdContainerBottom.visibility = View.GONE
-            } else {
-                loadBannerAdWhenReady(adBannerContainerTop)
-                loadBannerAdWhenReady(adBannerContainerSticky)
-                loadBannerAdWhenReady(adBannerContainerPlayer)
-                loadNativeAd()
-            }
+            loadBannerAdWhenReady(adBannerContainerTop)
+            loadBannerAdWhenReady(adBannerContainerSticky)
+            loadBannerAdWhenReady(adBannerContainerPlayer)
+            loadNativeAd()
         }
     }
 
@@ -692,7 +682,6 @@ class VideoPlayerActivity : AppCompatActivity() {
     // ──────────────────────────────────────────────
 
     private fun loadBannerAdWhenReady(container: FrameLayout) {
-        if (premium.allAdsRemoved) return
         if (NightBoxApp.adsInitialized) {
             loadBannerAd(container)
         } else {
@@ -703,7 +692,6 @@ class VideoPlayerActivity : AppCompatActivity() {
     }
 
     private fun loadBannerAd(container: FrameLayout) {
-        if (premium.allAdsRemoved) return
         val adView = AdView(this)
         
         // Calculate adaptive banner size
@@ -721,7 +709,6 @@ class VideoPlayerActivity : AppCompatActivity() {
     }
 
     private fun loadNativeAd() {
-        if (premium.allAdsRemoved) return
         val adLoader = AdLoader.Builder(this, "ca-app-pub-2964717174761820/2042116691") // Real ID
             .forNativeAd { ad: NativeAd ->
                 nativeAd?.destroy()

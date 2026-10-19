@@ -419,31 +419,6 @@
                 android:layout_marginTop="2dp" />
         </LinearLayout>
 
-        <!-- Premium subscription tab -->
-        <LinearLayout
-            android:id="@+id/navSubscription"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:gravity="center"
-            android:orientation="vertical"
-            android:clickable="true"
-            android:focusable="true">
-            <ImageView
-                android:id="@+id/ivNavSubscription"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:src="@drawable/ic_play_circle"
-                app:tint="@color/text_secondary_dark" />
-            <TextView
-                android:id="@+id/tvNavSubscription"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Premium"
-                android:textSize="11sp"
-                android:textColor="@color/text_secondary_dark"
-                android:layout_marginTop="2dp" />
-        </LinearLayout>
     </LinearLayout>
 
 </RelativeLayout>
