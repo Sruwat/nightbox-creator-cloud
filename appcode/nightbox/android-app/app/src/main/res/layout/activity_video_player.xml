@@ -97,7 +97,7 @@
                         android:id="@+id/btnFullscreen"
                         android:layout_width="36dp"
                         android:layout_height="36dp"
-                        android:layout_gravity="end|bottom"
+                        android:layout_gravity="end|top"
                         android:layout_margin="12dp"
                         android:padding="6dp"
                         android:src="@drawable/ic_fullscreen"

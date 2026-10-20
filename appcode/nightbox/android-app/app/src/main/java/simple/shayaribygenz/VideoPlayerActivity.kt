@@ -84,6 +84,10 @@ class VideoPlayerActivity : AppCompatActivity() {
     private var viewQualified = false
     private var linkSlug: String? = null
     private var remoteHlsUrl: String? = null
+    private var durationUpdateRunnable: Runnable? = null
+    private var shouldResumePlayback = true
+    private var restoredPositionMs = 0L
+    private var restoredPlayWhenReady = true
     private val apiClient = OkHttpClient()
 
     companion object {
@@ -112,6 +116,9 @@ class VideoPlayerActivity : AppCompatActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         setContentView(R.layout.activity_video_player)
+
+        restoredPositionMs = savedInstanceState?.getLong("player_position_ms", 0L) ?: 0L
+        restoredPlayWhenReady = savedInstanceState?.getBoolean("player_play_when_ready", true) ?: true
 
         // Bind views
         playerView = findViewById(R.id.playerView)
@@ -343,6 +350,8 @@ class VideoPlayerActivity : AppCompatActivity() {
                         loadingOverlay.visibility = View.GONE
                         playerView.visibility = View.VISIBLE
                         updateVideoMetaDetails()
+                        restorePlayerPositionIfNeeded()
+                        scheduleDurationUpdates()
                     }
                     Player.STATE_BUFFERING -> {
                         if (playerView.visibility != View.VISIBLE) {
@@ -359,6 +368,10 @@ class VideoPlayerActivity : AppCompatActivity() {
                 // Native playback failed — fallback to the same range-capable stream.
                 releasePlayer()
                 fallbackToWebView()
+            }
+
+            override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+                updateVideoMetaDetails()
             }
         })
     }
@@ -377,6 +390,8 @@ class VideoPlayerActivity : AppCompatActivity() {
                         loadingOverlay.visibility = View.GONE
                         playerView.visibility = View.VISIBLE
                         updateVideoMetaDetails()
+                        restorePlayerPositionIfNeeded()
+                        scheduleDurationUpdates()
                     }
                     Player.STATE_BUFFERING -> {
                         if (playerView.visibility != View.VISIBLE) {
@@ -391,7 +406,36 @@ class VideoPlayerActivity : AppCompatActivity() {
             override fun onPlayerError(error: PlaybackException) {
                 showError("Playback error: ${error.message}")
             }
+
+            override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+                updateVideoMetaDetails()
+            }
         })
+    }
+
+    private fun restorePlayerPositionIfNeeded() {
+        player?.let { current ->
+            if (restoredPositionMs > 0L && current.duration > 0L) {
+                current.seekTo(restoredPositionMs.coerceAtMost(current.duration))
+                restoredPositionMs = 0L
+            }
+            current.playWhenReady = restoredPlayWhenReady
+        }
+    }
+
+    private fun scheduleDurationUpdates() {
+        durationUpdateRunnable?.let { window.decorView.removeCallbacks(it) }
+        val runnable = object : Runnable {
+            override fun run() {
+                updateVideoMetaDetails()
+                val duration = player?.duration ?: 0L
+                if (duration <= 0L && !isFinishing) {
+                    window.decorView.postDelayed(this, 500L)
+                }
+            }
+        }
+        durationUpdateRunnable = runnable
+        window.decorView.post(runnable)
     }
 
     private fun qualifyAfterFiveSeconds() {
@@ -442,7 +486,7 @@ class VideoPlayerActivity : AppCompatActivity() {
             val timeString = String.format("%d:%02d min", minutes, seconds)
             tvVideoMetaDetails.text = timeString
         } else {
-            tvVideoMetaDetails.text = "Live Stream"
+            tvVideoMetaDetails.text = "Preparing video…"
         }
     }
 
@@ -763,6 +807,8 @@ class VideoPlayerActivity : AppCompatActivity() {
     // ──────────────────────────────────────────────
 
     private fun releasePlayer() {
+        durationUpdateRunnable?.let { window.decorView.removeCallbacks(it) }
+        durationUpdateRunnable = null
         player?.let {
             it.stop()
             it.release()
@@ -772,6 +818,7 @@ class VideoPlayerActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        shouldResumePlayback = player?.isPlaying == true
         player?.pause()
         if (usingWebView) webViewPlayer.onPause()
     }
@@ -779,7 +826,7 @@ class VideoPlayerActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         SecurityUtil.checkVpn(this)
-        player?.play()
+        if (shouldResumePlayback) player?.play()
         if (usingWebView) webViewPlayer.onResume()
     }
 
@@ -789,6 +836,12 @@ class VideoPlayerActivity : AppCompatActivity() {
         nativeAd?.destroy()
         if (usingWebView) webViewPlayer.destroy()
         super.onDestroy()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putLong("player_position_ms", player?.currentPosition ?: 0L)
+        outState.putBoolean("player_play_when_ready", player?.playWhenReady ?: true)
+        super.onSaveInstanceState(outState)
     }
 
     @Deprecated("Use onBackPressedDispatcher")

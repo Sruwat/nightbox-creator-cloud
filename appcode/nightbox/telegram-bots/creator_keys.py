@@ -42,9 +42,13 @@ def _connection():
     connection.execute(
         "CREATE TABLE IF NOT EXISTS text_preferences ("
         "chat_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0, "
-        "header TEXT NOT NULL DEFAULT '', footer TEXT NOT NULL DEFAULT ''"
+        "bold INTEGER NOT NULL DEFAULT 0, header TEXT NOT NULL DEFAULT '', footer TEXT NOT NULL DEFAULT ''"
         ")"
     )
+    try:
+        connection.execute("ALTER TABLE text_preferences ADD COLUMN bold INTEGER NOT NULL DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
     connection.execute(
         "CREATE TABLE IF NOT EXISTS pending_text_preferences ("
         "chat_id TEXT PRIMARY KEY, field TEXT NOT NULL"
@@ -86,30 +90,37 @@ def remove_creator_key(chat_id):
 def get_text_preferences(chat_id):
     with closing(_connection()) as connection:
         row = connection.execute(
-            "SELECT enabled, header, footer FROM text_preferences WHERE chat_id = ?",
+            "SELECT enabled, bold, header, footer FROM text_preferences WHERE chat_id = ?",
             (str(chat_id),),
         ).fetchone()
     if not row:
-        return {"enabled": False, "header": "", "footer": ""}
-    return {"enabled": bool(row[0]), "header": row[1] or "", "footer": row[2] or ""}
+        return {"enabled": False, "bold": False, "header": "", "footer": ""}
+    return {"enabled": bool(row[0]), "bold": bool(row[1]), "header": row[2] or "", "footer": row[3] or ""}
 
 
-def update_text_preferences(chat_id, *, enabled=None, header=None, footer=None):
+def update_text_preferences(chat_id, *, enabled=None, bold=None, header=None, footer=None):
     current = get_text_preferences(chat_id)
     values = {
         "enabled": current["enabled"] if enabled is None else bool(enabled),
+        "bold": current["bold"] if bold is None else bool(bold),
         "header": current["header"] if header is None else str(header),
         "footer": current["footer"] if footer is None else str(footer),
     }
     with closing(_connection()) as connection:
         with connection:
             connection.execute(
-                "INSERT INTO text_preferences(chat_id, enabled, header, footer) VALUES(?,?,?,?) "
-                "ON CONFLICT(chat_id) DO UPDATE SET enabled=excluded.enabled, "
+                "INSERT INTO text_preferences(chat_id, enabled, bold, header, footer) VALUES(?,?,?,?,?) "
+                "ON CONFLICT(chat_id) DO UPDATE SET enabled=excluded.enabled, bold=excluded.bold, "
                 "header=excluded.header, footer=excluded.footer",
-                (str(chat_id), int(values["enabled"]), values["header"], values["footer"]),
+                (str(chat_id), int(values["enabled"]), int(values["bold"]), values["header"], values["footer"]),
             )
     return values
+
+
+def remove_text_preference(chat_id, field):
+    if field not in {"header", "footer"}:
+        raise ValueError("text field must be header or footer")
+    return update_text_preferences(chat_id, **{field: ""})
 
 
 def set_pending_text(chat_id, field):

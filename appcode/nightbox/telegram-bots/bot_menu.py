@@ -7,6 +7,21 @@ from urllib.request import Request, urlopen
 log = logging.getLogger("nightbox-bot-menu")
 
 
+def settings_keyboard():
+    """Common inline controls so users do not need to type commands."""
+    try:
+        from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("➕ Header", callback_data="nb:add_header"), InlineKeyboardButton("➕ Footer", callback_data="nb:add_footer")],
+            [InlineKeyboardButton("🗑 Remove header", callback_data="nb:remove_header"), InlineKeyboardButton("🗑 Remove footer", callback_data="nb:remove_footer")],
+            [InlineKeyboardButton("✅ Text ON", callback_data="nb:enable_text"), InlineKeyboardButton("🚫 Text OFF", callback_data="nb:disable_text")],
+            [InlineKeyboardButton("𝗕 Bold ON", callback_data="nb:enable_bold"), InlineKeyboardButton("Normal text", callback_data="nb:disable_bold")],
+            [InlineKeyboardButton("ℹ️ Text status", callback_data="nb:text_status"), InlineKeyboardButton("🔌 Disconnect", callback_data="nb:disconnect")],
+        ])
+    except Exception:
+        return None
+
+
 def register_bot_menu(token, commands):
     if not token:
         return
@@ -35,8 +50,12 @@ def service_commands(kind):
         commands.extend([
             {"command": "add_header", "description": "Add text above links"},
             {"command": "add_footer", "description": "Add text below links"},
+            {"command": "remove_header", "description": "Remove header text"},
+            {"command": "remove_footer", "description": "Remove footer text"},
             {"command": "enable_text", "description": "Enable text overlay"},
             {"command": "disable_text", "description": "Disable text overlay"},
+            {"command": "enable_bold", "description": "Make overlay text bold"},
+            {"command": "disable_bold", "description": "Use normal overlay text"},
             {"command": "text_status", "description": "Show text settings"},
         ])
     commands.append({"command": "disconnect", "description": "Disconnect creator account"})
@@ -49,8 +68,12 @@ def convert_commands():
         {"command": "connect", "description": "Connect creator account"},
         {"command": "add_header", "description": "Add text above links"},
         {"command": "add_footer", "description": "Add text below links"},
+        {"command": "remove_header", "description": "Remove header text"},
+        {"command": "remove_footer", "description": "Remove footer text"},
         {"command": "enable_text", "description": "Enable text overlay"},
         {"command": "disable_text", "description": "Disable text overlay"},
+        {"command": "enable_bold", "description": "Make overlay text bold"},
+        {"command": "disable_bold", "description": "Use normal overlay text"},
         {"command": "text_status", "description": "Show text settings"},
         {"command": "disconnect", "description": "Disconnect creator account"},
     ]
@@ -64,8 +87,12 @@ def upload_commands():
         {"command": "status", "description": "Check upload status"},
         {"command": "add_header", "description": "Add text above links"},
         {"command": "add_footer", "description": "Add text below links"},
+        {"command": "remove_header", "description": "Remove header text"},
+        {"command": "remove_footer", "description": "Remove footer text"},
         {"command": "enable_text", "description": "Enable text overlay"},
         {"command": "disable_text", "description": "Disable text overlay"},
+        {"command": "enable_bold", "description": "Make overlay text bold"},
+        {"command": "disable_bold", "description": "Use normal overlay text"},
         {"command": "text_status", "description": "Show text settings"},
         {"command": "disconnect", "description": "Disconnect creator account"},
     ]

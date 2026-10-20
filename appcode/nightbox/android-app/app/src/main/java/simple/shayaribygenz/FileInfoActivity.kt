@@ -58,6 +58,7 @@ class FileInfoActivity : AppCompatActivity() {
     private var nativeAd2: NativeAd? = null
     private val handler = Handler(Looper.getMainLooper())
     private var timerRunnable: Runnable? = null
+    private var openVideoReady = false
 
     companion object {
         private const val INTERSTITIAL_INTERVAL = 3
@@ -144,7 +145,7 @@ class FileInfoActivity : AppCompatActivity() {
         }
         
         // Start 7-second timer for Open Video button
-        startOpenVideoTimer()
+        if (!openVideoReady) startOpenVideoTimer()
     }
     
     override fun onDestroy() {
@@ -167,6 +168,7 @@ class FileInfoActivity : AppCompatActivity() {
 
         // 7 seconds delay
         timerRunnable = Runnable {
+            openVideoReady = true
             btnOpenVideo.isClickable = true
             icOpenVideo.visibility = View.VISIBLE
             pbLoadingVideo.visibility = View.GONE

@@ -44,9 +44,10 @@ from creator_keys import (
     set_pending_text,
     consume_pending_text,
     update_text_preferences,
+    remove_text_preference,
 )
 from text_overlay import apply_text_overlay
-from bot_menu import register_bot_menu, upload_commands
+from bot_menu import register_bot_menu, settings_keyboard, upload_commands
 
 load_dotenv()
 
@@ -202,6 +203,7 @@ async def start_command(client: Client, message: Message):
         "📹 **Supported:** Any video format; backend limit 2 GB (Telegram source limits may apply)\n"
         "🔐 First connect your creator account with /connect nb_live_...\n\n"
         "Just send or forward a video to get started!",
+        reply_markup=settings_keyboard(),
     )
 
 
@@ -219,7 +221,10 @@ async def help_command(client: Client, message: Message):
         "`/add_header Your header`\n"
         "`/add_footer Your footer`\n"
         "`/enable_text` or `/disable_text`\n"
+        "`/remove_header` or `/remove_footer`\n"
+        "`/enable_bold` or `/disable_bold`\n"
         "`/text_status`",
+        reply_markup=settings_keyboard(),
     )
 
 
@@ -252,8 +257,20 @@ async def add_footer_command(client: Client, message: Message):
     preferences = update_text_preferences(message.chat.id, footer=value)
     await message.reply_text(
         f"✅ Footer saved for future uploads. Text overlay is currently {'ON' if preferences['enabled'] else 'OFF'}.\n"
-        "Use `/enable_text` to burn it into the video."
+        "Use `/enable_text` to burn it into the video.", reply_markup=settings_keyboard()
     )
+
+
+@app.on_message(filters.command("remove_header"))
+async def remove_header_command(client: Client, message: Message):
+    remove_text_preference(message.chat.id, "header")
+    await message.reply_text("✅ Header removed.", reply_markup=settings_keyboard())
+
+
+@app.on_message(filters.command("remove_footer"))
+async def remove_footer_command(client: Client, message: Message):
+    remove_text_preference(message.chat.id, "footer")
+    await message.reply_text("✅ Footer removed.", reply_markup=settings_keyboard())
 
 
 @app.on_message(filters.command("enable_text"))
@@ -272,6 +289,18 @@ async def disable_text_command(client: Client, message: Message):
     await message.reply_text("✅ Text overlay disabled. Existing videos are unchanged.")
 
 
+@app.on_message(filters.command("enable_bold"))
+async def enable_bold_command(client: Client, message: Message):
+    update_text_preferences(message.chat.id, bold=True)
+    await message.reply_text("✅ Bold text enabled for future uploads.", reply_markup=settings_keyboard())
+
+
+@app.on_message(filters.command("disable_bold"))
+async def disable_bold_command(client: Client, message: Message):
+    update_text_preferences(message.chat.id, bold=False)
+    await message.reply_text("✅ Normal text enabled for future uploads.", reply_markup=settings_keyboard())
+
+
 @app.on_message(filters.command("text_status"))
 async def text_status_command(client: Client, message: Message):
     preferences = get_text_preferences(message.chat.id)
@@ -280,9 +309,41 @@ async def text_status_command(client: Client, message: Message):
     await message.reply_text(
         "📝 **Text overlay settings**\n\n"
         f"Status: {'ON' if preferences['enabled'] else 'OFF'}\n"
+        f"Bold: {'ON' if preferences.get('bold') else 'OFF'}\n"
         f"Header: {header}\n"
         f"Footer: {footer}"
     )
+
+
+@app.on_callback_query(filters.regex(r"^nb:"))
+async def settings_callback(_, query):
+    action = query.data.split(":", 1)[1]
+    await query.answer()
+    chat_id = query.message.chat.id
+    if action == "add_header" or action == "add_footer":
+        set_pending_text(chat_id, action.replace("add_", ""))
+        await query.message.reply_text("Send the text in your next message.")
+    elif action in {"remove_header", "remove_footer"}:
+        remove_text_preference(chat_id, action.replace("remove_", ""))
+        await query.message.reply_text("✅ Removed.", reply_markup=settings_keyboard())
+    elif action == "enable_text":
+        update_text_preferences(chat_id, enabled=True)
+        await query.message.reply_text("✅ Text overlay enabled.", reply_markup=settings_keyboard())
+    elif action == "disable_text":
+        update_text_preferences(chat_id, enabled=False)
+        await query.message.reply_text("✅ Text overlay disabled.", reply_markup=settings_keyboard())
+    elif action == "enable_bold":
+        update_text_preferences(chat_id, bold=True)
+        await query.message.reply_text("✅ Bold text enabled.", reply_markup=settings_keyboard())
+    elif action == "disable_bold":
+        update_text_preferences(chat_id, bold=False)
+        await query.message.reply_text("✅ Normal text enabled.", reply_markup=settings_keyboard())
+    elif action == "text_status":
+        p = get_text_preferences(chat_id)
+        await query.message.reply_text(f"Status: {'ON' if p['enabled'] else 'OFF'}\nBold: {'ON' if p.get('bold') else 'OFF'}\nHeader: {p['header'] or '(not set)'}\nFooter: {p['footer'] or '(not set)'}", reply_markup=settings_keyboard())
+    elif action == "disconnect":
+        remove_creator_key(chat_id)
+        await query.message.reply_text("✅ Creator account disconnected.")
 
 
 @app.on_message(filters.command("status"))

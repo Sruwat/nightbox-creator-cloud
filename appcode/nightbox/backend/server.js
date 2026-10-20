@@ -938,11 +938,17 @@ app.post('/api/views/:id/qualify', (req, res) => {
   }
   const rate = store.db.prepare('SELECT cpm_cents FROM cpm_rates WHERE country = ?').get(session.country) || store.db.prepare("SELECT cpm_cents FROM cpm_rates WHERE country = 'ZZ'").get();
   const cpmCents = rate?.cpm_cents || 0;
-  const amountMicros = cpmCents * 10;
+  const grossAmountMicros = cpmCents * 10;
+  const referralPercent = Math.max(0, Math.min(100, Number(process.env.REFERRAL_PERCENT || 5)));
+  const videoOwner = store.db.prepare('SELECT v.owner_id AS ownerId, v.id AS videoId FROM videos v JOIN creator_links l ON l.video_id=v.id WHERE l.id=?').get(session.link_id);
+  const hasReferral = Boolean(videoOwner?.ownerId && videoOwner.ownerId !== link.creatorId && referralPercent > 0);
+  const referralAmountMicros = hasReferral ? Math.floor(grossAmountMicros * referralPercent / 100) : 0;
+  const amountMicros = grossAmountMicros - referralAmountMicros;
   store.db.exec('BEGIN');
   try {
     store.db.prepare('UPDATE view_sessions SET qualified_at = ?, counted = 1 WHERE id = ?').run(store.now(), session.id);
     if (amountMicros > 0) store.db.prepare('INSERT INTO earnings (id,creator_id,link_id,view_id,country,cpm_cents,amount_micros,created_at) VALUES (?,?,?,?,?,?,?,?)').run(store.id(), link.creatorId, session.link_id, session.id, session.country, cpmCents, amountMicros, store.now());
+    if (referralAmountMicros > 0) store.db.prepare('INSERT INTO referral_earnings (id,source_creator_id,importing_creator_id,video_id,link_id,view_id,percentage,amount_micros,country,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)').run(store.id(), videoOwner.ownerId, link.creatorId, videoOwner.videoId, session.link_id, session.id, referralPercent, referralAmountMicros, session.country, store.now());
     store.db.exec('COMMIT');
   } catch (error) { store.db.exec('ROLLBACK'); throw error; }
   res.json({ counted: true, country: session.country, cpmCents, amountMicros });
@@ -950,17 +956,18 @@ app.post('/api/views/:id/qualify', (req, res) => {
 
 app.get('/api/creator/analytics', requireUser, (req, res) => {
   const summary = store.db.prepare(`SELECT COUNT(s.id) AS views, COALESCE(SUM(e.amount_micros),0) AS earningsMicros FROM view_sessions s JOIN creator_links l ON l.id=s.link_id LEFT JOIN earnings e ON e.view_id=s.id WHERE l.creator_id = ? AND s.counted = 1`).get(req.user.id);
+  const referralSummary = store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS earningsMicros FROM referral_earnings WHERE source_creator_id=?').get(req.user.id);
   const countries = store.db.prepare(`SELECT s.country, COUNT(s.id) AS views, COALESCE(SUM(e.amount_micros),0) AS earningsMicros, COALESCE(MAX(e.cpm_cents),0) AS cpmCents FROM view_sessions s JOIN creator_links l ON l.id=s.link_id LEFT JOIN earnings e ON e.view_id=s.id WHERE l.creator_id = ? AND s.counted = 1 GROUP BY s.country ORDER BY views DESC`).all(req.user.id);
   const rates = store.db.prepare(`SELECT country,cpm_cents AS cpmCents FROM cpm_rates ORDER BY CASE WHEN country='ZZ' THEN 1 ELSE 0 END,country`).all();
   res.json({
-    summary: { views: Number(summary?.views || 0), earningsMicros: Number(summary?.earningsMicros || 0) },
+    summary: { views: Number(summary?.views || 0), earningsMicros: Number(summary?.earningsMicros || 0) + Number(referralSummary?.earningsMicros || 0) },
     countries: countries.map((row) => ({ ...row, views: Number(row.views || 0), earningsMicros: Number(row.earningsMicros || 0), cpmCents: Number(row.cpmCents || 0) })),
     rates,
   });
 });
 
 app.get('/api/creator/overview', requireUser, (req, res) => {
-  const dailyActivity = store.db.prepare(`
+  let dailyActivity = store.db.prepare(`
     SELECT DATE(s.qualified_at) AS date, COUNT(s.id) AS views,
       COALESCE(SUM(e.amount_micros),0) AS earningsMicros
     FROM view_sessions s
@@ -971,7 +978,41 @@ app.get('/api/creator/overview', requireUser, (req, res) => {
     GROUP BY DATE(s.qualified_at)
     ORDER BY DATE(s.qualified_at) ASC
   `).all(req.user.id);
-  res.json({ dailyActivity: dailyActivity.map((row) => ({ ...row, views: Number(row.views || 0), earningsMicros: Number(row.earningsMicros || 0) })) });
+  const referralDaily = store.db.prepare(`SELECT DATE(created_at) AS date, COALESCE(SUM(amount_micros),0) AS earningsMicros FROM referral_earnings WHERE source_creator_id=? AND DATE(created_at)>=DATE('now','-6 days') GROUP BY DATE(created_at)`).all(req.user.id);
+  const byDate = new Map(referralDaily.map(row => [row.date, Number(row.earningsMicros || 0)]));
+  const merged = new Map(dailyActivity.map(row => [row.date, { ...row, views: Number(row.views || 0), earningsMicros: Number(row.earningsMicros || 0) }]));
+  for (const row of referralDaily) {
+    if (!merged.has(row.date)) merged.set(row.date, { date: row.date, views: 0, earningsMicros: 0 });
+    merged.get(row.date).earningsMicros += byDate.get(row.date) || 0;
+  }
+  res.json({ dailyActivity: [...merged.values()].sort((a, b) => a.date.localeCompare(b.date)) });
+});
+
+function ensureCreatorProfile(creatorId) {
+  let profile = store.db.prepare('SELECT creator_id AS creatorId,display_name AS displayName,bio,avatar_url AS avatarUrl,brand_color AS brandColor,public_slug AS publicSlug,updated_at AS updatedAt FROM creator_profiles WHERE creator_id=?').get(creatorId);
+  if (!profile) {
+    const slug = `creator-${String(creatorId).replace(/[^a-z0-9]/gi, '').slice(0, 12).toLowerCase() || store.id().slice(0, 12)}`;
+    store.db.prepare('INSERT INTO creator_profiles (creator_id,display_name,bio,avatar_url,brand_color,public_slug,updated_at) VALUES (?,?,?,?,?,?,?)').run(creatorId, '', '', null, '#2563eb', slug, store.now());
+    profile = store.db.prepare('SELECT creator_id AS creatorId,display_name AS displayName,bio,avatar_url AS avatarUrl,brand_color AS brandColor,public_slug AS publicSlug,updated_at AS updatedAt FROM creator_profiles WHERE creator_id=?').get(creatorId);
+  }
+  return profile;
+}
+
+app.get('/api/creator/profile', requireUser, (req, res) => res.json({ profile: ensureCreatorProfile(req.user.id) }));
+app.put('/api/creator/profile', requireUser, (req, res) => {
+  const displayName = sanitizeInput(req.body?.displayName).slice(0, 80);
+  const bio = sanitizeInput(req.body?.bio).slice(0, 280);
+  const avatarUrl = sanitizeInput(req.body?.avatarUrl).slice(0, 500) || null;
+  const brandColor = String(req.body?.brandColor || '#2563eb').trim();
+  if (brandColor && !/^#[0-9a-f]{6}$/i.test(brandColor)) return res.status(400).json({ error: 'Brand color must be a six-digit hex color' });
+  ensureCreatorProfile(req.user.id);
+  store.db.prepare('UPDATE creator_profiles SET display_name=?,bio=?,avatar_url=?,brand_color=?,updated_at=? WHERE creator_id=?').run(displayName, bio, avatarUrl, brandColor || '#2563eb', store.now(), req.user.id);
+  res.json({ profile: ensureCreatorProfile(req.user.id) });
+});
+app.get('/api/public/creators/:slug/profile', (req, res) => {
+  const profile = store.db.prepare(`SELECT p.display_name AS displayName,p.bio,p.avatar_url AS avatarUrl,p.brand_color AS brandColor,p.public_slug AS publicSlug,u.email FROM creator_profiles p JOIN users u ON u.id=p.creator_id WHERE p.public_slug=? AND u.role='creator' AND u.status='active'`).get(req.params.slug);
+  if (!profile) return res.status(404).json({ error: 'Creator profile not found' });
+  res.json({ profile });
 });
 
 app.get('/api/cpm', (_req, res) => {
@@ -981,7 +1022,8 @@ app.get('/api/cpm', (_req, res) => {
 });
 
 function creatorBalance(creatorId) {
-  const earned = store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS amount FROM earnings WHERE creator_id=?').get(creatorId).amount;
+  const earned = Number(store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS amount FROM earnings WHERE creator_id=?').get(creatorId).amount)
+    + Number(store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS amount FROM referral_earnings WHERE source_creator_id=?').get(creatorId).amount);
   const reserved = store.db.prepare("SELECT COALESCE(SUM(amount_micros),0) AS amount FROM withdrawal_requests WHERE creator_id=? AND status IN ('pending','approved','paid')").get(creatorId).amount;
   return Math.max(0, earned - reserved);
 }
@@ -1004,6 +1046,7 @@ app.post('/api/creator/withdrawals', requireUser, (req, res) => {
 });
 
 app.get('/api/admin/cpm', requireAdmin, (req, res) => res.json({ rates: store.db.prepare('SELECT country,cpm_cents AS cpmCents,updated_at AS updatedAt FROM cpm_rates ORDER BY country').all() }));
+app.get('/api/admin/referrals', requireAdmin, (req, res) => res.json({ referrals: store.db.prepare(`SELECT r.id,r.video_id AS videoId,r.view_id AS viewId,r.percentage,r.amount_micros AS amountMicros,r.country,r.created_at AS createdAt,source.email AS sourceEmail,importing.email AS importingEmail FROM referral_earnings r JOIN users source ON source.id=r.source_creator_id JOIN users importing ON importing.id=r.importing_creator_id ORDER BY r.created_at DESC LIMIT 500`).all() }));
 app.put('/api/admin/cpm/:country', requireAdmin, (req, res) => {
   const country = String(req.params.country).toUpperCase();
   const cpmCents = Number(req.body?.cpmCents);
@@ -1031,7 +1074,8 @@ app.get('/api/admin/creators/:id', requireAdmin, (req, res) => {
     FROM users u LEFT JOIN creator_storage_limits l ON l.creator_id=u.id WHERE u.id=? AND u.role='creator'`).get(req.params.id);
   if (!creator) return res.status(404).json({ error: 'Creator not found' });
   const ranges = { today: "DATE('now','-1 day')", yesterday: "DATE('now','-2 day')", week: "DATE('now','-7 day')", month: "DATE('now','-30 day')" };
-  const earningsFor = (where) => Number(store.db.prepare(`SELECT COALESCE(SUM(amount_micros),0) AS amount FROM earnings WHERE creator_id=? AND ${where}`).get(creator.id).amount);
+  const earningsFor = (where) => Number(store.db.prepare(`SELECT COALESCE(SUM(amount_micros),0) AS amount FROM earnings WHERE creator_id=? AND ${where}`).get(creator.id).amount)
+    + Number(store.db.prepare(`SELECT COALESCE(SUM(amount_micros),0) AS amount FROM referral_earnings WHERE source_creator_id=? AND ${where}`).get(creator.id).amount);
   const viewsFor = (where) => Number(store.db.prepare(`SELECT COUNT(*) AS count FROM view_sessions s JOIN creator_links l ON l.id=s.link_id WHERE l.creator_id=? AND s.counted=1 AND ${where}`).get(creator.id).count);
   const usersFor = (where) => Number(store.db.prepare(`SELECT COUNT(DISTINCT s.viewer_hash) AS count FROM view_sessions s JOIN creator_links l ON l.id=s.link_id WHERE l.creator_id=? AND s.counted=1 AND ${where}`).get(creator.id).count);
   const lifetimeViews = viewsFor('1=1');
@@ -1089,7 +1133,9 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
   const users = store.db.prepare('SELECT COUNT(*) AS count FROM users').get().count;
   const videos = store.db.prepare('SELECT COUNT(*) AS count FROM videos').get().count;
   const qualifiedViews = store.db.prepare(`SELECT COUNT(*) AS count FROM view_sessions s WHERE s.counted=1 AND s.qualified_at IS NOT NULL${dateFilter}`).get(...dateParams).count;
-  const earningsMicros = store.db.prepare(`SELECT COALESCE(SUM(e.amount_micros),0) AS amount FROM earnings e${startDate ? ' WHERE DATE(e.created_at) BETWEEN ? AND ?' : ''}`).get(...dateParams).amount;
+  const directEarningsMicros = store.db.prepare(`SELECT COALESCE(SUM(e.amount_micros),0) AS amount FROM earnings e${startDate ? ' WHERE DATE(e.created_at) BETWEEN ? AND ?' : ''}`).get(...dateParams).amount;
+  const referralEarningsMicros = store.db.prepare(`SELECT COALESCE(SUM(r.amount_micros),0) AS amount FROM referral_earnings r${startDate ? ' WHERE DATE(r.created_at) BETWEEN ? AND ?' : ''}`).get(...dateParams).amount;
+  const earningsMicros = Number(directEarningsMicros || 0) + Number(referralEarningsMicros || 0);
   const pendingWithdrawals = store.db.prepare("SELECT COUNT(*) AS count FROM withdrawal_requests WHERE status='pending'").get().count;
   const dailyActivity = store.db.prepare(`
     SELECT DATE(s.qualified_at) AS date, COUNT(s.id) AS qualifiedViews,
@@ -1100,12 +1146,19 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
     WHERE s.counted=1 AND s.qualified_at IS NOT NULL${dateFilter}
     GROUP BY DATE(s.qualified_at) ORDER BY DATE(s.qualified_at) DESC
   `).all(...dateParams);
+  const referralDaily = store.db.prepare(`SELECT DATE(created_at) AS date, COALESCE(SUM(amount_micros),0) AS earningsMicros FROM referral_earnings${startDate ? ' WHERE DATE(created_at) BETWEEN ? AND ?' : ''} GROUP BY DATE(created_at)`).all(...dateParams);
+  const dailyByDate = new Map(dailyActivity.map(row => [row.date, row]));
+  for (const row of referralDaily) {
+    if (!dailyByDate.has(row.date)) dailyByDate.set(row.date, { date: row.date, qualifiedViews: 0, earningsMicros: 0, activeCreators: 0 });
+    dailyByDate.get(row.date).earningsMicros = Number(dailyByDate.get(row.date).earningsMicros || 0) + Number(row.earningsMicros || 0);
+  }
+  dailyActivity = [...dailyByDate.values()].sort((a, b) => b.date.localeCompare(a.date));
   const recentCreators = store.db.prepare(`
     SELECT u.id,u.email,u.created_at AS createdAt,
       (SELECT COUNT(*) FROM videos v WHERE v.owner_id=u.id) AS videos,
       (SELECT COUNT(*) FROM view_sessions s JOIN creator_links l ON l.id=s.link_id WHERE l.creator_id=u.id AND s.counted=1) AS qualifiedViews,
       (SELECT COALESCE(SUM(e.amount_micros),0) FROM earnings e WHERE e.creator_id=u.id AND DATE(e.created_at)=DATE('now')) AS todayEarningsMicros,
-      (SELECT COALESCE(SUM(e.amount_micros),0) FROM earnings e WHERE e.creator_id=u.id) AS earningsMicros
+      (SELECT COALESCE(SUM(e.amount_micros),0) FROM earnings e WHERE e.creator_id=u.id) + (SELECT COALESCE(SUM(r.amount_micros),0) FROM referral_earnings r WHERE r.source_creator_id=u.id) AS earningsMicros
     FROM users u WHERE u.role='creator' ORDER BY u.created_at DESC LIMIT 20
   `).all();
   res.json({ users, creators, videos, qualifiedViews, earningsMicros, pendingWithdrawals, dailyActivity, recentCreators, updatedAt: store.now() });
@@ -1170,17 +1223,24 @@ app.put('/api/admin/views/:id', requireAdmin, (req, res) => {
   try {
     if (!counted) {
       store.db.prepare('DELETE FROM earnings WHERE view_id=?').run(session.id);
+      store.db.prepare('DELETE FROM referral_earnings WHERE view_id=?').run(session.id);
       store.db.prepare('UPDATE view_sessions SET counted=0,qualified_at=COALESCE(qualified_at,?) WHERE id=?').run(timestamp, session.id);
     } else {
-      const link = store.db.prepare('SELECT creator_id FROM creator_links WHERE id=?').get(session.link_id);
+      const link = store.db.prepare('SELECT creator_id,video_id FROM creator_links WHERE id=?').get(session.link_id);
+      const owner = store.db.prepare('SELECT owner_id AS ownerId FROM videos WHERE id=?').get(link.video_id);
       const rate = store.db.prepare('SELECT cpm_cents FROM cpm_rates WHERE country=?').get(session.country)
         || store.db.prepare("SELECT cpm_cents FROM cpm_rates WHERE country='ZZ'").get();
       const cpmCents = rate?.cpm_cents || 0;
-      const amountMicros = cpmCents * 10;
+      const grossAmountMicros = cpmCents * 10;
+      const referralPercent = Math.max(0, Math.min(100, Number(process.env.REFERRAL_PERCENT || 5)));
+      const referralAmountMicros = owner?.ownerId && owner.ownerId !== link.creator_id ? Math.floor(grossAmountMicros * referralPercent / 100) : 0;
+      const amountMicros = grossAmountMicros - referralAmountMicros;
       store.db.prepare('UPDATE view_sessions SET counted=1,qualified_at=COALESCE(qualified_at,?) WHERE id=?').run(timestamp, session.id);
       if (amountMicros > 0) {
         store.db.prepare('INSERT OR REPLACE INTO earnings (id,creator_id,link_id,view_id,country,cpm_cents,amount_micros,created_at) VALUES (?,?,?,?,?,?,?,COALESCE((SELECT created_at FROM earnings WHERE view_id=?),?))').run(store.id(), link.creator_id, session.link_id, session.id, session.country, cpmCents, amountMicros, session.id, timestamp);
       } else store.db.prepare('DELETE FROM earnings WHERE view_id=?').run(session.id);
+      store.db.prepare('DELETE FROM referral_earnings WHERE view_id=?').run(session.id);
+      if (referralAmountMicros > 0) store.db.prepare('INSERT INTO referral_earnings (id,source_creator_id,importing_creator_id,video_id,link_id,view_id,percentage,amount_micros,country,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)').run(store.id(), owner.ownerId, link.creator_id, link.video_id, session.link_id, session.id, referralPercent, referralAmountMicros, session.country, timestamp);
     }
     store.db.exec('COMMIT');
   } catch (error) { store.db.exec('ROLLBACK'); throw error; }

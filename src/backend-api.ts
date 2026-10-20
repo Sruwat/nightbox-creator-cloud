@@ -205,6 +205,10 @@ export async function getCreatorOverview(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/creator/overview`, { headers: authHeaders(token) });
   return parseCreatorResponse<{ dailyActivity: Array<{ date: string; views: number; earningsMicros: number }> }>(response);
 }
+export type CreatorProfile = { creatorId: string; displayName: string; bio: string; avatarUrl: string | null; brandColor: string; publicSlug: string; updatedAt: string };
+export async function getCreatorProfile(token: string) { const response = await fetch(`${BACKEND_URL}/api/creator/profile`, { headers: authHeaders(token) }); return parseCreatorResponse<{ profile: CreatorProfile }>(response); }
+export async function updateCreatorProfile(token: string, profile: Pick<CreatorProfile, "displayName" | "bio" | "avatarUrl" | "brandColor">) { const response = await fetch(`${BACKEND_URL}/api/creator/profile`, { method: "PUT", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify(profile) }); return parseCreatorResponse<{ profile: CreatorProfile }>(response); }
+export async function getPublicCreatorProfile(slug: string) { const response = await fetch(`${BACKEND_URL}/api/public/creators/${encodeURIComponent(slug)}/profile`); return parseResponse<{ profile: Pick<CreatorProfile, "displayName" | "bio" | "avatarUrl" | "brandColor" | "publicSlug"> & { email: string } }>(response); }
 
 export async function getPublicCpm() {
   const response = await fetch(`${BACKEND_URL}/api/cpm`);
@@ -214,6 +218,10 @@ export async function getPublicCpm() {
 export async function getAdminUsers(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/users`, { headers: authHeaders(token) });
   return parseResponse<{ users: Array<{ id: string; email: string; role: string; status: string; telegramUserId: string | null; createdAt: string; storageQuotaBytes: number | null; storageUsedBytes: number }> }>(response);
+}
+export async function getAdminReferrals(token: string) {
+  const response = await fetch(`${BACKEND_URL}/api/admin/referrals`, { headers: authHeaders(token) });
+  return parseResponse<{ referrals: Array<{ id: string; videoId: string; viewId: string; percentage: number; amountMicros: number; country: string; createdAt: string; sourceEmail: string; importingEmail: string }> }>(response);
 }
 export type AdminCreatorDetail = {
   creator: { id: string; email: string; status: string; telegramUserId: string | null; createdAt: string; storageQuotaBytes: number | null; storageUsedBytes: number };

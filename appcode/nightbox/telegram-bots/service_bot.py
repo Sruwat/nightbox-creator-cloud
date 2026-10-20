@@ -24,8 +24,9 @@ from creator_keys import (
     set_pending_text,
     consume_pending_text,
     update_text_preferences,
+    remove_text_preference,
 )
-from bot_menu import register_bot_menu, service_commands
+from bot_menu import register_bot_menu, service_commands, settings_keyboard
 
 load_dotenv()
 logging.basicConfig(format="%(asctime)s %(levelname)s %(message)s", level=logging.INFO)
@@ -128,12 +129,12 @@ async def start(_, message):
             await message.reply_text(
                 f"✅ Already connected to creator account {user['email']}.\n\n"
                 "Your Telegram account is linked for automatic bot access.\n"
-                "Use the matching NightBox service bot to upload or convert content."
+                "Use the matching NightBox service bot to upload or convert content.", reply_markup=settings_keyboard()
             )
             return
         await message.reply_text(f"{LABEL} is ready. Connect your creator account with /connect nb_live_your_creator_key.")
         return
-    await message.reply_text(f"{LABEL} is ready. Send a supported remote video URL to create a NightLink.")
+    await message.reply_text(f"{LABEL} is ready. Send one or more supported remote video URLs to create NightLinks.", reply_markup=settings_keyboard())
 
 
 @app.on_message(filters.command("status"))
@@ -241,8 +242,20 @@ async def add_footer(_, message):
     preferences = update_text_preferences(message.chat.id, footer=value)
     await message.reply_text(
         f"✅ Footer saved. Text overlay is currently {'ON' if preferences['enabled'] else 'OFF'}.\n"
-        "Use `/enable_text`, then send the video in NightBox Upload."
+        "Use `/enable_text`, then send the video in NightBox Upload.", reply_markup=settings_keyboard()
     )
+
+
+@app.on_message(filters.command("remove_header"))
+async def remove_header(_, message):
+    remove_text_preference(message.chat.id, "header")
+    await message.reply_text("✅ Header removed.", reply_markup=settings_keyboard())
+
+
+@app.on_message(filters.command("remove_footer"))
+async def remove_footer(_, message):
+    remove_text_preference(message.chat.id, "footer")
+    await message.reply_text("✅ Footer removed.", reply_markup=settings_keyboard())
 
 
 @app.on_message(filters.command("enable_text"))
@@ -261,15 +274,59 @@ async def disable_text(_, message):
     await message.reply_text("✅ Text overlay disabled. Existing videos are unchanged.")
 
 
+@app.on_message(filters.command("enable_bold"))
+async def enable_bold(_, message):
+    update_text_preferences(message.chat.id, bold=True)
+    await message.reply_text("✅ Bold text enabled.", reply_markup=settings_keyboard())
+
+
+@app.on_message(filters.command("disable_bold"))
+async def disable_bold(_, message):
+    update_text_preferences(message.chat.id, bold=False)
+    await message.reply_text("✅ Normal text enabled.", reply_markup=settings_keyboard())
+
+
 @app.on_message(filters.command("text_status"))
 async def text_status(_, message):
     preferences = get_text_preferences(message.chat.id)
     await message.reply_text(
         "📝 **Text overlay settings**\n\n"
         f"Status: {'ON' if preferences['enabled'] else 'OFF'}\n"
+        f"Bold: {'ON' if preferences.get('bold') else 'OFF'}\n"
         f"Header: {preferences['header'] or '(not set)'}\n"
         f"Footer: {preferences['footer'] or '(not set)'}"
     )
+
+
+@app.on_callback_query(filters.regex(r"^nb:"))
+async def settings_callback(_, query):
+    action = query.data.split(":", 1)[1]
+    await query.answer()
+    chat_id = query.message.chat.id
+    if action in {"add_header", "add_footer"}:
+        set_pending_text(chat_id, action.replace("add_", ""))
+        await query.message.reply_text("Send the text in your next message.")
+    elif action in {"remove_header", "remove_footer"}:
+        remove_text_preference(chat_id, action.replace("remove_", ""))
+        await query.message.reply_text("✅ Removed.", reply_markup=settings_keyboard())
+    elif action == "enable_text":
+        update_text_preferences(chat_id, enabled=True)
+        await query.message.reply_text("✅ Text overlay enabled.", reply_markup=settings_keyboard())
+    elif action == "disable_text":
+        update_text_preferences(chat_id, enabled=False)
+        await query.message.reply_text("✅ Text overlay disabled.", reply_markup=settings_keyboard())
+    elif action == "enable_bold":
+        update_text_preferences(chat_id, bold=True)
+        await query.message.reply_text("✅ Bold text enabled.", reply_markup=settings_keyboard())
+    elif action == "disable_bold":
+        update_text_preferences(chat_id, bold=False)
+        await query.message.reply_text("✅ Normal text enabled.", reply_markup=settings_keyboard())
+    elif action == "text_status":
+        p = get_text_preferences(chat_id)
+        await query.message.reply_text(f"Status: {'ON' if p['enabled'] else 'OFF'}\nBold: {'ON' if p.get('bold') else 'OFF'}\nHeader: {p['header'] or '(not set)'}\nFooter: {p['footer'] or '(not set)'}", reply_markup=settings_keyboard())
+    elif action == "disconnect":
+        remove_creator_key(chat_id)
+        await query.message.reply_text("✅ Creator account disconnected.")
 
 
 @app.on_message(filters.text & ~filters.command(["start", "status", "connect", "disconnect"]))
@@ -291,24 +348,26 @@ async def remote_upload(_, message):
     if not key_for(message.chat.id):
         await message.reply_text("Connect your creator account first with /connect nb_live_your_creator_key")
         return
-    match = URL_RE.search(message.text or "")
-    if not match:
-        await message.reply_text("Send one http(s) video URL.")
+    urls = [url[:MAX_URL_LENGTH] for url in URL_RE.findall(message.text or "")]
+    if not urls:
+        await message.reply_text("Send one or more http(s) video URLs.")
         return
-    url = match.group(0)[:MAX_URL_LENGTH]
-    progress = await message.reply_text(f"Processing with {LABEL}...")
-    try:
-        payload = {"url": url, "title": f"{LABEL} upload"}
-        async with aiohttp.ClientSession() as session:
-            async with session.post(f"{BACKEND_URL}/upload-from-url", json=payload, headers=headers(message.chat.id), timeout=3600) as response:
-                data = await response.json(content_type=None)
-                if response.status >= 300:
-                    raise RuntimeError(data.get("error", f"HTTP {response.status}"))
-        link = data.get("link") or data.get("watchUrl")
-        await progress.edit_text(f"Upload complete.\n\n{link or 'Video is processing; check your dashboard.'}")
-    except Exception as error:
-        log.exception("service upload failed")
-        await progress.edit_text(f"Upload failed: {str(error)[:300]}")
+    progress = await message.reply_text(f"Processing {len(urls)} link(s) with {LABEL}...")
+    results = []
+    async with aiohttp.ClientSession() as session:
+        for index, url in enumerate(urls, start=1):
+            try:
+                payload = {"url": url, "title": f"{LABEL} upload"}
+                async with session.post(f"{BACKEND_URL}/upload-from-url", json=payload, headers=headers(message.chat.id), timeout=3600) as response:
+                    data = await response.json(content_type=None)
+                    if response.status >= 300:
+                        raise RuntimeError(data.get("error", f"HTTP {response.status}"))
+                link = data.get("link") or data.get("watchUrl")
+                results.append(f"✅ {index}. {link or 'Processing in dashboard'}")
+            except Exception as error:
+                log.exception("service upload failed")
+                results.append(f"❌ {index}. {str(error)[:180]}")
+    await progress.edit_text("\n".join(results))
 
 
 if __name__ == "__main__":

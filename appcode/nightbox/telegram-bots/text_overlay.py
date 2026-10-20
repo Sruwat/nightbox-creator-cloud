@@ -14,13 +14,13 @@ def _clean_text(value):
     return "".join(str(value or "").replace("\x00", "").splitlines()).strip()[:MAX_OVERLAY_TEXT_LENGTH]
 
 
-def _font_file():
-    for candidate in (
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
-    ):
-        if os.path.exists(candidate):
-            return candidate
+def _font_file(bold=True):
+    names = ("DejaVuSans-Bold.ttf", "LiberationSans-Bold.ttf") if bold else ("DejaVuSans.ttf", "LiberationSans-Regular.ttf")
+    for directory in ("/usr/share/fonts/truetype/dejavu", "/usr/share/fonts/truetype/liberation2"):
+        for name in names:
+            candidate = os.path.join(directory, name)
+            if os.path.exists(candidate):
+                return candidate
     return ""
 
 
@@ -28,13 +28,13 @@ def _filter_path(path):
     return str(path).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
 
 
-def _run_overlay(input_path, output_path, header_path, footer_path, header, footer):
+def _run_overlay(input_path, output_path, header_path, footer_path, header, footer, bold):
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise RuntimeError("Text overlay is unavailable because FFmpeg is not installed on the server")
 
     filters = []
-    font = _font_file()
+    font = _font_file(bold)
     common = ":fontcolor=white:fontsize=h*0.045:x=(w-text_w)/2:box=1:boxcolor=black@0.62:boxborderw=12"
     if font:
         common = f":fontfile='{_filter_path(font)}'" + common
@@ -64,6 +64,7 @@ async def apply_text_overlay(input_path, output_dir, chat_id):
     preferences = get_text_preferences(chat_id)
     header = _clean_text(preferences.get("header")) if preferences.get("enabled") else ""
     footer = _clean_text(preferences.get("footer")) if preferences.get("enabled") else ""
+    bold = bool(preferences.get("bold", False))
     if not header and not footer:
         return input_path, False
 
@@ -84,6 +85,7 @@ async def apply_text_overlay(input_path, output_dir, chat_id):
             footer_path,
             header,
             footer,
+            bold,
         )
         return str(output_path), True
     finally:

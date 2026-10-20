@@ -69,6 +69,15 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_creator_storage_reservations_creator
     ON creator_storage_reservations(creator_id, created_at);
+  CREATE TABLE IF NOT EXISTS creator_profiles (
+    creator_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    display_name TEXT NOT NULL DEFAULT '',
+    bio TEXT NOT NULL DEFAULT '',
+    avatar_url TEXT,
+    brand_color TEXT NOT NULL DEFAULT '#2563eb',
+    public_slug TEXT NOT NULL UNIQUE,
+    updated_at TEXT NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS reward_milestones (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
@@ -128,6 +137,19 @@ db.exec(`
     amount_micros INTEGER NOT NULL,
     created_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS referral_earnings (
+    id TEXT PRIMARY KEY,
+    source_creator_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    importing_creator_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+    link_id TEXT NOT NULL REFERENCES creator_links(id) ON DELETE CASCADE,
+    view_id TEXT NOT NULL UNIQUE REFERENCES view_sessions(id) ON DELETE CASCADE,
+    percentage INTEGER NOT NULL CHECK (percentage BETWEEN 0 AND 100),
+    amount_micros INTEGER NOT NULL CHECK (amount_micros >= 0),
+    country TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_referral_earnings_source ON referral_earnings(source_creator_id, created_at);
   CREATE TABLE IF NOT EXISTS view_rules (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     eligible_percent INTEGER NOT NULL DEFAULT 100 CHECK (eligible_percent BETWEEN 0 AND 100),

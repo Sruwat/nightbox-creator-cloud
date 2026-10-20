@@ -23,13 +23,14 @@ from creator_keys import (
     is_full_creator_key,
     key_help_text,
     remove_creator_key,
+    remove_text_preference,
     set_creator_key,
     set_pending_text,
     consume_pending_text,
     update_text_preferences,
 )
 from text_overlay import apply_text_overlay
-from bot_menu import convert_commands, register_bot_menu
+from bot_menu import convert_commands, register_bot_menu, settings_keyboard
 
 load_dotenv()
 
@@ -421,14 +422,12 @@ async def import_nightbox_link(url, chat_id, telegram_id=""):
 async def start_command(_, message):
     if AUTO_CREATOR_IDENTITY:
         action = "send a NightBox link to create your own earning link" if BOT_KIND == "NIGHTBOX_TO_NIGHTBOX" else "send a Nightheast link (the access code can be included in the message when required)"
-        await message.reply_text(
-            f"{BOT_KIND.replace('_', ' ').title()} is ready. Just {action}."
-        )
+        await message.reply_text(f"{BOT_KIND.replace('_', ' ').title()} is ready. Just {action}.", reply_markup=settings_keyboard())
         return
     action = "send a NightBox link to create your own earning link" if BOT_KIND == "NIGHTBOX_TO_NIGHTBOX" else "send a supported share URL"
     await message.reply_text(
         f"{BOT_KIND.replace('_', ' ').title()} is ready. Connect with /connect nb_live_your_creator_key, then {action}.\n\n"
-        "Text overlay: `/add_header text`, `/add_footer text`, `/enable_text`, `/disable_text`."
+        "Use the buttons below for text settings, or type the commands manually.", reply_markup=settings_keyboard()
     )
 
 
@@ -465,6 +464,18 @@ async def add_footer_command(_, message):
     )
 
 
+@app.on_message(filters.command("remove_header"))
+async def remove_header_command(_, message):
+    remove_text_preference(message.chat.id, "header")
+    await message.reply_text("✅ Header removed.", reply_markup=settings_keyboard())
+
+
+@app.on_message(filters.command("remove_footer"))
+async def remove_footer_command(_, message):
+    remove_text_preference(message.chat.id, "footer")
+    await message.reply_text("✅ Footer removed.", reply_markup=settings_keyboard())
+
+
 @app.on_message(filters.command("enable_text"))
 async def enable_text_command(_, message):
     preferences = get_text_preferences(message.chat.id)
@@ -481,15 +492,65 @@ async def disable_text_command(_, message):
     await message.reply_text("✅ Text overlay disabled. Existing videos are unchanged.")
 
 
+@app.on_message(filters.command("enable_bold"))
+async def enable_bold_command(_, message):
+    update_text_preferences(message.chat.id, bold=True)
+    await message.reply_text("✅ Bold text enabled for future conversions.", reply_markup=settings_keyboard())
+
+
+@app.on_message(filters.command("disable_bold"))
+async def disable_bold_command(_, message):
+    update_text_preferences(message.chat.id, bold=False)
+    await message.reply_text("✅ Normal text enabled for future conversions.", reply_markup=settings_keyboard())
+
+
 @app.on_message(filters.command("text_status"))
 async def text_status_command(_, message):
     preferences = get_text_preferences(message.chat.id)
     await message.reply_text(
         "📝 **Text overlay settings**\n\n"
         f"Status: {'ON' if preferences['enabled'] else 'OFF'}\n"
+        f"Bold: {'ON' if preferences.get('bold') else 'OFF'}\n"
         f"Header: {preferences['header'] or '(not set)'}\n"
         f"Footer: {preferences['footer'] or '(not set)'}"
     )
+
+
+@app.on_callback_query(filters.regex(r"^nb:"))
+async def settings_callback(_, query):
+    action = query.data.split(":", 1)[1]
+    await query.answer()
+    if action == "add_header":
+        set_pending_text(query.message.chat.id, "header")
+        await query.message.reply_text("Send the header text in your next message.")
+    elif action == "add_footer":
+        set_pending_text(query.message.chat.id, "footer")
+        await query.message.reply_text("Send the footer text in your next message.")
+    elif action in {"remove_header", "remove_footer"}:
+        remove_text_preference(query.message.chat.id, action.replace("remove_", ""))
+        await query.message.reply_text("✅ Removed.", reply_markup=settings_keyboard())
+    elif action == "enable_text":
+        update_text_preferences(query.message.chat.id, enabled=True)
+        await query.message.reply_text("✅ Text overlay enabled.", reply_markup=settings_keyboard())
+    elif action == "disable_text":
+        update_text_preferences(query.message.chat.id, enabled=False)
+        await query.message.reply_text("✅ Text overlay disabled.", reply_markup=settings_keyboard())
+    elif action == "enable_bold":
+        update_text_preferences(query.message.chat.id, bold=True)
+        await query.message.reply_text("✅ Bold text enabled.", reply_markup=settings_keyboard())
+    elif action == "disable_bold":
+        update_text_preferences(query.message.chat.id, bold=False)
+        await query.message.reply_text("✅ Normal text enabled.", reply_markup=settings_keyboard())
+    elif action == "text_status":
+        preferences = get_text_preferences(query.message.chat.id)
+        await query.message.reply_text(
+            f"📝 Text: {'ON' if preferences['enabled'] else 'OFF'} · Bold: {'ON' if preferences.get('bold') else 'OFF'}\n"
+            f"Header: {preferences['header'] or '(not set)'}\nFooter: {preferences['footer'] or '(not set)'}",
+            reply_markup=settings_keyboard(),
+        )
+    elif action == "disconnect":
+        remove_creator_key(query.message.chat.id)
+        await query.message.reply_text("Disconnected.")
 
 
 @app.on_message(filters.command("connect"))
@@ -599,9 +660,27 @@ async def handle(c, m):
                 raise Exception(f"Forwarded media is not a valid video: {reason}")
             info = {"path": media_path, "title": file_name, "size": os.path.getsize(media_path)}
         elif BOT_KIND == "NIGHTBOX_TO_NIGHTBOX":
-            url = urls[0]
-            res = await import_nightbox_link(url, m.chat.id, telegram_id)
-            await status.edit_text(f"✅ **NightBox link added to your dashboard!**\n\n🔗 `{res.get('link', '')}`")
+            # Convert every NightBox link in the message and ignore unrelated URLs.
+            valid_urls = []
+            ignored = 0
+            for candidate in urls:
+                parsed = urlparse(candidate)
+                if parsed.hostname and parsed.hostname.lower() in {"nightbox.in", "www.nightbox.in", "api.nightbox.in"} and re.fullmatch(r"/l/[^/]+", parsed.path):
+                    valid_urls.append(candidate)
+                else:
+                    ignored += 1
+            if not valid_urls:
+                raise Exception("No valid NightBox /l/ link found. Other links were ignored.")
+            results = []
+            for index, url in enumerate(valid_urls, 1):
+                await status.edit_text(f"⏳ Converting NightBox link {index}/{len(valid_urls)}...")
+                try:
+                    res = await import_nightbox_link(url, m.chat.id, telegram_id)
+                    results.append(f"✅ `{res.get('link', '')}`")
+                except Exception as error:
+                    results.append(f"❌ {str(error)[:140]}")
+            note = f"\n\nIgnored {ignored} unrelated link(s)." if ignored else ""
+            await status.edit_text(f"✅ **NightBox links processed ({len(valid_urls)})**\n\n" + "\n".join(results) + note)
             return
         else:
             url = urls[0]
