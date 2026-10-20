@@ -541,19 +541,7 @@ async def handle_video(client: Client, message: Message):
             video_id = data.get("videoId", "")
             watch_url = data.get("link") or data.get("watchUrl", "")
 
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("▶️ Watch Video", url=watch_url)],
-                [InlineKeyboardButton("📋 Copy Link", url=watch_url)],
-            ])
-
-            await status_msg.edit_text(
-                "✅ **Video Uploaded Successfully!**\n\n"
-                f"🔗 **Your earning link:** `{watch_url}`\n\n"
-                f"🆔 **Video ID:** `{video_id}`\n\n"
-                f"📏 Size: {size_mb} MB\n\n"
-                "📱 Share this link — it opens directly in the app!",
-                reply_markup=keyboard,
-            )
+            await status_msg.edit_text(watch_url)
             logger.info(f"Video uploaded: {video_id} ({size_mb} MB)")
 
     except Exception as e:

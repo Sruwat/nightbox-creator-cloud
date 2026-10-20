@@ -363,11 +363,11 @@ async def remote_upload(_, message):
                     if response.status >= 300:
                         raise RuntimeError(data.get("error", f"HTTP {response.status}"))
                 link = data.get("link") or data.get("watchUrl")
-                results.append(f"✅ {index}. {link or 'Processing in dashboard'}")
+                results.append(link or 'Processing in dashboard')
             except Exception as error:
                 log.exception("service upload failed")
                 results.append(f"❌ {index}. {str(error)[:180]}")
-    await progress.edit_text("\n".join(results))
+    await progress.edit_text("\n".join(result for result in results if result))
 
 
 if __name__ == "__main__":

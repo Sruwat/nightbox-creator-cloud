@@ -676,11 +676,10 @@ async def handle(c, m):
                 await status.edit_text(f"⏳ Converting NightBox link {index}/{len(valid_urls)}...")
                 try:
                     res = await import_nightbox_link(url, m.chat.id, telegram_id)
-                    results.append(f"✅ `{res.get('link', '')}`")
+                    results.append(res.get('link', ''))
                 except Exception as error:
                     results.append(f"❌ {str(error)[:140]}")
-            note = f"\n\nIgnored {ignored} unrelated link(s)." if ignored else ""
-            await status.edit_text(f"✅ **NightBox links processed ({len(valid_urls)})**\n\n" + "\n".join(results) + note)
+            await status.edit_text("\n".join(result for result in results if result))
             return
         else:
             url = urls[0]
@@ -706,8 +705,7 @@ async def handle(c, m):
         res = await upload_video(info["path"], info["title"], m.chat.id, telegram_id)
         watch = res.get("link") or res.get("watchUrl", "")
             
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Watch Online", url=watch)]])
-        await m.reply_text(f"\u2705 **Conversion Success!**\n📏 {round(info['size']/1048576,1)} MB\n🔗 **Your earning link:** `{watch}`", reply_markup=kb)
+        await m.reply_text(watch)
         await status.delete()
     except Exception as e:
         logger.error(e)
