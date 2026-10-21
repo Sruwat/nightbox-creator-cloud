@@ -126,7 +126,10 @@ def update_text_preferences(chat_id, *, enabled=None, bold=None, link_only=None,
 def remove_text_preference(chat_id, field):
     if field not in {"header", "footer"}:
         raise ValueError("text field must be header or footer")
-    return update_text_preferences(chat_id, **{field: ""})
+    # Removing source text/header/footer switches the converter to the clean
+    # media + converted-link mode. /enable_text explicitly restores the
+    # original caption around the converted link.
+    return update_text_preferences(chat_id, link_only=True, **{field: ""})
 
 
 def set_pending_text(chat_id, field):
