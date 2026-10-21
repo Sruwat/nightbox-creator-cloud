@@ -723,9 +723,24 @@ async def handle(c, m):
         await status.edit_text("\u2601 **Uploading to server...**")
         res = await upload_video(info["path"], info["title"], m.chat.id, telegram_id)
         watch = res.get("link") or res.get("watchUrl", "")
-            
-        await m.reply_text(watch)
+        if not watch:
+            raise Exception("Backend did not return a NightBox link")
+
+        # Keep the user's original post intact. Replace only the source URL so
+        # captions, blank lines, spacing, access codes and surrounding text are
+        # returned exactly as they were sent.
+        source_text = (
+            m.caption
+            if (m.photo or m.video or m.document or m.animation)
+            else (m.text or "")
+        )
+        converted_text = source_text.replace(urls[0], watch) if urls else watch
+
         await status.delete()
+        if m.photo or m.video or m.document or m.animation:
+            await m.copy(chat_id=m.chat.id, caption=converted_text or watch)
+        else:
+            await m.reply_text(converted_text or watch)
     except Exception as e:
         logger.error(e)
         await status.edit_text(f"\u274c **Error:** {str(e)}")
