@@ -290,7 +290,7 @@ async def add_header_command(client: Client, message: Message):
         set_pending_text(message.chat.id, "header")
         await message.reply_text("Send the header text in your next message. No command needed.")
         return
-    preferences = update_text_preferences(message.chat.id, header=value)
+    preferences = update_text_preferences(message.chat.id, enabled=True, header=value)
     await message.reply_text(
         f"✅ Header saved for future uploads. Text overlay is currently {'ON' if preferences['enabled'] else 'OFF'}.\n"
         "Use `/enable_text` to burn it into the video."
@@ -304,7 +304,7 @@ async def add_footer_command(client: Client, message: Message):
         set_pending_text(message.chat.id, "footer")
         await message.reply_text("Send the footer text in your next message. No command needed.")
         return
-    preferences = update_text_preferences(message.chat.id, footer=value)
+    preferences = update_text_preferences(message.chat.id, enabled=True, footer=value)
     await message.reply_text(
         f"✅ Footer saved for future uploads. Text overlay is currently {'ON' if preferences['enabled'] else 'OFF'}.\n"
         "Use `/enable_text` to burn it into the video.", reply_markup=settings_keyboard()
@@ -648,8 +648,8 @@ async def handle_unknown(client: Client, message: Message):
     """Handle non-video messages"""
     pending = consume_pending_text(message.chat.id)
     if pending:
-        update_text_preferences(message.chat.id, **{pending: (message.text or "").strip()})
-        await message.reply_text(f"✅ {pending.title()} saved. Use `/enable_text` to apply it to future uploads.")
+        update_text_preferences(message.chat.id, enabled=True, **{pending: (message.text or "").strip()})
+        await message.reply_text(f"✅ {pending.title()} saved and enabled for future uploads.")
         return
     await message.reply_text(
         "📹 Please send me a **video file** to upload.\n"
