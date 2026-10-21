@@ -42,11 +42,16 @@ def _connection():
     connection.execute(
         "CREATE TABLE IF NOT EXISTS text_preferences ("
         "chat_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0, "
-        "bold INTEGER NOT NULL DEFAULT 0, header TEXT NOT NULL DEFAULT '', footer TEXT NOT NULL DEFAULT ''"
+        "bold INTEGER NOT NULL DEFAULT 0, link_only INTEGER NOT NULL DEFAULT 0, "
+        "header TEXT NOT NULL DEFAULT '', footer TEXT NOT NULL DEFAULT ''"
         ")"
     )
     try:
         connection.execute("ALTER TABLE text_preferences ADD COLUMN bold INTEGER NOT NULL DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        connection.execute("ALTER TABLE text_preferences ADD COLUMN link_only INTEGER NOT NULL DEFAULT 0")
     except sqlite3.OperationalError:
         pass
     connection.execute(
@@ -90,29 +95,30 @@ def remove_creator_key(chat_id):
 def get_text_preferences(chat_id):
     with closing(_connection()) as connection:
         row = connection.execute(
-            "SELECT enabled, bold, header, footer FROM text_preferences WHERE chat_id = ?",
+            "SELECT enabled, bold, link_only, header, footer FROM text_preferences WHERE chat_id = ?",
             (str(chat_id),),
         ).fetchone()
     if not row:
-        return {"enabled": False, "bold": False, "header": "", "footer": ""}
-    return {"enabled": bool(row[0]), "bold": bool(row[1]), "header": row[2] or "", "footer": row[3] or ""}
+        return {"enabled": False, "bold": False, "link_only": False, "header": "", "footer": ""}
+    return {"enabled": bool(row[0]), "bold": bool(row[1]), "link_only": bool(row[2]), "header": row[3] or "", "footer": row[4] or ""}
 
 
-def update_text_preferences(chat_id, *, enabled=None, bold=None, header=None, footer=None):
+def update_text_preferences(chat_id, *, enabled=None, bold=None, link_only=None, header=None, footer=None):
     current = get_text_preferences(chat_id)
     values = {
         "enabled": current["enabled"] if enabled is None else bool(enabled),
         "bold": current["bold"] if bold is None else bool(bold),
+        "link_only": current["link_only"] if link_only is None else bool(link_only),
         "header": current["header"] if header is None else str(header),
         "footer": current["footer"] if footer is None else str(footer),
     }
     with closing(_connection()) as connection:
         with connection:
             connection.execute(
-                "INSERT INTO text_preferences(chat_id, enabled, bold, header, footer) VALUES(?,?,?,?,?) "
-                "ON CONFLICT(chat_id) DO UPDATE SET enabled=excluded.enabled, bold=excluded.bold, "
+                "INSERT INTO text_preferences(chat_id, enabled, bold, link_only, header, footer) VALUES(?,?,?,?,?,?) "
+                "ON CONFLICT(chat_id) DO UPDATE SET enabled=excluded.enabled, bold=excluded.bold, link_only=excluded.link_only, "
                 "header=excluded.header, footer=excluded.footer",
-                (str(chat_id), int(values["enabled"]), int(values["bold"]), values["header"], values["footer"]),
+                (str(chat_id), int(values["enabled"]), int(values["bold"]), int(values["link_only"]), values["header"], values["footer"]),
             )
     return values
 
@@ -120,7 +126,7 @@ def update_text_preferences(chat_id, *, enabled=None, bold=None, header=None, fo
 def remove_text_preference(chat_id, field):
     if field not in {"header", "footer"}:
         raise ValueError("text field must be header or footer")
-    return update_text_preferences(chat_id, **{field: ""})
+    return update_text_preferences(chat_id, link_only=True, **{field: ""})
 
 
 def set_pending_text(chat_id, field):

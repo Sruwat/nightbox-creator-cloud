@@ -686,10 +686,14 @@ async def handle(c, m):
             if errors:
                 await status.edit_text("❌ " + "\n❌ ".join(errors))
                 return
-            original_text = m.caption if (m.photo or m.video or m.document or m.animation) else (m.text or "")
-            converted_text = original_text
-            for source, replacement in replacements.items():
-                converted_text = converted_text.replace(source, replacement)
+            preferences = get_text_preferences(m.chat.id)
+            if preferences.get("link_only"):
+                converted_text = "\n".join(part for part in [preferences.get("header", ""), *replacements.values(), preferences.get("footer", "")] if part)
+            else:
+                original_text = m.caption if (m.photo or m.video or m.document or m.animation) else (m.text or "")
+                converted_text = original_text
+                for source, replacement in replacements.items():
+                    converted_text = converted_text.replace(source, replacement)
             await status.delete()
             if m.photo or m.video or m.document or m.animation:
                 await m.copy(chat_id=m.chat.id, caption=converted_text or None)
