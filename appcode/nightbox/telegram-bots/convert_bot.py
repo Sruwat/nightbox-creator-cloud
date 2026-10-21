@@ -482,13 +482,13 @@ async def enable_text_command(_, message):
     if not preferences["header"] and not preferences["footer"]:
         await message.reply_text("⚠️ Add a header or footer first, then use `/enable_text`.")
         return
-    update_text_preferences(message.chat.id, enabled=True)
+    update_text_preferences(message.chat.id, enabled=True, link_only=False)
     await message.reply_text("✅ Text overlay enabled for the next converted videos.")
 
 
 @app.on_message(filters.command("disable_text"))
 async def disable_text_command(_, message):
-    update_text_preferences(message.chat.id, enabled=False)
+    update_text_preferences(message.chat.id, enabled=False, link_only=True)
     await message.reply_text("✅ Text overlay disabled. Existing videos are unchanged.")
 
 
@@ -530,10 +530,10 @@ async def settings_callback(_, query):
         remove_text_preference(query.message.chat.id, action.replace("remove_", ""))
         await query.message.reply_text("✅ Removed.", reply_markup=settings_keyboard())
     elif action == "enable_text":
-        update_text_preferences(query.message.chat.id, enabled=True)
+        update_text_preferences(query.message.chat.id, enabled=True, link_only=False)
         await query.message.reply_text("✅ Text overlay enabled.", reply_markup=settings_keyboard())
     elif action == "disable_text":
-        update_text_preferences(query.message.chat.id, enabled=False)
+        update_text_preferences(query.message.chat.id, enabled=False, link_only=True)
         await query.message.reply_text("✅ Text overlay disabled.", reply_markup=settings_keyboard())
     elif action == "enable_bold":
         update_text_preferences(query.message.chat.id, bold=True)
@@ -687,13 +687,16 @@ async def handle(c, m):
                 await status.edit_text("❌ " + "\n❌ ".join(errors))
                 return
             preferences = get_text_preferences(m.chat.id)
+            header = preferences.get("header", "").strip()
+            footer = preferences.get("footer", "").strip()
             if preferences.get("link_only"):
-                converted_text = "\n".join(part for part in [preferences.get("header", ""), *replacements.values(), preferences.get("footer", "")] if part)
+                converted_text = "\n".join(part for part in [header, *replacements.values(), footer] if part)
             else:
                 original_text = m.caption if (m.photo or m.video or m.document or m.animation) else (m.text or "")
-                converted_text = original_text
+                body = original_text
                 for source, replacement in replacements.items():
-                    converted_text = converted_text.replace(source, replacement)
+                    body = body.replace(source, replacement)
+                converted_text = "\n".join(part for part in [header, body, footer] if part)
             await status.delete()
             if m.photo or m.video or m.document or m.animation:
                 await m.copy(chat_id=m.chat.id, caption=converted_text or None)
