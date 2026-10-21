@@ -1952,7 +1952,19 @@ app.get('/ready', (req, res) => {
     payment: !process.env.PAYMENT_PROVIDER || Boolean(razorpayConfigured() && process.env.RAZORPAY_WEBHOOK_SECRET),
     recurringPlans: !process.env.PAYMENT_PROVIDER || Boolean(razorpayConfigured() && process.env.RAZORPAY_PLAN_MONTHLY && process.env.RAZORPAY_PLAN_PRIORITY),
   };
-  const required = production ? Object.values(checks).every(Boolean) : checks.database;
+  const coreReady = [
+    checks.database,
+    checks.publicDomain,
+    checks.webOrigins,
+    checks.authSecrets,
+    checks.adminApiKey,
+    checks.trustedProxy,
+    checks.bunny,
+  ].every(Boolean);
+  // Reputation and payments are optional deployments. Their individual
+  // statuses remain visible to operators without taking down core playback,
+  // uploads, links, analytics or creator earnings when intentionally unused.
+  const required = production ? coreReady : checks.database;
   res.status(required ? 200 : 503).json({ status: required ? 'ready' : 'not_ready', environment: process.env.NODE_ENV || 'development', checks });
 });
 
