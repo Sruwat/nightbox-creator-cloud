@@ -671,15 +671,30 @@ async def handle(c, m):
                     ignored += 1
             if not valid_urls:
                 raise Exception("No valid NightBox /l/ link found. Other links were ignored.")
-            results = []
+            replacements = {}
+            errors = []
             for index, url in enumerate(valid_urls, 1):
                 await status.edit_text(f"⏳ Converting NightBox link {index}/{len(valid_urls)}...")
                 try:
                     res = await import_nightbox_link(url, m.chat.id, telegram_id)
-                    results.append(res.get('link', ''))
+                    replacement = res.get('link', '')
+                    if not replacement:
+                        raise Exception("Backend did not return a NightBox link")
+                    replacements[url] = replacement
                 except Exception as error:
-                    results.append(f"❌ {str(error)[:140]}")
-            await status.edit_text("\n".join(result for result in results if result))
+                    errors.append(str(error)[:180])
+            if errors:
+                await status.edit_text("❌ " + "\n❌ ".join(errors))
+                return
+            original_text = m.caption if (m.photo or m.video or m.document or m.animation) else (m.text or "")
+            converted_text = original_text
+            for source, replacement in replacements.items():
+                converted_text = converted_text.replace(source, replacement)
+            await status.delete()
+            if m.photo or m.video or m.document or m.animation:
+                await m.copy(chat_id=m.chat.id, caption=converted_text or None)
+            else:
+                await m.reply_text(converted_text)
             return
         else:
             url = urls[0]
