@@ -25,6 +25,9 @@ import asyncio
 import tempfile
 import re
 import time
+import random
+import shutil
+import subprocess
 import aiohttp
 from pathlib import Path
 from dotenv import load_dotenv
@@ -118,6 +121,53 @@ def validate_video_file(file_path):
         return True  # Don't block — Telegram already verified
     except Exception:
         return True  # Don't block on validation errors
+
+
+def create_temporary_thumbnail(video_path, output_dir):
+    """Extract one random video frame for the Telegram result preview.
+
+    The JPEG is deliberately created inside the per-upload temp directory and
+    is deleted in ``handle_video``'s finally block. It is never sent to the
+    backend or persisted in NightBox storage.
+    """
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    if not ffmpeg:
+        return None
+
+    duration = 0.0
+    if ffprobe:
+        try:
+            result = subprocess.run(
+                [ffprobe, "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", str(video_path)],
+                capture_output=True, text=True, timeout=30,
+            )
+            duration = max(0.0, float((result.stdout or "").strip()))
+        except (ValueError, OSError, subprocess.SubprocessError):
+            duration = 0.0
+
+    # Avoid seeking beyond the end of short videos. A small random offset gives
+    # a useful frame without storing a separate thumbnail asset.
+    seek = random.uniform(0.0, max(0.0, duration - 0.25)) if duration else 0.5
+    thumbnail_path = os.path.join(output_dir, "telegram-preview.jpg")
+    try:
+        result = subprocess.run(
+            [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{seek:.3f}",
+             "-i", str(video_path), "-frames:v", "1", "-vf", "scale=640:-2",
+             "-q:v", "3", thumbnail_path],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode == 0 and os.path.exists(thumbnail_path) and os.path.getsize(thumbnail_path) > 0:
+            return thumbnail_path
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        if os.path.exists(thumbnail_path):
+            os.unlink(thumbnail_path)
+    except OSError:
+        pass
+    return None
 
 
 def creator_key(chat_id):
@@ -470,6 +520,7 @@ async def handle_video(client: Client, message: Message):
     )
 
     tmp_path = None
+    thumbnail_path = None
     try:
         async with upload_semaphore:
             # Update status to downloading
@@ -540,8 +591,24 @@ async def handle_video(client: Client, message: Message):
 
             video_id = data.get("videoId", "")
             watch_url = data.get("link") or data.get("watchUrl", "")
-
-            await status_msg.edit_text(watch_url)
+            thumbnail_path = create_temporary_thumbnail(processed_path, os.path.dirname(tmp_path))
+            if thumbnail_path:
+                try:
+                    await status_msg.delete()
+                except Exception:
+                    pass
+                try:
+                    await message.reply_photo(
+                        photo=thumbnail_path,
+                        caption=watch_url,
+                    )
+                except Exception:
+                    # A preview failure must never hide a successful upload.
+                    await message.reply_text(watch_url)
+            else:
+                # Keep upload completion reliable even if FFmpeg cannot extract
+                # a preview frame on an unusual source format.
+                await status_msg.edit_text(watch_url)
             logger.info(f"Video uploaded: {video_id} ({size_mb} MB)")
 
     except Exception as e:
@@ -566,6 +633,12 @@ async def handle_video(client: Client, message: Message):
             try:
                 os.unlink(processed_path)
                 logger.info(f"Cleaned up overlay file: {processed_path}")
+            except Exception:
+                pass
+        if thumbnail_path and os.path.exists(thumbnail_path):
+            try:
+                os.unlink(thumbnail_path)
+                logger.info("Cleaned up temporary Telegram thumbnail")
             except Exception:
                 pass
 
