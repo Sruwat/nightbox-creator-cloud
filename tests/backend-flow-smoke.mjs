@@ -11,6 +11,7 @@ let videoId;
 let previousRate;
 let previousUkRate;
 let previousMinimumWatchSeconds;
+let previousEligiblePercent;
 
 async function json(url, options) {
   const response = await fetch(`${baseUrl}${url}`, options);
@@ -83,6 +84,7 @@ try {
   previousRate = store.db.prepare("SELECT cpm_cents AS cpmCents FROM cpm_rates WHERE country='IN'").get();
   previousUkRate = store.db.prepare("SELECT cpm_cents AS cpmCents FROM cpm_rates WHERE country='GB'").get();
   previousMinimumWatchSeconds = store.db.prepare("SELECT minimum_watch_seconds AS minimumWatchSeconds FROM view_rules WHERE id=1").get().minimumWatchSeconds;
+  previousEligiblePercent = store.db.prepare("SELECT eligible_percent AS eligiblePercent FROM view_rules WHERE id=1").get().eligiblePercent;
   store.db.prepare("INSERT INTO cpm_rates(country,cpm_cents,updated_at) VALUES('IN',1000,?) ON CONFLICT(country) DO UPDATE SET cpm_cents=excluded.cpm_cents,updated_at=excluded.updated_at").run(store.now());
   store.db.prepare("INSERT INTO cpm_rates(country,cpm_cents,updated_at) VALUES('GB',1500,?) ON CONFLICT(country) DO UPDATE SET cpm_cents=excluded.cpm_cents,updated_at=excluded.updated_at").run(store.now());
 
@@ -113,7 +115,7 @@ try {
   assert.equal(qualified.amountMicros, 10000);
 
   // Keep the remaining cap checks fast while preserving the real minimum-watch assertion above.
-  store.db.prepare("UPDATE view_rules SET minimum_watch_seconds=1 WHERE id=1").run();
+  store.db.prepare("UPDATE view_rules SET minimum_watch_seconds=1, eligible_percent=100 WHERE id=1").run();
 
   // Replaying the same signed qualification must not create another ledger row.
   const replay = await json(`/api/views/${started.sessionId}/qualify`, {
@@ -188,5 +190,8 @@ try {
   }
   if (previousMinimumWatchSeconds !== undefined) {
     store.db.prepare("UPDATE view_rules SET minimum_watch_seconds=? WHERE id=1").run(previousMinimumWatchSeconds);
+  }
+  if (previousEligiblePercent !== undefined) {
+    store.db.prepare("UPDATE view_rules SET eligible_percent=? WHERE id=1").run(previousEligiblePercent);
   }
 }

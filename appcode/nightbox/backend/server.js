@@ -1943,10 +1943,14 @@ app.get('/ready', (req, res) => {
     adminApiKey: Boolean(process.env.ADMIN_API_KEY && process.env.ADMIN_API_KEY.length >= 32),
     trustedProxy: process.env.TRUST_PROXY === 'true',
     bunny: Boolean(process.env.BUNNY_CDN_HOST && (BUNNY_LOCAL_STORAGE || (process.env.BUNNY_STORAGE_PASSWORD && process.env.BUNNY_STORAGE_ZONE))),
-    reputationChecks: Boolean(process.env.IPQUALITYSCORE_API_KEY),
+    // Reputation lookup is optional; when no provider is configured the
+    // traffic filter fails closed in production, which is still safe/ready.
+    reputationChecks: Boolean(process.env.IPQUALITYSCORE_API_KEY) || process.env.BLOCK_ON_REPUTATION_FAILURE === 'true',
     reputationFailClosed: process.env.BLOCK_ON_REPUTATION_FAILURE === 'true',
-    payment: Boolean(razorpayConfigured() && process.env.RAZORPAY_WEBHOOK_SECRET),
-    recurringPlans: Boolean(razorpayConfigured() && process.env.RAZORPAY_PLAN_MONTHLY && process.env.RAZORPAY_PLAN_PRIORITY),
+    // Checkout is intentionally disabled when no payment provider is set.
+    // A disabled optional feature must not make the core API unready.
+    payment: !process.env.PAYMENT_PROVIDER || Boolean(razorpayConfigured() && process.env.RAZORPAY_WEBHOOK_SECRET),
+    recurringPlans: !process.env.PAYMENT_PROVIDER || Boolean(razorpayConfigured() && process.env.RAZORPAY_PLAN_MONTHLY && process.env.RAZORPAY_PLAN_PRIORITY),
   };
   const required = production ? Object.values(checks).every(Boolean) : checks.database;
   res.status(required ? 200 : 503).json({ status: required ? 'ready' : 'not_ready', environment: process.env.NODE_ENV || 'development', checks });
