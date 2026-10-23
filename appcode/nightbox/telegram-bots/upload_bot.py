@@ -49,7 +49,6 @@ from creator_keys import (
     update_text_preferences,
     remove_text_preference,
 )
-from text_overlay import apply_text_overlay
 from bot_menu import register_bot_menu, settings_keyboard, upload_commands
 
 load_dotenv()
@@ -281,6 +280,19 @@ async def help_command(client: Client, message: Message):
 def command_text(message):
     parts = (message.text or "").split(maxsplit=1)
     return parts[1].strip() if len(parts) == 2 else ""
+
+
+def build_upload_caption(message, watch_url):
+    """Return the Telegram caption; never burn settings into the uploaded media."""
+    preferences = get_text_preferences(message.chat.id)
+    header = str(preferences.get("header") or "").strip()
+    footer = str(preferences.get("footer") or "").strip()
+    original = str(getattr(message, "caption", "") or "").strip()
+
+    # Text OFF/link-only intentionally removes the user's source caption, but
+    # configured header/footer remain normal message text around the new link.
+    body = "" if preferences.get("link_only") else original
+    return "\n\n".join(part for part in (header, body, watch_url, footer) if part)
 
 
 @app.on_message(filters.command("add_header"))
@@ -562,19 +574,10 @@ async def handle_video(client: Client, message: Message):
             if not validate_video_file(tmp_path):
                 raise Exception("Downloaded file does not appear to be a valid video")
 
-            processed_path, overlay_applied = await apply_text_overlay(
-                tmp_path,
-                os.path.dirname(tmp_path),
-                message.chat.id,
-            )
-            if overlay_applied:
-                await status_msg.edit_text(
-                    "⏳ **Applying text overlay...**\n\n"
-                    f"📁 File: `{safe_file_name}`\n"
-                    "This may take a little longer for large videos."
-                )
-            else:
-                processed_path = tmp_path
+            # Header/footer settings are Telegram caption text. Never render
+            # them into the video: the uploaded media must remain unchanged.
+            processed_path = tmp_path
+            overlay_applied = False
 
             # Update status
             await status_msg.edit_text(
@@ -591,6 +594,7 @@ async def handle_video(client: Client, message: Message):
 
             video_id = data.get("videoId", "")
             watch_url = data.get("link") or data.get("watchUrl", "")
+            caption = build_upload_caption(message, watch_url)
             thumbnail_path = create_temporary_thumbnail(processed_path, os.path.dirname(tmp_path))
             if thumbnail_path:
                 try:
@@ -600,15 +604,15 @@ async def handle_video(client: Client, message: Message):
                 try:
                     await message.reply_photo(
                         photo=thumbnail_path,
-                        caption=watch_url,
+                        caption=caption or watch_url,
                     )
                 except Exception:
                     # A preview failure must never hide a successful upload.
-                    await message.reply_text(watch_url)
+                    await message.reply_text(caption or watch_url)
             else:
                 # Keep upload completion reliable even if FFmpeg cannot extract
                 # a preview frame on an unusual source format.
-                await status_msg.edit_text(watch_url)
+                await status_msg.edit_text(caption or watch_url)
             logger.info(f"Video uploaded: {video_id} ({size_mb} MB)")
 
     except Exception as e:
