@@ -227,8 +227,8 @@ async def add_header(_, message):
         return
     preferences = update_text_preferences(message.chat.id, header=value)
     await message.reply_text(
-        f"✅ Header saved. Text overlay is currently {'ON' if preferences['enabled'] else 'OFF'}.\n"
-        "Use `/enable_text`, then send the video in NightBox Upload."
+        f"✅ Header saved. Caption text is currently {'ON' if preferences['enabled'] else 'OFF'}.\n"
+        "Use `/enable_text`, then send the video in NightBox Upload. Media stays unchanged."
     )
 
 
@@ -241,8 +241,8 @@ async def add_footer(_, message):
         return
     preferences = update_text_preferences(message.chat.id, footer=value)
     await message.reply_text(
-        f"✅ Footer saved. Text overlay is currently {'ON' if preferences['enabled'] else 'OFF'}.\n"
-        "Use `/enable_text`, then send the video in NightBox Upload.", reply_markup=settings_keyboard()
+        f"✅ Footer saved. Caption text is currently {'ON' if preferences['enabled'] else 'OFF'}.\n"
+        "Use `/enable_text`, then send the video in NightBox Upload. Media stays unchanged.", reply_markup=settings_keyboard()
     )
 
 
@@ -264,14 +264,14 @@ async def enable_text(_, message):
     if not preferences["header"] and not preferences["footer"]:
         await message.reply_text("⚠️ Add a header or footer first, then use `/enable_text`.")
         return
-    update_text_preferences(message.chat.id, enabled=True)
-    await message.reply_text("✅ Text overlay enabled for your next uploads/conversions.")
+    update_text_preferences(message.chat.id, enabled=True, link_only=False)
+    await message.reply_text("✅ Caption text enabled for your next upload/conversion. Media stays unchanged.")
 
 
 @app.on_message(filters.command("disable_text"))
 async def disable_text(_, message):
-    update_text_preferences(message.chat.id, enabled=False)
-    await message.reply_text("✅ Text overlay disabled. Existing videos are unchanged.")
+    update_text_preferences(message.chat.id, enabled=False, link_only=True)
+    await message.reply_text("✅ Original caption disabled. Media, header/footer and link will remain.")
 
 
 @app.on_message(filters.command("enable_bold"))
@@ -290,7 +290,7 @@ async def disable_bold(_, message):
 async def text_status(_, message):
     preferences = get_text_preferences(message.chat.id)
     await message.reply_text(
-        "📝 **Text overlay settings**\n\n"
+        "📝 **Caption text settings**\n\n"
         f"Status: {'ON' if preferences['enabled'] else 'OFF'}\n"
         f"Bold: {'ON' if preferences.get('bold') else 'OFF'}\n"
         f"Header: {preferences['header'] or '(not set)'}\n"
@@ -310,11 +310,11 @@ async def settings_callback(_, query):
         remove_text_preference(chat_id, action.replace("remove_", ""))
         await query.message.reply_text("✅ Removed.", reply_markup=settings_keyboard())
     elif action == "enable_text":
-        update_text_preferences(chat_id, enabled=True)
-        await query.message.reply_text("✅ Text overlay enabled.", reply_markup=settings_keyboard())
+        update_text_preferences(chat_id, enabled=True, link_only=False)
+        await query.message.reply_text("✅ Caption text enabled. Media stays unchanged.", reply_markup=settings_keyboard())
     elif action == "disable_text":
-        update_text_preferences(chat_id, enabled=False)
-        await query.message.reply_text("✅ Text overlay disabled.", reply_markup=settings_keyboard())
+        update_text_preferences(chat_id, enabled=False, link_only=True)
+        await query.message.reply_text("✅ Original caption disabled. Media, header/footer and link will remain.", reply_markup=settings_keyboard())
     elif action == "enable_bold":
         update_text_preferences(chat_id, bold=True)
         await query.message.reply_text("✅ Bold text enabled.", reply_markup=settings_keyboard())

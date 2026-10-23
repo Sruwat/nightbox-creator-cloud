@@ -29,7 +29,6 @@ from creator_keys import (
     consume_pending_text,
     update_text_preferences,
 )
-from text_overlay import apply_text_overlay
 from bot_menu import convert_commands, register_bot_menu, settings_keyboard
 
 load_dotenv()
@@ -317,7 +316,12 @@ async def download_nightheast(url, message_text, tmp_dir):
                 )
             return response.status, data
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
+    # Resolver responses should be quick, but the returned media can be large.
+    # Keep connection/read timeouts bounded without imposing a 60-second total
+    # limit on a multi-gigabyte download.
+    async with aiohttp.ClientSession(
+        timeout=aiohttp.ClientTimeout(total=900, connect=20, sock_read=60)
+    ) as session:
         status, data = await resolve(payload)
         if not isinstance(data, dict):
             raise Exception("Nightheast resolver returned an invalid response object.")
@@ -445,8 +449,8 @@ async def add_header_command(_, message):
         return
     preferences = update_text_preferences(message.chat.id, header=value)
     await message.reply_text(
-        f"✅ Header saved for future conversions. Text overlay is currently {'ON' if preferences['enabled'] else 'OFF'}.\n"
-        "Use `/enable_text` to burn it into the video."
+        f"✅ Header saved for future conversions. Caption text is currently {'ON' if preferences['enabled'] else 'OFF'}.\n"
+        "Use `/enable_text` to include the original caption; media stays unchanged."
     )
 
 
@@ -459,8 +463,8 @@ async def add_footer_command(_, message):
         return
     preferences = update_text_preferences(message.chat.id, footer=value)
     await message.reply_text(
-        f"✅ Footer saved for future conversions. Text overlay is currently {'ON' if preferences['enabled'] else 'OFF'}.\n"
-        "Use `/enable_text` to burn it into the video."
+        f"✅ Footer saved for future conversions. Caption text is currently {'ON' if preferences['enabled'] else 'OFF'}.\n"
+        "Use `/enable_text` to include the original caption; media stays unchanged."
     )
 
 
@@ -483,13 +487,13 @@ async def enable_text_command(_, message):
         await message.reply_text("⚠️ Add a header or footer first, then use `/enable_text`.")
         return
     update_text_preferences(message.chat.id, enabled=True, link_only=False)
-    await message.reply_text("✅ Text overlay enabled for the next converted videos.")
+    await message.reply_text("✅ Caption text enabled. Converted media stays unchanged.")
 
 
 @app.on_message(filters.command("disable_text"))
 async def disable_text_command(_, message):
     update_text_preferences(message.chat.id, enabled=False, link_only=True)
-    await message.reply_text("✅ Text overlay disabled. Existing videos are unchanged.")
+    await message.reply_text("✅ Original caption disabled. Media, header/footer and link will remain.")
 
 
 @app.on_message(filters.command("enable_bold"))
@@ -508,7 +512,7 @@ async def disable_bold_command(_, message):
 async def text_status_command(_, message):
     preferences = get_text_preferences(message.chat.id)
     await message.reply_text(
-        "📝 **Text overlay settings**\n\n"
+        "📝 **Caption text settings**\n\n"
         f"Status: {'ON' if preferences['enabled'] else 'OFF'}\n"
         f"Bold: {'ON' if preferences.get('bold') else 'OFF'}\n"
         f"Header: {preferences['header'] or '(not set)'}\n"
@@ -531,10 +535,10 @@ async def settings_callback(_, query):
         await query.message.reply_text("✅ Removed.", reply_markup=settings_keyboard())
     elif action == "enable_text":
         update_text_preferences(query.message.chat.id, enabled=True, link_only=False)
-        await query.message.reply_text("✅ Text overlay enabled.", reply_markup=settings_keyboard())
+        await query.message.reply_text("✅ Caption text enabled. Media stays unchanged.", reply_markup=settings_keyboard())
     elif action == "disable_text":
         update_text_preferences(query.message.chat.id, enabled=False, link_only=True)
-        await query.message.reply_text("✅ Text overlay disabled.", reply_markup=settings_keyboard())
+        await query.message.reply_text("✅ Original caption disabled. Media, header/footer and link will remain.", reply_markup=settings_keyboard())
     elif action == "enable_bold":
         update_text_preferences(query.message.chat.id, bold=True)
         await query.message.reply_text("✅ Bold text enabled.", reply_markup=settings_keyboard())
@@ -707,22 +711,13 @@ async def handle(c, m):
             url = urls[0]
             async with download_semaphore:
                 if BOT_KIND == "NIGHTHEAST_TO_NIGHTBOX" and extract_nightheast_video_id(url):
-                    info = await download_nightheast(url, text, tmp)
+                    await status.edit_text("⏳ Contacting Nightheast resolver and downloading media...")
+                    info = await asyncio.wait_for(download_nightheast(url, text, tmp), timeout=900)
                 elif any(x in url.lower() for x in ["terabox", "1024"]) and BOT_KIND == "TERABOX":
-                    info = await download_terabox(url, tmp)
+                    info = await asyncio.wait_for(download_terabox(url, tmp), timeout=1200)
                 else:
-                    info = await download_generic(url, tmp)
+                    info = await asyncio.wait_for(download_generic(url, tmp), timeout=1200)
             
-        processed_path, overlay_applied = await apply_text_overlay(
-            info["path"],
-            tmp,
-            m.chat.id,
-        )
-        if overlay_applied:
-            await status.edit_text("\u23f3 **Applying text overlay...**")
-            info["path"] = processed_path
-            info["size"] = os.path.getsize(processed_path)
-
         await status.edit_text("\u2601 **Uploading to server...**")
         res = await upload_video(info["path"], info["title"], m.chat.id, telegram_id)
         watch = res.get("link") or res.get("watchUrl", "")
@@ -737,7 +732,14 @@ async def handle(c, m):
             if (m.photo or m.video or m.document or m.animation)
             else (m.text or "")
         )
-        converted_text = source_text.replace(urls[0], watch) if urls else watch
+        preferences = get_text_preferences(m.chat.id)
+        header = preferences.get("header", "").strip()
+        footer = preferences.get("footer", "").strip()
+        body = source_text.replace(urls[0], watch) if urls else source_text
+        if preferences.get("link_only"):
+            converted_text = "\n".join(part for part in [header, watch, footer] if part)
+        else:
+            converted_text = "\n".join(part for part in [header, body or watch, footer] if part)
 
         await status.delete()
         if m.photo or m.video or m.document or m.animation:
