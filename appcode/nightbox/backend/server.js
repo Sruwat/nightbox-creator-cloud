@@ -1418,7 +1418,8 @@ app.put('/api/admin/withdrawals/:id', requireAdmin, (req, res) => {
   const minimumMicros = Number(process.env.MIN_WITHDRAWAL_USD_MICROS || 10000000);
   if (editable && (!Number.isSafeInteger(amountMicros) || amountMicros < minimumMicros || !method)) return res.status(400).json({ error: 'Provide a valid payout amount above the configured minimum and payout method' });
   if (editable && ['pending', 'approved'].includes(status)) {
-    const earned = Number(store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS amount FROM earnings WHERE creator_id=?').get(current.creatorId).amount);
+    const earned = Number(store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS amount FROM earnings WHERE creator_id=?').get(current.creatorId).amount)
+      + Number(store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS amount FROM referral_earnings WHERE source_creator_id=?').get(current.creatorId).amount);
     const reservedOther = Number(store.db.prepare("SELECT COALESCE(SUM(amount_micros),0) AS amount FROM withdrawal_requests WHERE creator_id=? AND status IN ('pending','approved','paid') AND id<>?").get(current.creatorId, current.id).amount);
     if (amountMicros > Math.max(0, earned - reservedOther)) return res.status(409).json({ error: 'Withdrawal exceeds the available creator balance', balanceMicros: Math.max(0, earned - reservedOther) });
   }
