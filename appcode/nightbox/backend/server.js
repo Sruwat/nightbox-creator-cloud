@@ -1137,7 +1137,7 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
   const referralEarningsMicros = store.db.prepare(`SELECT COALESCE(SUM(r.amount_micros),0) AS amount FROM referral_earnings r${startDate ? ' WHERE DATE(r.created_at) BETWEEN ? AND ?' : ''}`).get(...dateParams).amount;
   const earningsMicros = Number(directEarningsMicros || 0) + Number(referralEarningsMicros || 0);
   const pendingWithdrawals = store.db.prepare("SELECT COUNT(*) AS count FROM withdrawal_requests WHERE status='pending'").get().count;
-  const dailyActivity = store.db.prepare(`
+  const dailyActivityRows = store.db.prepare(`
     SELECT DATE(s.qualified_at) AS date, COUNT(s.id) AS qualifiedViews,
       COALESCE(SUM(e.amount_micros),0) AS earningsMicros, COUNT(DISTINCT l.creator_id) AS activeCreators
     FROM view_sessions s
@@ -1147,12 +1147,12 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
     GROUP BY DATE(s.qualified_at) ORDER BY DATE(s.qualified_at) DESC
   `).all(...dateParams);
   const referralDaily = store.db.prepare(`SELECT DATE(created_at) AS date, COALESCE(SUM(amount_micros),0) AS earningsMicros FROM referral_earnings${startDate ? ' WHERE DATE(created_at) BETWEEN ? AND ?' : ''} GROUP BY DATE(created_at)`).all(...dateParams);
-  const dailyByDate = new Map(dailyActivity.map(row => [row.date, row]));
+  const dailyByDate = new Map(dailyActivityRows.map(row => [row.date, row]));
   for (const row of referralDaily) {
     if (!dailyByDate.has(row.date)) dailyByDate.set(row.date, { date: row.date, qualifiedViews: 0, earningsMicros: 0, activeCreators: 0 });
     dailyByDate.get(row.date).earningsMicros = Number(dailyByDate.get(row.date).earningsMicros || 0) + Number(row.earningsMicros || 0);
   }
-  dailyActivity = [...dailyByDate.values()].sort((a, b) => b.date.localeCompare(a.date));
+  const dailyActivity = [...dailyByDate.values()].sort((a, b) => b.date.localeCompare(a.date));
   const recentCreators = store.db.prepare(`
     SELECT u.id,u.email,u.created_at AS createdAt,
       (SELECT COUNT(*) FROM videos v WHERE v.owner_id=u.id) AS videos,
