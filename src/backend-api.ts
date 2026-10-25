@@ -118,12 +118,33 @@ export async function adminLogin(email: string, password: string) {
   return parseResponse<{ user: { id: string; email: string; role: string }; token: string }>(response);
 }
 
-export async function uploadVideo(file: File, title: string, token?: string): Promise<UploadResult> {
+export type UploadProgress = { loaded: number; total: number; percent: number };
+
+export async function uploadVideo(file: File, title: string, token?: string, onProgress?: (progress: UploadProgress) => void): Promise<UploadResult> {
   const form = new FormData();
   form.append("video", file);
   form.append("title", title || file.name);
-  const response = await fetch(`${BACKEND_URL}/upload-file`, { method: "POST", body: form, headers: token ? { Authorization: `Bearer ${token}` } : undefined });
-  return parseResponse<UploadResult>(response);
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${BACKEND_URL}/upload-file`);
+    xhr.timeout = 30 * 60 * 1000;
+    xhr.responseType = "json";
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return;
+      onProgress?.({ loaded: event.loaded, total: event.total, percent: Math.round((event.loaded / event.total) * 100) });
+    };
+    xhr.onload = () => {
+      const body = xhr.response || (() => { try { return JSON.parse(xhr.responseText || "{}"); } catch { return {}; } })();
+      if (xhr.status >= 200 && xhr.status < 300) return resolve(body as UploadResult);
+      if (xhr.status === 401) notifyUnauthorized("creator");
+      reject(new Error(body?.error || `Backend request failed (${xhr.status || "network error"})`));
+    };
+    xhr.onerror = () => reject(new Error("Upload connection failed. Please check your network and try again."));
+    xhr.ontimeout = () => reject(new Error("Upload timed out after 30 minutes. Please retry with a stable connection."));
+    xhr.onabort = () => reject(new Error("Upload cancelled."));
+    try { xhr.send(form); } catch { reject(new Error("Unable to start upload. Please choose the file again.")); }
+  });
 }
 
 export async function getVideo(videoId: string) {
