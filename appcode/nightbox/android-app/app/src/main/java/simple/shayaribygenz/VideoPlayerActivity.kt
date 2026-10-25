@@ -28,6 +28,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -85,6 +86,7 @@ class VideoPlayerActivity : AppCompatActivity() {
     private var viewQualified = false
     private var linkSlug: String? = null
     private var remoteHlsUrl: String? = null
+    private var remoteStreamUrl: String? = null
     private var durationUpdateRunnable: Runnable? = null
     private var shouldResumePlayback = true
     private var restoredPositionMs = 0L
@@ -215,6 +217,7 @@ class VideoPlayerActivity : AppCompatActivity() {
                     val payload = org.json.JSONObject(response.body?.string().orEmpty())
                     val video = payload.optJSONObject("video") ?: throw IllegalStateException("Video metadata missing")
                     remoteHlsUrl = video.optString("hlsUrl").takeIf { it.isNotBlank() }
+                    remoteStreamUrl = video.optString("streamUrl").takeIf { it.isNotBlank() }
                     val title = video.optString("title").takeIf { it.isNotBlank() }
                     withContext(Dispatchers.Main) {
                         title?.let { tvVideoMetaDetails.text = it }
@@ -293,7 +296,10 @@ class VideoPlayerActivity : AppCompatActivity() {
     private fun initExoPlayerHls() {
         val vid = videoId ?: return
 
-        val mediaUrl = remoteHlsUrl ?: run {
+        // Prefer the backend's range-capable proxy. It avoids CDN-specific
+        // redirect/header differences between Android versions while retaining
+        // byte-range streaming and keeps the direct CDN URL as a fallback.
+        val mediaUrl = remoteStreamUrl ?: remoteHlsUrl ?: run {
             showError("Video URL is unavailable.")
             return
         }
@@ -301,10 +307,7 @@ class VideoPlayerActivity : AppCompatActivity() {
 
         // Create HTTP data source with proper headers
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setDefaultRequestProperties(mapOf(
-                "Referer" to "$backendOrigin/",
-                "Origin" to backendOrigin
-            ))
+            .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(15000)
             .setReadTimeoutMs(15000)
 
@@ -326,7 +329,9 @@ class VideoPlayerActivity : AppCompatActivity() {
         // InMobi VAST tag URL
         val adTagUri = Uri.parse("https://api.inmobi.com/showad/v3.1?site-id=10000219819&pl-id=10000775406&rt=vast3&r=4")
 
-        val mediaItemBuilder = MediaItem.Builder().setUri(mediaUrl)
+        val mediaItemBuilder = MediaItem.Builder()
+            .setUri(mediaUrl)
+            .setMimeType(MimeTypes.VIDEO_MP4)
         if (imaAdsLoader != null) {
             mediaItemBuilder.setAdsConfiguration(
                 MediaItem.AdsConfiguration.Builder(adTagUri).build()
@@ -588,7 +593,7 @@ class VideoPlayerActivity : AppCompatActivity() {
             }
         }
 
-        val streamUrl = remoteHlsUrl ?: run {
+        val streamUrl = remoteStreamUrl ?: remoteHlsUrl ?: run {
             showError("Video stream URL is unavailable.")
             return
         }

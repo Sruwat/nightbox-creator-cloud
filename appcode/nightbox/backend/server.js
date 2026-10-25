@@ -1736,6 +1736,9 @@ app.get('/video/:id', async (req, res) => {
         // VPS range-stream fallback for local-only objects.
         embedUrl: BUNNY_LOCAL_STORAGE ? (await bunny.getCdnUrlIfAvailable(videoId)) || `${PUBLIC_API_URL}/video/${videoId}/stream` : bunny.getEmbedUrl(videoId),
         hlsUrl: BUNNY_LOCAL_STORAGE ? (await bunny.getCdnUrlIfAvailable(videoId)) || `${PUBLIC_API_URL}/video/${videoId}/stream` : bunny.getDirectPlayUrl(videoId),
+        // Stable range-capable API playback URL for clients that cannot reliably
+        // consume the Bunny CDN MP4 directly (notably Android WebView/ExoPlayer).
+        streamUrl: `${PUBLIC_API_URL}/video/${videoId}/stream`,
         watchUrl: bunny.getWatchUrl(videoId),
         downloadUrl: `${DOMAIN_URL}/download/${videoId}`,
       },

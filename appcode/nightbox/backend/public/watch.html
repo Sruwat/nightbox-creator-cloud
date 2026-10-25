@@ -166,7 +166,7 @@
     
     <h1>Opening in NightBox</h1>
     <p id="status">Attempting to open the video in your app. Please wait a moment...</p>
-    <video id="browserPlayer" controls playsinline preload="metadata"></video>
+    <video id="browserPlayer" controls crossorigin="anonymous" playsinline preload="metadata"></video>
     
     <div class="loader" id="loader"></div>
 
@@ -224,19 +224,28 @@
         const metadata = await fetch(`/video/${encodeURIComponent(resolvedVideoId)}`);
         if (!metadata.ok) throw new Error('Video metadata unavailable');
         const video = (await metadata.json()).video;
-        if (/\.mp4(?:$|\?)/i.test(video.hlsUrl)) {
-          browserPlayer.src = video.hlsUrl;
+        const directUrl = video.hlsUrl;
+        const fallbackUrl = video.streamUrl || `/video/${encodeURIComponent(resolvedVideoId)}/stream`;
+        if (/\.mp4(?:$|\?)/i.test(directUrl)) {
+          browserPlayer.src = directUrl;
         } else if (browserPlayer.canPlayType('application/vnd.apple.mpegurl')) {
-          browserPlayer.src = video.hlsUrl;
+          browserPlayer.src = directUrl;
         } else if (window.Hls && window.Hls.isSupported()) {
           const hls = new window.Hls({ enableWorker: true });
-          hls.loadSource(video.hlsUrl);
+          hls.loadSource(directUrl);
           hls.attachMedia(browserPlayer);
           window.nightboxHls = hls;
         } else {
           throw new Error('HLS playback is not supported by this browser');
         }
         browserPlayer.style.display = 'block';
+        browserPlayer.load();
+        browserPlayer.addEventListener('error', () => {
+          if (browserPlayer.dataset.fallbackAttempted === 'true') return;
+          browserPlayer.dataset.fallbackAttempted = 'true';
+          browserPlayer.src = fallbackUrl;
+          browserPlayer.load();
+        }, { once: true });
         document.getElementById('status').innerText = 'Watch here or open the NightBox app.';
       } catch (error) {
         document.getElementById('status').innerText = 'This video is not available in the browser.';
