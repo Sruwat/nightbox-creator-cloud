@@ -948,7 +948,7 @@ app.post('/api/links/:slug/view/start', async (req, res) => {
   const viewToken = crypto.randomBytes(32).toString('base64url');
   const session = { id: store.id(), linkId: link.id, viewerUserId: viewer?.id || null, viewerHash, ipHash, viewTokenHash: store.hash(`${viewToken}|${process.env.VIEW_HASH_SECRET || process.env.AUTH_SECRET || 'change-me'}`), country: viewerCountry(req) };
   store.db.prepare('INSERT INTO view_sessions (id,link_id,viewer_user_id,viewer_hash,ip_hash,view_token_hash,country,started_at) VALUES (?,?,?,?,?,?,?,?)').run(session.id, session.linkId, session.viewerUserId, session.viewerHash, session.ipHash, session.viewTokenHash, session.country, store.now());
-  const counted = process.env.COUNT_VIEWS_ON_START === 'false' ? { counted: false } : recordViewAtStart({ ...session, link_id: session.linkId });
+  const counted = process.env.COUNT_VIEWS_ON_START === 'false' ? { counted: false } : recordViewAtStart({ ...session, link_id: session.linkId, ip_hash: session.ipHash });
   res.status(201).json({ sessionId: session.id, viewToken, counted: counted.counted, countedAtStart: counted.countedAtStart === true, minimumWatchSeconds: store.db.prepare('SELECT minimum_watch_seconds AS seconds FROM view_rules WHERE id = 1').get().seconds });
 });
 
