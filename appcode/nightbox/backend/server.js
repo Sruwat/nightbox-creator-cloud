@@ -891,6 +891,51 @@ app.get('/api/links/:slug', (req, res) => {
   res.json({ link });
 });
 
+// Compatibility mode for older Android builds that only call view/start and
+// never send the later qualify callback. The backend remains the source of
+// truth for limits, filtering, earnings, and referral ledger writes.
+function recordViewAtStart(session) {
+  const rules = store.db.prepare('SELECT * FROM view_rules WHERE id = 1').get();
+  const ipRule = store.db.prepare('SELECT max_views_per_ip_24h AS maxViews FROM view_rules WHERE id=1').get();
+  const link = store.db.prepare('SELECT creator_id AS creatorId FROM creator_links WHERE id = ?').get(session.link_id);
+  if (!link) return { counted: false, reason: 'link_not_found' };
+
+  const recent = store.db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM view_sessions existing
+    JOIN creator_links existingLink ON existingLink.id = existing.link_id
+    WHERE existingLink.creator_id = ?
+      AND existing.ip_hash = ?
+      AND existing.started_at >= datetime('now', '-24 hours')
+      AND existing.counted = 1
+  `).get(link.creatorId, session.ip_hash);
+  if (recent.count >= ipRule.maxViews) return { counted: false, duplicate: true };
+
+  const bucket = parseInt(store.hash(session.id).slice(0, 8), 16) % 100;
+  if (bucket >= rules.eligible_percent) return { counted: false, filtered: true };
+
+  const rate = store.db.prepare('SELECT cpm_cents FROM cpm_rates WHERE country = ?').get(session.country)
+    || store.db.prepare("SELECT cpm_cents FROM cpm_rates WHERE country = 'ZZ'").get();
+  const cpmCents = rate?.cpm_cents || 0;
+  const grossAmountMicros = cpmCents * 10;
+  const referralPercent = Math.max(0, Math.min(100, Number(process.env.REFERRAL_PERCENT || 5)));
+  const videoOwner = store.db.prepare('SELECT v.owner_id AS ownerId, v.id AS videoId FROM videos v JOIN creator_links l ON l.video_id=v.id WHERE l.id=?').get(session.link_id);
+  const referralAmountMicros = videoOwner?.ownerId && videoOwner.ownerId !== link.creatorId
+    ? Math.floor(grossAmountMicros * referralPercent / 100) : 0;
+  const amountMicros = grossAmountMicros - referralAmountMicros;
+  const timestamp = store.now();
+
+  store.db.exec('BEGIN');
+  try {
+    store.db.prepare('UPDATE view_sessions SET qualified_at = ?, counted = 1 WHERE id = ? AND counted = 0').run(timestamp, session.id);
+    if (amountMicros > 0) store.db.prepare('INSERT OR IGNORE INTO earnings (id,creator_id,link_id,view_id,country,cpm_cents,amount_micros,created_at) VALUES (?,?,?,?,?,?,?,?)').run(store.id(), link.creatorId, session.link_id, session.id, session.country, cpmCents, amountMicros, timestamp);
+    if (referralAmountMicros > 0) store.db.prepare('INSERT OR IGNORE INTO referral_earnings (id,source_creator_id,importing_creator_id,video_id,link_id,view_id,percentage,amount_micros,country,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)').run(store.id(), videoOwner.ownerId, link.creatorId, videoOwner.videoId, session.link_id, session.id, referralPercent, referralAmountMicros, session.country, timestamp);
+    store.db.exec('COMMIT');
+  } catch (error) { store.db.exec('ROLLBACK'); throw error; }
+  console.info(`[View] Counted at start: session=${session.id} link=${session.link_id}`);
+  return { counted: true, country: session.country, cpmCents, amountMicros, countedAtStart: true };
+}
+
 app.post('/api/links/:slug/view/start', async (req, res) => {
   const link = store.db.prepare('SELECT id, creator_id AS creatorId FROM creator_links WHERE slug = ?').get(req.params.slug);
   if (!link) return res.status(404).json({ error: 'Link not found' });
@@ -903,7 +948,8 @@ app.post('/api/links/:slug/view/start', async (req, res) => {
   const viewToken = crypto.randomBytes(32).toString('base64url');
   const session = { id: store.id(), linkId: link.id, viewerUserId: viewer?.id || null, viewerHash, ipHash, viewTokenHash: store.hash(`${viewToken}|${process.env.VIEW_HASH_SECRET || process.env.AUTH_SECRET || 'change-me'}`), country: viewerCountry(req) };
   store.db.prepare('INSERT INTO view_sessions (id,link_id,viewer_user_id,viewer_hash,ip_hash,view_token_hash,country,started_at) VALUES (?,?,?,?,?,?,?,?)').run(session.id, session.linkId, session.viewerUserId, session.viewerHash, session.ipHash, session.viewTokenHash, session.country, store.now());
-  res.status(201).json({ sessionId: session.id, viewToken, minimumWatchSeconds: store.db.prepare('SELECT minimum_watch_seconds AS seconds FROM view_rules WHERE id = 1').get().seconds });
+  const counted = process.env.COUNT_VIEWS_ON_START === 'false' ? { counted: false } : recordViewAtStart({ ...session, link_id: session.linkId });
+  res.status(201).json({ sessionId: session.id, viewToken, counted: counted.counted, countedAtStart: counted.countedAtStart === true, minimumWatchSeconds: store.db.prepare('SELECT minimum_watch_seconds AS seconds FROM view_rules WHERE id = 1').get().seconds });
 });
 
 app.post('/api/views/:id/qualify', (req, res) => {
