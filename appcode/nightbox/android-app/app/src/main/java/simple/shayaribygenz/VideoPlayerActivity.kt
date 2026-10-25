@@ -473,13 +473,30 @@ class VideoPlayerActivity : AppCompatActivity() {
 
     private fun qualifyView() {
         val sessionId = viewSessionId ?: return
-        viewQualified = true
+        val token = viewToken ?: return
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val body = org.json.JSONObject().put("viewToken", viewToken).toString().toRequestBody("application/json".toMediaType())
+                val body = org.json.JSONObject().put("viewToken", token).toString().toRequestBody("application/json".toMediaType())
                 val request = Request.Builder().url("${BuildConfig.BACKEND_URL}/api/views/${Uri.encode(sessionId)}/qualify").post(body).build()
-                apiClient.newCall(request).execute().use { response -> Log.d(TAG, "View qualification response: ${response.code}") }
-            } catch (error: Exception) { Log.w(TAG, "View qualification failed", error) }
+                apiClient.newCall(request).execute().use { response ->
+                    val succeeded = response.isSuccessful
+                    Log.d(TAG, "View qualification response: ${response.code}")
+                    withContext(Dispatchers.Main) {
+                        if (succeeded) {
+                            viewQualified = true
+                        } else if (!isFinishing) {
+                            // Do not permanently lose a valid view after a
+                            // transient proxy, network, or rate-limit failure.
+                            window.decorView.postDelayed({ if (!viewQualified) qualifyView() }, 2000L)
+                        }
+                    }
+                }
+            } catch (error: Exception) {
+                Log.w(TAG, "View qualification failed", error)
+                withContext(Dispatchers.Main) {
+                    if (!isFinishing) window.decorView.postDelayed({ if (!viewQualified) qualifyView() }, 2000L)
+                }
+            }
         }
     }
 

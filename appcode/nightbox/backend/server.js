@@ -910,11 +910,19 @@ app.post('/api/views/:id/qualify', (req, res) => {
   const session = store.db.prepare('SELECT * FROM view_sessions WHERE id = ?').get(req.params.id);
   if (!session) return res.status(404).json({ error: 'View session not found' });
   const viewToken = String(req.body?.viewToken || req.headers['x-view-token'] || '');
-  if (!viewToken || !session.view_token_hash || !crypto.timingSafeEqual(Buffer.from(session.view_token_hash), Buffer.from(store.hash(`${viewToken}|${process.env.VIEW_HASH_SECRET || process.env.AUTH_SECRET || 'change-me'}`)))) return res.status(403).json({ error: 'View authorization failed' });
+  const expectedTokenHash = store.hash(`${viewToken}|${process.env.VIEW_HASH_SECRET || process.env.AUTH_SECRET || 'change-me'}`);
+  const suppliedHash = Buffer.from(String(session.view_token_hash || ''), 'utf8');
+  const expectedHash = Buffer.from(expectedTokenHash, 'utf8');
+  if (!viewToken || !session.view_token_hash || suppliedHash.length !== expectedHash.length || !crypto.timingSafeEqual(suppliedHash, expectedHash)) {
+    console.warn(`[View] Qualification rejected: invalid token for session ${session.id}`);
+    return res.status(403).json({ error: 'View authorization failed', code: 'INVALID_VIEW_TOKEN' });
+  }
   if (session.counted) return res.json({ counted: true, duplicate: false });
   const rules = store.db.prepare('SELECT * FROM view_rules WHERE id = 1').get();
   const elapsed = (Date.now() - Date.parse(session.started_at)) / 1000;
-  if (elapsed < rules.minimum_watch_seconds) return res.status(400).json({ error: `Watch at least ${rules.minimum_watch_seconds} seconds` });
+  if (elapsed < rules.minimum_watch_seconds) {
+    return res.status(400).json({ error: `Watch at least ${rules.minimum_watch_seconds} seconds`, code: 'WATCH_TIME_NOT_REACHED', retryAfterSeconds: Math.ceil(rules.minimum_watch_seconds - elapsed) });
+  }
   const ipRule = store.db.prepare('SELECT max_views_per_ip_24h AS maxViews FROM view_rules WHERE id=1').get();
   const link = store.db.prepare('SELECT creator_id AS creatorId FROM creator_links WHERE id = ?').get(session.link_id);
   if (!link) return res.status(404).json({ error: 'Link not found' });
@@ -951,6 +959,7 @@ app.post('/api/views/:id/qualify', (req, res) => {
     if (referralAmountMicros > 0) store.db.prepare('INSERT INTO referral_earnings (id,source_creator_id,importing_creator_id,video_id,link_id,view_id,percentage,amount_micros,country,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)').run(store.id(), videoOwner.ownerId, link.creatorId, videoOwner.videoId, session.link_id, session.id, referralPercent, referralAmountMicros, session.country, store.now());
     store.db.exec('COMMIT');
   } catch (error) { store.db.exec('ROLLBACK'); throw error; }
+  console.info(`[View] Qualified session ${session.id}: link=${session.link_id} country=${session.country} amountMicros=${amountMicros}`);
   res.json({ counted: true, country: session.country, cpmCents, amountMicros });
 });
 
