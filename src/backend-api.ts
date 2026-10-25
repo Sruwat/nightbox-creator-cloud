@@ -269,7 +269,7 @@ export async function updateAdminUser(token: string, id: string, status: string)
 
 export async function getAdminVideos(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/videos`, { headers: authHeaders(token) });
-  return parseResponse<{ videos: Array<{ id: string; title: string; status: string; ownerId: string | null; createdAt: string; eligibleViews: number }> }>(response);
+  return parseResponse<{ videos: Array<{ id: string; title: string; status: string; ownerId: string | null; ownerEmail: string | null; ownerTelegramUserId: string | null; uploadSource: string; uploadEventType: string | null; fileSize: number | null; createdAt: string; eligibleViews: number }> }>(response);
 }
 export async function deleteAdminVideo(token: string, id: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/videos/${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders(token) });

@@ -1170,7 +1170,21 @@ app.put('/api/admin/users/:id/storage-limit', requireAdmin, (req, res) => {
   store.db.prepare('DELETE FROM creator_storage_limits WHERE creator_id=?').run(creator.id);
   res.json({ creatorId: creator.id, quotaBytes: null, unlimited: true });
 });
-app.get('/api/admin/videos', requireAdmin, (req, res) => res.json({ videos: store.db.prepare(`SELECT v.id,v.title,v.status,v.owner_id AS ownerId,v.created_at AS createdAt,COALESCE(SUM(CASE WHEN s.counted = 1 THEN 1 ELSE 0 END),0) AS eligibleViews FROM videos v LEFT JOIN creator_links l ON l.video_id = v.id LEFT JOIN view_sessions s ON s.link_id = l.id GROUP BY v.id ORDER BY v.created_at DESC`).all() }));
+app.get('/api/admin/videos', requireAdmin, (req, res) => res.json({ videos: store.db.prepare(`
+  SELECT v.id,v.title,v.status,v.owner_id AS ownerId,v.file_size AS fileSize,v.created_at AS createdAt,
+    u.email AS ownerEmail,
+    u.telegram_user_id AS ownerTelegramUserId,
+    COALESCE((SELECT be.bot_name FROM bot_events be WHERE be.video_id=v.id ORDER BY be.created_at DESC LIMIT 1),
+      CASE WHEN v.owner_id IS NULL THEN 'Bot upload' ELSE 'Creator dashboard' END) AS uploadSource,
+    (SELECT be.event_type FROM bot_events be WHERE be.video_id=v.id ORDER BY be.created_at DESC LIMIT 1) AS uploadEventType,
+    COALESCE(SUM(CASE WHEN s.counted = 1 THEN 1 ELSE 0 END),0) AS eligibleViews
+  FROM videos v
+  LEFT JOIN users u ON u.id=v.owner_id
+  LEFT JOIN creator_links l ON l.video_id = v.id
+  LEFT JOIN view_sessions s ON s.link_id = l.id
+  GROUP BY v.id
+  ORDER BY v.created_at DESC
+`).all() }));
 app.get('/api/admin/bot-events', requireAdmin, (req, res) => {
   const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 100, 1), 500);
   res.json({ events: store.db.prepare(`SELECT e.id,e.user_id AS userId,u.email,e.bot_name AS botName,e.event_type AS eventType,e.external_id AS externalId,e.video_id AS videoId,e.status,e.error,e.created_at AS createdAt FROM bot_events e LEFT JOIN users u ON u.id=e.user_id ORDER BY e.created_at DESC LIMIT ?`).all(limit) });
