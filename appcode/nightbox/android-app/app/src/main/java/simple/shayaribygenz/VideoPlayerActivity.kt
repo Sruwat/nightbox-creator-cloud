@@ -13,6 +13,7 @@ import android.util.Rational
 import android.view.View
 import android.view.WindowManager
 import android.webkit.WebChromeClient
+import android.webkit.JavascriptInterface
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -520,6 +521,18 @@ class VideoPlayerActivity : AppCompatActivity() {
             cacheMode = WebSettings.LOAD_DEFAULT
         }
 
+        // ExoPlayer can fall back to WebView for streams that fail native
+        // playback. Keep the same server-side view qualification contract in
+        // that path instead of silently losing the view.
+        webViewPlayer.addJavascriptInterface(object {
+            @JavascriptInterface
+            fun onVideoProgress(positionSeconds: Double) {
+                if (positionSeconds >= 5.0) {
+                    runOnUiThread { if (!viewQualified) qualifyView() }
+                }
+            }
+        }, "NightboxViewTracker")
+
         webViewPlayer.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
@@ -607,8 +620,16 @@ class VideoPlayerActivity : AppCompatActivity() {
             </head>
             <body>
                 <div class="video-container">
-                    <video src="$streamUrl" autoplay controls playsinline></video>
+                    <video id="nightboxVideo" src="$streamUrl" autoplay controls playsinline></video>
                 </div>
+                <script>
+                    const video = document.getElementById('nightboxVideo');
+                    video.addEventListener('timeupdate', () => {
+                        if (window.NightboxViewTracker) {
+                            window.NightboxViewTracker.onVideoProgress(video.currentTime || 0);
+                        }
+                    });
+                </script>
             </body>
             </html>
         """.trimIndent()

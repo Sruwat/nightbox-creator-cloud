@@ -189,6 +189,8 @@
     let viewSessionId = null;
     let viewToken = null;
     let qualified = false;
+    let qualificationInFlight = false;
+    let minimumWatchSeconds = 5;
 
     async function resolveVideoId() {
       if (videoId) return videoId;
@@ -217,6 +219,7 @@
         const tracking = await response.json();
         viewSessionId = tracking.sessionId;
         viewToken = tracking.viewToken;
+        minimumWatchSeconds = Number(tracking.minimumWatchSeconds) || 5;
         const resolvedVideoId = await resolveVideoId();
         const metadata = await fetch(`/video/${encodeURIComponent(resolvedVideoId)}`);
         if (!metadata.ok) throw new Error('Video metadata unavailable');
@@ -240,11 +243,29 @@
       }
     }
 
-    browserPlayer.addEventListener('timeupdate', async () => {
-      if (!qualified && viewSessionId && browserPlayer.currentTime >= 5) {
-        qualified = true;
-        await fetch(`/api/views/${encodeURIComponent(viewSessionId)}/qualify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ viewToken }) }).catch(() => {});
+    async function qualifyBrowserView() {
+      if (qualified || qualificationInFlight || !viewSessionId || !viewToken) return;
+      qualificationInFlight = true;
+      try {
+        const response = await fetch(`/api/views/${encodeURIComponent(viewSessionId)}/qualify`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ viewToken }), keepalive: true
+        });
+        if (response.ok) {
+          await response.json().catch(() => ({}));
+          qualified = true;
+        }
+      } catch (_) {
+        // A transient network failure should be retried on the next timeupdate.
+      } finally {
+        qualificationInFlight = false;
       }
+    }
+
+    browserPlayer.addEventListener('timeupdate', () => {
+      if (browserPlayer.currentTime >= minimumWatchSeconds) void qualifyBrowserView();
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden' && browserPlayer.currentTime >= minimumWatchSeconds) void qualifyBrowserView();
     });
 
     let fallbackTimer = null;
