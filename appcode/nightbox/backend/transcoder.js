@@ -17,9 +17,12 @@ function runFfmpeg(sourcePath, outputDir) {
       '-map', '0:v:0', '-map', '0:a:0?',
       '-vf', "scale='min(1280,iw)':-2",
       '-c:v', 'libx264', '-preset', process.env.FFMPEG_PRESET || 'veryfast',
-      '-crf', process.env.FFMPEG_CRF || '23', '-pix_fmt', 'yuv420p',
-      '-c:a', 'aac', '-b:a', '128k', '-ac', '2',
+      '-crf', process.env.FFMPEG_CRF || '23', '-maxrate', process.env.FFMPEG_MAXRATE || '2200k',
+      '-bufsize', process.env.FFMPEG_BUFSIZE || '4400k', '-pix_fmt', 'yuv420p',
+      '-g', '180', '-keyint_min', '180', '-sc_threshold', '0',
+      '-c:a', 'aac', '-b:a', process.env.FFMPEG_AUDIO_BITRATE || '96k', '-ac', '2',
       '-f', 'hls', '-hls_time', '6', '-hls_playlist_type', 'vod',
+      '-hls_flags', 'independent_segments',
       '-hls_segment_filename', segmentPattern, playlistPath,
     ];
     const child = spawn(FFMPEG_BIN, args, { stdio: ['ignore', 'ignore', 'pipe'] });
