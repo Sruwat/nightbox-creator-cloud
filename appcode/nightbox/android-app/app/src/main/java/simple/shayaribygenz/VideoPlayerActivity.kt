@@ -216,7 +216,10 @@ class VideoPlayerActivity : AppCompatActivity() {
                     if (!response.isSuccessful) throw IllegalStateException("Video metadata request failed: ${response.code}")
                     val payload = org.json.JSONObject(response.body?.string().orEmpty())
                     val video = payload.optJSONObject("video") ?: throw IllegalStateException("Video metadata missing")
-                    remoteHlsUrl = video.optString("hlsUrl").takeIf { it.isNotBlank() }
+                    // Prefer the direct Bunny CDN object. The backend proxy is
+                    // only a fallback for legacy/local-storage videos.
+                    remoteHlsUrl = video.optString("cdnUrl").takeIf { it.isNotBlank() }
+                        ?: video.optString("hlsUrl").takeIf { it.isNotBlank() }
                     remoteStreamUrl = video.optString("streamUrl").takeIf { it.isNotBlank() }
                     val title = video.optString("title").takeIf { it.isNotBlank() }
                     withContext(Dispatchers.Main) {
@@ -296,14 +299,14 @@ class VideoPlayerActivity : AppCompatActivity() {
     private fun initExoPlayerHls() {
         val vid = videoId ?: return
 
-        // Prefer the backend's range-capable proxy. It avoids CDN-specific
-        // redirect/header differences between Android versions while retaining
-        // byte-range streaming and keeps the direct CDN URL as a fallback.
-        val mediaUrl = remoteStreamUrl ?: remoteHlsUrl ?: run {
+        // Prefer the direct CDN URL to avoid an unnecessary VPS hop. Keep the
+        // range-capable API stream as a fallback for unavailable CDN objects.
+        val mediaUrl = remoteHlsUrl ?: remoteStreamUrl ?: run {
             showError("Video URL is unavailable.")
             return
         }
         Log.d(TAG, "Trying CDN URL: $mediaUrl")
+        val isHls = mediaUrl.substringBefore('?').lowercase().endsWith(".m3u8")
 
         // Create HTTP data source with proper headers
         val dataSourceFactory = DefaultHttpDataSource.Factory()
@@ -331,7 +334,7 @@ class VideoPlayerActivity : AppCompatActivity() {
 
         val mediaItemBuilder = MediaItem.Builder()
             .setUri(mediaUrl)
-            .setMimeType(MimeTypes.VIDEO_MP4)
+            .setMimeType(if (isHls) MimeTypes.APPLICATION_M3U8 else MimeTypes.VIDEO_MP4)
         if (imaAdsLoader != null) {
             mediaItemBuilder.setAdsConfiguration(
                 MediaItem.AdsConfiguration.Builder(adTagUri).build()

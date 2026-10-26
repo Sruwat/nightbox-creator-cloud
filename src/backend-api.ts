@@ -12,6 +12,8 @@ export type BackendVideo = {
   views?: number;
   dateUploaded?: string;
   thumbnailUrl?: string | null;
+  /** Direct Bunny CDN playback URL; clients should prefer this over the API proxy. */
+  cdnUrl?: string | null;
   embedUrl: string;
   hlsUrl: string;
   watchUrl: string;

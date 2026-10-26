@@ -1794,6 +1794,9 @@ app.get('/video/:id', async (req, res) => {
 
   try {
     const v = await bunny.getVideo(videoId);
+    const cdnUrl = BUNNY_LOCAL_STORAGE
+      ? await bunny.getCdnUrlIfAvailable(videoId)
+      : bunny.getDirectPlayUrl(videoId);
     res.json({
       success: true,
       video: {
@@ -1803,8 +1806,15 @@ app.get('/video/:id', async (req, res) => {
           thumbnailUrl: v.thumbnailFileName ? `https://${process.env.BUNNY_CDN_HOST}/${String(process.env.BUNNY_STORAGE_PREFIX || 'nightbox').replace(/^\/+|\/+$/g, '')}/${v.guid}/${v.thumbnailFileName}` : null,
         // Prefer Bunny CDN when the object is available, while retaining the
         // VPS range-stream fallback for local-only objects.
-        embedUrl: BUNNY_LOCAL_STORAGE ? (await bunny.getCdnUrlIfAvailable(videoId)) || `${PUBLIC_API_URL}/video/${videoId}/stream` : bunny.getEmbedUrl(videoId),
-        hlsUrl: BUNNY_LOCAL_STORAGE ? (await bunny.getCdnUrlIfAvailable(videoId)) || `${PUBLIC_API_URL}/video/${videoId}/stream` : bunny.getDirectPlayUrl(videoId),
+        // Expose the CDN URL separately so native clients can connect directly
+        // instead of making every playback request through the API container.
+        // The API stream remains the compatibility fallback for local storage
+        // or a temporarily unavailable CDN object.
+        cdnUrl,
+        // Keep the Bunny iframe contract for existing feed embeds; native
+        // playback clients use cdnUrl/hlsUrl below.
+        embedUrl: BUNNY_LOCAL_STORAGE ? cdnUrl || `${PUBLIC_API_URL}/video/${videoId}/stream` : bunny.getEmbedUrl(videoId),
+        hlsUrl: cdnUrl || `${PUBLIC_API_URL}/video/${videoId}/stream`,
         // Stable range-capable API playback URL for clients that cannot reliably
         // consume the Bunny CDN MP4 directly (notably Android WebView/ExoPlayer).
         streamUrl: `${PUBLIC_API_URL}/video/${videoId}/stream`,
