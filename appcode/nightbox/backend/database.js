@@ -29,6 +29,9 @@ db.exec(`
     content_hash TEXT,
     file_size INTEGER,
     status TEXT NOT NULL DEFAULT 'processing',
+    playback_status TEXT NOT NULL DEFAULT 'processing',
+    hls_url TEXT,
+    playback_error TEXT,
     created_at TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS creator_folders (
@@ -300,6 +303,9 @@ for (const statement of [
   'ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT \'active\'',
   'ALTER TABLE users ADD COLUMN google_sub TEXT',
   'ALTER TABLE creator_links ADD COLUMN canonical INTEGER NOT NULL DEFAULT 1 CHECK (canonical IN (0,1))',
+  'ALTER TABLE videos ADD COLUMN playback_status TEXT NOT NULL DEFAULT \'processing\'',
+  'ALTER TABLE videos ADD COLUMN hls_url TEXT',
+  'ALTER TABLE videos ADD COLUMN playback_error TEXT',
 ]) {
   try { db.exec(statement); } catch (error) {
     if (!String(error.message).includes('duplicate column name')) throw error;
@@ -434,7 +440,9 @@ module.exports = {
   },
   findUser(email) { return db.prepare('SELECT id,email,password_hash,role,status FROM users WHERE email = ?').get(email.trim().toLowerCase()); },
   findUserById(userId) { return db.prepare('SELECT id,email,role,status,telegram_user_id FROM users WHERE id = ?').get(userId); },
-  createVideo(video) { db.prepare('INSERT INTO videos (id,owner_id,title,watch_url,embed_url,content_hash,file_size,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)').run(video.id, video.ownerId || null, video.title, video.watchUrl, video.embedUrl, video.contentHash || null, video.fileSize || null, video.status || 'processing', now()); },
+  createVideo(video) { db.prepare('INSERT INTO videos (id,owner_id,title,watch_url,embed_url,content_hash,file_size,status,playback_status,hls_url,playback_error,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(video.id, video.ownerId || null, video.title, video.watchUrl, video.embedUrl, video.contentHash || null, video.fileSize || null, video.status || 'processing', video.playbackStatus || 'processing', video.hlsUrl || null, video.playbackError || null, now()); },
+  getVideoPlayback(videoId) { return db.prepare('SELECT playback_status AS playbackStatus,hls_url AS hlsUrl,playback_error AS playbackError FROM videos WHERE id=?').get(videoId) || null; },
+  updateVideoPlayback(videoId, playbackStatus, hlsUrl = null, playbackError = null) { db.prepare('UPDATE videos SET playback_status=?,hls_url=?,playback_error=? WHERE id=?').run(playbackStatus, hlsUrl, playbackError, videoId); },
   findVideoByHash(contentHash, ownerId) { return db.prepare('SELECT id,title,watch_url AS watchUrl,embed_url AS embedUrl FROM videos WHERE content_hash = ? AND (owner_id = ? OR owner_id IS NULL) ORDER BY created_at ASC LIMIT 1').get(contentHash, ownerId || null); },
   createLink(videoId, creatorId) {
     const existing = db.prepare(`

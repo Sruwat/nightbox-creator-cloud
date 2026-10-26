@@ -27,6 +27,10 @@ function objectPath(videoId) {
   return `${STORAGE_ZONE}/${STORAGE_PREFIX}/${videoId}.mp4`;
 }
 
+function hlsObjectPath(videoId, fileName) {
+  return `${STORAGE_ZONE}/${STORAGE_PREFIX}/hls/${videoId}/${fileName}`;
+}
+
 function localPath(videoId) {
   return path.join(LOCAL_STORAGE_ROOT, `${videoId}.mp4`);
 }
@@ -91,6 +95,18 @@ async function uploadVideoFromUrl(videoId, url, tempDir) {
   } finally { cleanupTempFile(tempFilePath); }
 }
 
+async function downloadVideoToFile(videoId, targetPath) {
+  assertConfigured();
+  if (STORAGE_DRIVER === 'local') {
+    fs.copyFileSync(localPath(videoId), targetPath);
+    return;
+  }
+  const response = await axios({ method: 'GET', url: getDirectPlayUrl(videoId), responseType: 'stream', timeout: 600000, maxContentLength: MAX_VIDEO_BYTES, maxBodyLength: MAX_VIDEO_BYTES });
+  const writer = fs.createWriteStream(targetPath);
+  response.data.pipe(writer);
+  await new Promise((resolve, reject) => { writer.on('finish', resolve); writer.on('error', reject); response.data.on('error', reject); });
+}
+
 async function getVideo(videoId) {
   assertConfigured();
   if (STORAGE_DRIVER === 'local') {
@@ -117,7 +133,38 @@ async function deleteVideo(videoId) {
   return withRetry(async () => (await bunnyApi.delete(`/${objectPath(videoId)}`, { timeout: 30000 })).data, MAX_RETRIES, 'deleteVideo');
 }
 
+function contentTypeFor(fileName) {
+  if (fileName.endsWith('.m3u8')) return 'application/vnd.apple.mpegurl';
+  if (fileName.endsWith('.ts')) return 'video/mp2t';
+  return 'application/octet-stream';
+}
+
+async function uploadHlsDirectory(videoId, directory) {
+  assertConfigured();
+  if (STORAGE_DRIVER === 'local') {
+    const target = path.join(LOCAL_STORAGE_ROOT, 'hls', videoId);
+    fs.mkdirSync(target, { recursive: true });
+    for (const fileName of fs.readdirSync(directory)) {
+      fs.copyFileSync(path.join(directory, fileName), path.join(target, fileName));
+    }
+    return;
+  }
+  const files = fs.readdirSync(directory).filter((fileName) => /\.(m3u8|ts)$/i.test(fileName));
+  for (const fileName of files) {
+    const filePath = path.join(directory, fileName);
+    const size = fs.statSync(filePath).size;
+    await withRetry(() => bunnyApi.put(`/${hlsObjectPath(videoId, fileName)}`, fs.createReadStream(filePath), {
+      headers: { 'Content-Type': contentTypeFor(fileName), 'Content-Length': size, 'Cache-Control': fileName.endsWith('.m3u8') ? 'public, max-age=60' : 'public, max-age=31536000, immutable' },
+      maxContentLength: Infinity, maxBodyLength: Infinity, timeout: 300000,
+    }), MAX_RETRIES, `uploadHls:${fileName}`);
+  }
+}
+
 function getDirectPlayUrl(videoId) { assertConfigured(); return `https://${CDN_HOST}/${STORAGE_PREFIX}/${videoId}.mp4`; }
+function getHlsUrl(videoId) {
+  if (!CDN_HOST) return null;
+  return `https://${CDN_HOST}/${STORAGE_PREFIX}/hls/${videoId}/master.m3u8`;
+}
 function getEmbedUrl(videoId) { return getDirectPlayUrl(videoId); }
 const cdnAvailability = new Map();
 async function getCdnUrlIfAvailable(videoId) {
@@ -146,4 +193,4 @@ function getWatchUrl(videoId) {
 }
 function cleanupTempFile(filePath) { try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (error) { console.error('[Cleanup] Failed:', error.message); } }
 
-module.exports = { createVideo, uploadVideo, uploadVideoFromUrl, getVideo, deleteVideo, getEmbedUrl, getDirectPlayUrl, getCdnUrlIfAvailable, getWatchUrl, cleanupTempFile, getLocalPath: (videoId) => STORAGE_DRIVER === 'local' ? localPath(videoId) : null, isLocalStorage: () => STORAGE_DRIVER === 'local' };
+module.exports = { createVideo, uploadVideo, uploadVideoFromUrl, downloadVideoToFile, uploadHlsDirectory, getVideo, deleteVideo, getEmbedUrl, getDirectPlayUrl, getHlsUrl, getCdnUrlIfAvailable, getWatchUrl, cleanupTempFile, getLocalPath: (videoId) => STORAGE_DRIVER === 'local' ? localPath(videoId) : null, isLocalStorage: () => STORAGE_DRIVER === 'local' };

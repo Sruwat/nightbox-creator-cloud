@@ -6,7 +6,13 @@ ENV NODE_ENV=production
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-COPY server.js database.js bunny.js ./
+# Background playback processing normalizes uploaded codecs and creates HLS
+# segments so viewers do not need to download the full original MP4 first.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY server.js database.js bunny.js transcoder.js ./
 COPY public ./public
 
 RUN mkdir -p /app/data /app/temp

@@ -29,6 +29,7 @@ const net = require('net');
 const axios = require('axios');
 const bunny = require('./bunny');
 const store = require('./database');
+const transcoder = require('./transcoder');
 
 const app = express();
 const googleAuthClient = new OAuth2Client();
@@ -45,6 +46,7 @@ const CREATOR_MAX_QUOTA_BYTES = null;
 const BUNNY_STORAGE_PASSWORD = process.env.BUNNY_STORAGE_PASSWORD;
 const BUNNY_STORAGE_ZONE = process.env.BUNNY_STORAGE_ZONE;
 const BUNNY_LOCAL_STORAGE = String(process.env.VIDEO_STORAGE_DRIVER || '').toLowerCase() === 'local';
+const HLS_TRANSCODE_ENABLED = process.env.ENABLE_HLS_TRANSCODE !== 'false' && !BUNNY_LOCAL_STORAGE;
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || crypto.randomBytes(32).toString('hex');
 // Conversion bots can identify a creator by Telegram's verified sender ID.
 // This is deliberately separate from creator API keys: the shared secret
@@ -814,7 +816,7 @@ app.post('/api/subscriptions/:id/cancel', requireUser, async (req, res) => {
 
 app.get('/api/creator/videos', requireUser, (req, res) => {
   const videos = store.db.prepare(`
-    SELECT v.id, v.title, v.status, v.file_size AS fileSize, v.watch_url AS watchUrl, v.embed_url AS embedUrl, v.created_at AS createdAt,
+    SELECT v.id, v.title, v.status, v.playback_status AS playbackStatus, v.playback_error AS playbackError, v.file_size AS fileSize, v.watch_url AS watchUrl, v.embed_url AS embedUrl, v.created_at AS createdAt,
       (SELECT MIN(l.slug) FROM creator_links l WHERE l.video_id = v.id AND l.creator_id = v.owner_id) AS linkSlug,
       COALESCE((SELECT COUNT(*) FROM view_sessions s JOIN creator_links l ON l.id = s.link_id WHERE l.video_id = v.id AND l.creator_id = v.owner_id AND s.counted = 1), 0) AS eligibleViews
       ,COALESCE((SELECT SUM(e.amount_micros) FROM earnings e JOIN creator_links l2 ON l2.id = e.link_id WHERE l2.video_id = v.id AND l2.creator_id = v.owner_id), 0) AS earningsMicros
@@ -1171,7 +1173,7 @@ app.put('/api/admin/users/:id/storage-limit', requireAdmin, (req, res) => {
   res.json({ creatorId: creator.id, quotaBytes: null, unlimited: true });
 });
 app.get('/api/admin/videos', requireAdmin, (req, res) => res.json({ videos: store.db.prepare(`
-  SELECT v.id,v.title,v.status,v.owner_id AS ownerId,v.file_size AS fileSize,v.created_at AS createdAt,
+  SELECT v.id,v.title,v.status,v.playback_status AS playbackStatus,v.playback_error AS playbackError,v.owner_id AS ownerId,v.file_size AS fileSize,v.created_at AS createdAt,
     u.email AS ownerEmail,
     u.telegram_user_id AS ownerTelegramUserId,
     COALESCE((SELECT be.bot_name FROM bot_events be WHERE be.video_id=v.id ORDER BY be.created_at DESC LIMIT 1),
@@ -1638,6 +1640,7 @@ app.post('/upload-file', (req, res, next) => {
   const botName = String(req.headers['x-bot-name'] || 'upload').slice(0, 40);
   const botExternalId = String(req.headers['x-bot-external-id'] || '').slice(0, 120) || null;
   let reservationId;
+  let handedToTranscoder = false;
 
   // CRITICAL: Reject empty/tiny files BEFORE creating Bunny video slot
   if (!fileSize || fileSize === 0) {
@@ -1710,9 +1713,24 @@ app.post('/upload-file', (req, res, next) => {
     const videoData = await bunny.createVideo(title);
     const videoId = videoData.guid;
     await bunny.uploadVideo(videoId, filePath);
-    store.createVideo({ id: videoId, ownerId: owner?.id, title, contentHash, fileSize, status: 'active', watchUrl: bunny.getWatchUrl(videoId), embedUrl: bunny.getEmbedUrl(videoId) });
+    store.createVideo({ id: videoId, ownerId: owner?.id, title, contentHash, fileSize, status: 'active', playbackStatus: HLS_TRANSCODE_ENABLED ? 'processing' : 'ready', watchUrl: bunny.getWatchUrl(videoId), embedUrl: bunny.getEmbedUrl(videoId) });
     releaseCreatorStorageReservation(reservationId);
     reservationId = null;
+
+    if (HLS_TRANSCODE_ENABLED && bunny.getHlsUrl(videoId)) {
+      // Keep the uploaded temporary source until the background transcode has
+      // finished. This makes upload responses fast while preserving the raw
+      // CDN MP4 as a fallback during processing.
+      handedToTranscoder = true;
+      transcoder.enqueue({
+        videoId,
+        sourcePath: filePath,
+        uploadHlsDirectory: bunny.uploadHlsDirectory,
+        getHlsUrl: bunny.getHlsUrl,
+        onReady: (hlsUrl) => store.updateVideoPlayback(videoId, 'ready', hlsUrl, null),
+        onError: (error) => store.updateVideoPlayback(videoId, 'failed', null, String(error.message || error).slice(0, 2000)),
+      });
+    }
     const creatorLink = owner ? store.createLink(videoId, owner.id) : null;
     if (owner && isBotRequest(req)) store.db.prepare('INSERT INTO bot_events (id,user_id,bot_name,event_type,external_id,video_id,status,created_at) VALUES (?,?,?,?,?,?,?,?)').run(store.id(), owner.id, botName, 'upload', botExternalId, videoId, 'created', store.now());
 
@@ -1732,6 +1750,7 @@ app.post('/upload-file', (req, res, next) => {
       embedUrl: bunny.getEmbedUrl(videoId),
       link: creatorLink ? `${DOMAIN_URL}/l/${creatorLink.slug}` : null,
       status: 'active',
+      playbackStatus: HLS_TRANSCODE_ENABLED ? 'processing' : 'ready',
       message: 'Video uploaded and active.',
     });
   } catch (error) {
@@ -1740,7 +1759,7 @@ app.post('/upload-file', (req, res, next) => {
   } finally {
     releaseCreatorStorageReservation(reservationId);
     activeUploads--;
-    bunny.cleanupTempFile(filePath);
+    if (!handedToTranscoder) bunny.cleanupTempFile(filePath);
   }
 });
 
@@ -1763,7 +1782,18 @@ app.post('/upload-from-url', async (req, res) => {
     const videoId = videoData.guid;
     await bunny.uploadVideoFromUrl(videoId, safeUrl, TEMP_DIR);
     const owner = uploadOwner(req);
-    store.createVideo({ id: videoId, ownerId: owner?.id, title, status: 'active', watchUrl: bunny.getWatchUrl(videoId), embedUrl: bunny.getEmbedUrl(videoId) });
+    store.createVideo({ id: videoId, ownerId: owner?.id, title, status: 'active', playbackStatus: HLS_TRANSCODE_ENABLED ? 'processing' : 'ready', watchUrl: bunny.getWatchUrl(videoId), embedUrl: bunny.getEmbedUrl(videoId) });
+    if (HLS_TRANSCODE_ENABLED && bunny.getHlsUrl(videoId)) {
+      const sourcePath = path.join(TEMP_DIR, `transcode-${videoId}.mp4`);
+      transcoder.enqueue({
+        videoId,
+        prepareSource: () => bunny.downloadVideoToFile(videoId, sourcePath).then(() => sourcePath),
+        uploadHlsDirectory: bunny.uploadHlsDirectory,
+        getHlsUrl: bunny.getHlsUrl,
+        onReady: (hlsUrl) => store.updateVideoPlayback(videoId, 'ready', hlsUrl, null),
+        onError: (error) => store.updateVideoPlayback(videoId, 'failed', null, String(error.message || error).slice(0, 2000)),
+      });
+    }
     const creatorLink = owner ? store.createLink(videoId, owner.id) : null;
     if (owner && isBotRequest(req)) store.db.prepare('INSERT INTO bot_events (id,user_id,bot_name,event_type,external_id,video_id,status,created_at) VALUES (?,?,?,?,?,?,?,?)').run(store.id(), owner.id, botName, 'url_upload', botExternalId, videoId, 'created', store.now());
     res.json({
@@ -1773,6 +1803,7 @@ app.post('/upload-from-url', async (req, res) => {
       embedUrl: bunny.getEmbedUrl(videoId),
       link: creatorLink ? `${DOMAIN_URL}/l/${creatorLink.slug}` : null,
       status: 'active',
+      playbackStatus: HLS_TRANSCODE_ENABLED ? 'processing' : 'ready',
       message: 'Video uploaded from URL and active.',
     });
   } catch (error) {
@@ -1794,6 +1825,7 @@ app.get('/video/:id', async (req, res) => {
 
   try {
     const v = await bunny.getVideo(videoId);
+    const playback = store.getVideoPlayback(videoId);
     const cdnUrl = BUNNY_LOCAL_STORAGE
       ? await bunny.getCdnUrlIfAvailable(videoId)
       : bunny.getDirectPlayUrl(videoId);
@@ -1814,7 +1846,9 @@ app.get('/video/:id', async (req, res) => {
         // Keep the Bunny iframe contract for existing feed embeds; native
         // playback clients use cdnUrl/hlsUrl below.
         embedUrl: BUNNY_LOCAL_STORAGE ? cdnUrl || `${PUBLIC_API_URL}/video/${videoId}/stream` : bunny.getEmbedUrl(videoId),
-        hlsUrl: cdnUrl || `${PUBLIC_API_URL}/video/${videoId}/stream`,
+        hlsUrl: playback?.hlsUrl || cdnUrl || `${PUBLIC_API_URL}/video/${videoId}/stream`,
+        playbackStatus: playback?.hlsUrl ? 'ready' : (playback?.playbackStatus || 'ready'),
+        playbackError: playback?.playbackError || null,
         // Stable range-capable API playback URL for clients that cannot reliably
         // consume the Bunny CDN MP4 directly (notably Android WebView/ExoPlayer).
         streamUrl: `${PUBLIC_API_URL}/video/${videoId}/stream`,
@@ -2079,12 +2113,31 @@ app.use((req, res) => {
 // Server Start + Graceful Shutdown
 // ─────────────────────────────────────────────
 
+function queueLegacyTranscodes() {
+  if (!HLS_TRANSCODE_ENABLED || !bunny.getHlsUrl('probe')) return;
+  const limit = Math.min(Math.max(Number.parseInt(process.env.HLS_BACKFILL_LIMIT || '10', 10) || 10, 1), 100);
+  const pending = store.db.prepare("SELECT id FROM videos WHERE status <> 'deleted' AND hls_url IS NULL ORDER BY created_at ASC LIMIT ?").all(limit);
+  for (const video of pending) {
+    const sourcePath = path.join(TEMP_DIR, `transcode-${video.id}.mp4`);
+    transcoder.enqueue({
+      videoId: video.id,
+      prepareSource: () => bunny.downloadVideoToFile(video.id, sourcePath).then(() => sourcePath),
+      uploadHlsDirectory: bunny.uploadHlsDirectory,
+      getHlsUrl: bunny.getHlsUrl,
+      onReady: (hlsUrl) => store.updateVideoPlayback(video.id, 'ready', hlsUrl, null),
+      onError: (error) => store.updateVideoPlayback(video.id, 'failed', null, String(error.message || error).slice(0, 2000)),
+    });
+  }
+  if (pending.length) console.log(`[HLS] Queued ${pending.length} legacy video(s) for CDN playback processing.`);
+}
+
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🚀 Backend running on port ${PORT}`);
   console.log(`📡 Domain: ${DOMAIN_URL}`);
   console.log(`🎬 Bunny Storage Zone: ${process.env.BUNNY_STORAGE_ZONE}`);
   console.log(`🔑 Admin API Key: ${ADMIN_API_KEY.substring(0, 8)}...`);
   console.log(`🛡️  Security: helmet + compression + rate limiting\n`);
+  queueLegacyTranscodes();
 });
 
 // Graceful shutdown for PM2
