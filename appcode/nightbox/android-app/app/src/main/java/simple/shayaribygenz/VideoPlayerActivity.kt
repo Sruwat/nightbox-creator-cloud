@@ -87,6 +87,7 @@ class VideoPlayerActivity : AppCompatActivity() {
     private var linkSlug: String? = null
     private var remoteHlsUrl: String? = null
     private var remoteStreamUrl: String? = null
+    private var triedRangeFallback = false
     private var durationUpdateRunnable: Runnable? = null
     private var shouldResumePlayback = true
     private var restoredPositionMs = 0L
@@ -218,8 +219,11 @@ class VideoPlayerActivity : AppCompatActivity() {
                     val video = payload.optJSONObject("video") ?: throw IllegalStateException("Video metadata missing")
                     // Prefer the direct Bunny CDN object. The backend proxy is
                     // only a fallback for legacy/local-storage videos.
-                    remoteHlsUrl = video.optString("cdnUrl").takeIf { it.isNotBlank() }
-                        ?: video.optString("hlsUrl").takeIf { it.isNotBlank() }
+                    // HLS must be preferred over the original MP4. Large or
+                    // unsupported MP4 files can expose audio without video.
+                    remoteHlsUrl = video.optString("hlsUrl").takeIf {
+                        it.isNotBlank() && it.substringBefore('?').endsWith(".m3u8", ignoreCase = true)
+                    }
                     remoteStreamUrl = video.optString("streamUrl").takeIf { it.isNotBlank() }
                     val title = video.optString("title").takeIf { it.isNotBlank() }
                     withContext(Dispatchers.Main) {
@@ -373,6 +377,16 @@ class VideoPlayerActivity : AppCompatActivity() {
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                if (isHls && !triedRangeFallback && !remoteStreamUrl.isNullOrBlank()) {
+                    // Retry through the byte-range endpoint instead of opening
+                    // a WebView that may wait for the complete MP4 download.
+                    triedRangeFallback = true
+                    remoteHlsUrl = null
+                    Log.w(TAG, "HLS playback failed; retrying range MP4", error)
+                    releasePlayer()
+                    initializePlayer()
+                    return
+                }
                 Log.e(TAG, "ExoPlayer playback failed: ${error.message}, falling back to WebView")
                 // Native playback failed — fallback to the same range-capable stream.
                 releasePlayer()

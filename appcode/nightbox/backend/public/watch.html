@@ -234,6 +234,14 @@
           const hls = new window.Hls({ enableWorker: true });
           hls.loadSource(directUrl);
           hls.attachMedia(browserPlayer);
+          hls.on(window.Hls.Events.ERROR, (_event, data) => {
+            if (!data?.fatal || browserPlayer.dataset.fallbackAttempted === 'true') return;
+            browserPlayer.dataset.fallbackAttempted = 'true';
+            hls.destroy();
+            window.nightboxHls = null;
+            browserPlayer.src = fallbackUrl;
+            browserPlayer.load();
+          });
           window.nightboxHls = hls;
         } else {
           throw new Error('HLS playback is not supported by this browser');
