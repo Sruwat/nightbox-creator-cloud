@@ -752,7 +752,7 @@ app.get('/api/plans', (req, res) => {
 app.get('/api/feed', (req, res) => {
   const requestedLimit = Number(req.query.limit || 20);
   const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 50) : 20;
-  const videos = store.db.prepare(`SELECT v.id,v.title,v.embed_url AS embedUrl,v.watch_url AS watchUrl,MIN(l.slug) AS slug,v.created_at AS createdAt FROM videos v LEFT JOIN creator_links l ON l.video_id=v.id WHERE v.status <> 'deleted' GROUP BY v.id ORDER BY v.created_at DESC LIMIT ${limit}`).all();
+  const videos = store.db.prepare(`SELECT v.id,v.title,v.embed_url AS embedUrl,v.watch_url AS watchUrl,MIN(l.slug) AS slug,v.created_at AS createdAt FROM videos v LEFT JOIN creator_links l ON l.video_id=v.id WHERE v.status <> 'deleted' AND v.playback_status = 'ready' GROUP BY v.id ORDER BY v.created_at DESC LIMIT ${limit}`).all();
   res.json({ videos });
 });
 
@@ -1853,8 +1853,11 @@ app.get('/video/:id', async (req, res) => {
   if (!/^[a-f0-9-]+$/i.test(videoId)) return res.status(400).json({ error: 'Invalid video ID format' });
 
   try {
-    const v = await bunny.getVideo(videoId);
+    // A share link can be created as soon as the source reaches storage, but
+    // public playback stays hidden until normalization/HLS processing succeeds.
     const playback = store.getVideoPlayback(videoId);
+    if (!playback || playback.playbackStatus !== 'ready') return res.status(404).json({ error: 'Video not found' });
+    const v = await bunny.getVideo(videoId);
     const cdnUrl = BUNNY_LOCAL_STORAGE
       ? await bunny.getCdnUrlIfAvailable(videoId)
       : bunny.getDirectPlayUrl(videoId);
@@ -1900,6 +1903,8 @@ app.get('/video/:id/stream', async (req, res) => {
   if (!videoId || !/^[a-f0-9-]+$/i.test(videoId)) {
     return res.status(400).json({ error: 'Invalid video ID' });
   }
+  const playback = store.getVideoPlayback(videoId);
+  if (!playback || playback.playbackStatus !== 'ready') return res.status(404).json({ error: 'Video not found' });
 
   if (BUNNY_LOCAL_STORAGE) {
     const localPath = bunny.getLocalPath(videoId);
