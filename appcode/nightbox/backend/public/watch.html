@@ -214,12 +214,6 @@
     async function startBrowserView() {
       if (!linkSlug || /android/i.test(navigator.userAgent)) return;
       try {
-        const response = await fetch(`/api/links/${encodeURIComponent(linkSlug)}/view/start`, { method: 'POST' });
-        if (!response.ok) throw new Error('Traffic quality check failed');
-        const tracking = await response.json();
-        viewSessionId = tracking.sessionId;
-        viewToken = tracking.viewToken;
-        minimumWatchSeconds = Number(tracking.minimumWatchSeconds) || 5;
         const resolvedVideoId = await resolveVideoId();
         let metadata;
         let metadataPayload;
@@ -232,6 +226,12 @@
         }
         if (!metadata?.ok) throw new Error(metadataPayload?.error || 'Video metadata unavailable');
         const video = metadataPayload.video;
+        const response = await fetch(`/api/links/${encodeURIComponent(linkSlug)}/view/start`, { method: 'POST' });
+        if (!response.ok) throw new Error('Traffic quality check failed');
+        const tracking = await response.json();
+        viewSessionId = tracking.sessionId;
+        viewToken = tracking.viewToken;
+        minimumWatchSeconds = Number(tracking.minimumWatchSeconds) || 5;
         const directUrl = video.hlsUrl;
         const fallbackUrl = video.streamUrl || `/video/${encodeURIComponent(resolvedVideoId)}/stream`;
         if (/\.mp4(?:$|\?)/i.test(directUrl)) {

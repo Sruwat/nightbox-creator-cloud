@@ -156,8 +156,6 @@ class VideoPlayerActivity : AppCompatActivity() {
             showError("Invalid video link. No video ID found.")
             return
         }
-        if (videoId != null && !linkSlug.isNullOrBlank()) startViewTracking(linkSlug!!)
-        
         if (videoTitle != null) {
             tvVideoMetaDetails.text = videoTitle
         }
@@ -240,6 +238,7 @@ class VideoPlayerActivity : AppCompatActivity() {
                     val title = video.optString("title").takeIf { it.isNotBlank() }
                     withContext(Dispatchers.Main) {
                         title?.let { tvVideoMetaDetails.text = it }
+                        if (!linkSlug.isNullOrBlank()) startViewTracking(linkSlug!!)
                         initializePlayer()
                     }
                 }

@@ -960,6 +960,12 @@ function recordViewAtStart(session) {
 app.post('/api/links/:slug/view/start', async (req, res) => {
   const link = store.db.prepare('SELECT id, creator_id AS creatorId FROM creator_links WHERE slug = ?').get(req.params.slug);
   if (!link) return res.status(404).json({ error: 'Link not found' });
+  const playback = store.getVideoPlayback(store.db.prepare('SELECT video_id AS videoId FROM creator_links WHERE id=?').get(link.id)?.videoId);
+  if (!playback) return res.status(404).json({ error: 'Video not found' });
+  if (playback.playbackStatus !== 'ready') {
+    res.setHeader('Retry-After', '5');
+    return res.status(202).json({ error: 'Video is still processing', code: 'VIDEO_PROCESSING', playbackStatus: playback.playbackStatus || 'processing' });
+  }
   if (await viewerIsBlocked(req)) return res.status(403).json({ error: 'Viewer did not pass traffic quality checks' });
   const ip = requestIp(req);
   const userAgent = req.headers['user-agent'] || '';
