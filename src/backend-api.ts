@@ -3,6 +3,13 @@
 const configuredBackendUrl = String(import.meta.env.VITE_BACKEND_URL || "").trim();
 const BACKEND_URL = (configuredBackendUrl || (import.meta.env.DEV ? "http://localhost:3000" : "https://api.nightbox.in")).replace(/\/$/, "");
 
+export type SupportMessage = {
+  id?: string;
+  authorType: "creator" | "admin";
+  message: string;
+  createdAt: string;
+};
+
 export type BackendVideo = {
   id: string;
   title: string;
@@ -394,15 +401,19 @@ export async function updatePassword(token: string, currentPassword: string, new
 }
 export async function getCreatorTickets(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/creator/tickets`, { headers: authHeaders(token) });
-  return parseCreatorResponse<{ tickets: Array<{ id: string; subject: string; message: string; status: string; adminNote: string | null; createdAt: string; updatedAt: string }> }>(response);
+  return parseCreatorResponse<{ tickets: Array<{ id: string; subject: string; message: string; status: string; adminNote: string | null; createdAt: string; updatedAt: string; messages: SupportMessage[] }> }>(response);
 }
 export async function createCreatorTicket(token: string, subject: string, message: string) {
   const response = await fetch(`${BACKEND_URL}/api/creator/tickets`, { method: "POST", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify({ subject, message }) });
   return parseCreatorResponse(response);
 }
+export async function replyToCreatorTicket(token: string, id: string, message: string) {
+  const response = await fetch(`${BACKEND_URL}/api/creator/tickets/${encodeURIComponent(id)}/messages`, { method: "POST", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify({ message }) });
+  return parseCreatorResponse<{ message: SupportMessage }>(response);
+}
 export async function getAdminTickets(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/tickets`, { headers: authHeaders(token) });
-  return parseResponse<{ tickets: Array<{ id: string; email: string; subject: string; message: string; status: string; adminNote: string | null; createdAt: string; updatedAt: string }> }>(response);
+  return parseResponse<{ tickets: Array<{ id: string; email: string; subject: string; message: string; status: string; adminNote: string | null; createdAt: string; updatedAt: string; messages: SupportMessage[] }> }>(response);
 }
 export async function updateAdminTicket(token: string, id: string, status: string, adminNote: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/tickets/${encodeURIComponent(id)}`, { method: "PUT", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify({ status, adminNote }) });

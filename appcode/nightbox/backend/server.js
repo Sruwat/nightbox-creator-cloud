@@ -674,14 +674,33 @@ app.get('/f/:slug', downloadLimiter, async (req, res) => {
     if (!res.headersSent) res.status(503).send('File delivery is temporarily unavailable.'); else res.destroy(error);
   }
 });
-app.get('/api/creator/tickets', requireUser, (req, res) => res.json({ tickets: store.db.prepare('SELECT id,subject,message,status,admin_note AS adminNote,created_at AS createdAt,updated_at AS updatedAt FROM support_tickets WHERE user_id=? ORDER BY created_at DESC').all(req.user.id) }));
+const supportMessagesFor = (ticketId) => store.db.prepare('SELECT id,author_type AS authorType,message,created_at AS createdAt FROM support_messages WHERE ticket_id=? ORDER BY created_at ASC,id ASC').all(ticketId);
+const withSupportMessages = (ticket) => ({ ...ticket, messages: supportMessagesFor(ticket.id) });
+app.get('/api/creator/tickets', requireUser, (req, res) => {
+  const tickets = store.db.prepare('SELECT id,subject,message,status,admin_note AS adminNote,created_at AS createdAt,updated_at AS updatedAt FROM support_tickets WHERE user_id=? ORDER BY created_at DESC').all(req.user.id).map(withSupportMessages);
+  res.json({ tickets });
+});
 app.post('/api/creator/tickets', requireUser, (req, res) => {
   const subject = sanitizeInput(req.body?.subject);
   const message = sanitizeInput(req.body?.message);
   if (!subject || !message) return res.status(400).json({ error: 'Subject and message are required' });
   const ticket = { id: store.id(), userId: req.user.id, subject, message, createdAt: store.now() };
   store.db.prepare('INSERT INTO support_tickets (id,user_id,subject,message,created_at,updated_at) VALUES (?,?,?,?,?,?)').run(ticket.id, ticket.userId, ticket.subject, ticket.message, ticket.createdAt, ticket.createdAt);
-  res.status(201).json({ ticket: { ...ticket, status: 'open', adminNote: null, updatedAt: ticket.createdAt } });
+  store.db.prepare('INSERT INTO support_messages (id,ticket_id,author_type,author_user_id,message,created_at) VALUES (?,?,?,?,?,?)').run(store.id(), ticket.id, 'creator', ticket.userId, ticket.message, ticket.createdAt);
+  res.status(201).json({ ticket: { ...ticket, status: 'open', adminNote: null, updatedAt: ticket.createdAt, messages: [{ authorType: 'creator', message: ticket.message, createdAt: ticket.createdAt }] } });
+});
+app.post('/api/creator/tickets/:id/messages', requireUser, (req, res) => {
+  const message = sanitizeInput(req.body?.message);
+  if (!message) return res.status(400).json({ error: 'Reply message is required' });
+  if (message.length > 5000) return res.status(400).json({ error: 'Reply must be 5,000 characters or fewer' });
+  const ticket = store.db.prepare('SELECT id,status FROM support_tickets WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
+  if (!ticket) return res.status(404).json({ error: 'Support ticket not found' });
+  if (ticket.status === 'closed') return res.status(409).json({ error: 'This support ticket is closed' });
+  const createdAt = store.now();
+  const messageId = store.id();
+  store.db.prepare('INSERT INTO support_messages (id,ticket_id,author_type,author_user_id,message,created_at) VALUES (?,?,?,?,?,?)').run(messageId, ticket.id, 'creator', req.user.id, message, createdAt);
+  store.db.prepare("UPDATE support_tickets SET status='open',updated_at=? WHERE id=?").run(createdAt, ticket.id);
+  res.status(201).json({ message: { id: messageId, authorType: 'creator', message, createdAt } });
 });
 app.get('/api/creator/rewards', requireUser, (req, res) => {
   const eligibleViews = Number(store.db.prepare('SELECT COUNT(*) AS total FROM view_sessions s JOIN creator_links l ON l.id=s.link_id WHERE l.creator_id=? AND s.counted=1').get(req.user.id).total);
@@ -1370,12 +1389,22 @@ app.put('/api/admin/plans/:id', requireAdmin, (req, res) => {
   res.json({ plan: store.db.prepare('SELECT id,name,price_minor AS priceMinor,currency,duration_days AS durationDays,video_ads_removed AS videoAdsRemoved,all_ads_removed AS allAdsRemoved,recurring,active FROM subscription_plans WHERE id=?').get(req.params.id) });
 });
 app.get('/api/admin/withdrawals', requireAdmin, (req, res) => res.json({ withdrawals: store.db.prepare('SELECT w.id,w.creator_id AS creatorId,u.email,w.amount_micros AS amountMicros,w.currency,w.method,w.status,w.note,w.requested_at AS requestedAt,w.reviewed_at AS reviewedAt,w.paid_at AS paidAt FROM withdrawal_requests w JOIN users u ON u.id=w.creator_id ORDER BY w.requested_at DESC').all() }));
-app.get('/api/admin/tickets', requireAdmin, (req, res) => res.json({ tickets: store.db.prepare('SELECT t.id,t.user_id AS userId,u.email,t.subject,t.message,t.status,t.admin_note AS adminNote,t.created_at AS createdAt,t.updated_at AS updatedAt FROM support_tickets t JOIN users u ON u.id=t.user_id ORDER BY t.created_at DESC').all() }));
+app.get('/api/admin/tickets', requireAdmin, (req, res) => {
+  const tickets = store.db.prepare('SELECT t.id,t.user_id AS userId,u.email,t.subject,t.message,t.status,t.admin_note AS adminNote,t.created_at AS createdAt,t.updated_at AS updatedAt FROM support_tickets t JOIN users u ON u.id=t.user_id ORDER BY t.created_at DESC').all().map(withSupportMessages);
+  res.json({ tickets });
+});
 app.put('/api/admin/tickets/:id', requireAdmin, (req, res) => {
   const status = String(req.body?.status || '');
   if (!['open', 'in_progress', 'resolved', 'closed'].includes(status)) return res.status(400).json({ error: 'Invalid ticket status' });
-  const result = store.db.prepare('UPDATE support_tickets SET status=?,admin_note=?,updated_at=? WHERE id=?').run(status, sanitizeInput(req.body?.adminNote), store.now(), req.params.id);
-  if (!result.changes) return res.status(404).json({ error: 'Ticket not found' });
+  const adminNote = sanitizeInput(req.body?.adminNote);
+  const current = store.db.prepare('SELECT id,admin_note AS adminNote FROM support_tickets WHERE id=?').get(req.params.id);
+  if (!current) return res.status(404).json({ error: 'Ticket not found' });
+  const updatedAt = store.now();
+  store.db.prepare('UPDATE support_tickets SET status=?,admin_note=?,updated_at=? WHERE id=?').run(status, adminNote || null, updatedAt, req.params.id);
+  const latest = store.db.prepare("SELECT message FROM support_messages WHERE ticket_id=? AND author_type='admin' ORDER BY created_at DESC,id DESC LIMIT 1").get(req.params.id);
+  if (adminNote && (!latest || latest.message !== adminNote)) {
+    store.db.prepare('INSERT INTO support_messages (id,ticket_id,author_type,message,created_at) VALUES (?,?,?,?,?)').run(store.id(), req.params.id, 'admin', adminNote, updatedAt);
+  }
   res.json({ updated: true });
 });
 app.get('/api/admin/reports', requireAdmin, (req, res) => res.json({ reports: store.db.prepare('SELECT id,reporter_name AS reporterName,reporter_email AS reporterEmail,video_id AS videoId,video_url AS videoUrl,reason,status,admin_note AS adminNote,created_at AS createdAt,updated_at AS updatedAt FROM dmca_reports ORDER BY created_at DESC').all() }));

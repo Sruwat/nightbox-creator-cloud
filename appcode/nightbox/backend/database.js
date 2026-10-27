@@ -242,6 +242,15 @@ db.exec(`
     updated_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_support_tickets_user ON support_tickets(user_id, created_at);
+  CREATE TABLE IF NOT EXISTS support_messages (
+    id TEXT PRIMARY KEY,
+    ticket_id TEXT NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
+    author_type TEXT NOT NULL CHECK (author_type IN ('creator', 'admin')),
+    author_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    message TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_support_messages_ticket ON support_messages(ticket_id, created_at);
   CREATE TABLE IF NOT EXISTS contact_messages (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -293,6 +302,17 @@ db.exec(`
 db.prepare('UPDATE creator_storage_limits SET quota_bytes=2147483648, updated_at=? WHERE quota_bytes > 2147483648').run(new Date().toISOString());
 
 db.prepare('INSERT OR IGNORE INTO ads_txt_content (id, content, updated_at) VALUES (1, ?, ?)').run('', new Date().toISOString());
+
+// Preserve support conversations created before the message history table was introduced.
+db.exec(`
+  INSERT OR IGNORE INTO support_messages (id, ticket_id, author_type, author_user_id, message, created_at)
+  SELECT id || ':creator', id, 'creator', user_id, message, created_at
+  FROM support_tickets;
+  INSERT OR IGNORE INTO support_messages (id, ticket_id, author_type, message, created_at)
+  SELECT id || ':admin', id, 'admin', admin_note, updated_at
+  FROM support_tickets
+  WHERE admin_note IS NOT NULL AND trim(admin_note) <> '';
+`);
 
 for (const statement of [
   'ALTER TABLE videos ADD COLUMN content_hash TEXT',
