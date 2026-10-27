@@ -213,9 +213,21 @@ class VideoPlayerActivity : AppCompatActivity() {
                     .url("${BuildConfig.BACKEND_URL}/video/${Uri.encode(vid)}")
                     .get()
                     .build()
-                apiClient.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) throw IllegalStateException("Video metadata request failed: ${response.code}")
-                    val payload = org.json.JSONObject(response.body?.string().orEmpty())
+                var response = apiClient.newCall(request).execute()
+                var processingAttempts = 0
+                while (response.code == 202 && processingAttempts < 60) {
+                    response.close()
+                    processingAttempts += 1
+                    withContext(Dispatchers.Main) {
+                        loadingOverlay.visibility = View.VISIBLE
+                        tvVideoMetaDetails.text = "Video processing… checking again in 5 seconds"
+                    }
+                    kotlinx.coroutines.delay(5000)
+                    response = apiClient.newCall(request).execute()
+                }
+                response.use { readyResponse ->
+                    if (!readyResponse.isSuccessful) throw IllegalStateException("Video metadata request failed: ${readyResponse.code}")
+                    val payload = org.json.JSONObject(readyResponse.body?.string().orEmpty())
                     val video = payload.optJSONObject("video") ?: throw IllegalStateException("Video metadata missing")
                     // Prefer the direct Bunny CDN object. The backend proxy is
                     // only a fallback for legacy/local-storage videos.

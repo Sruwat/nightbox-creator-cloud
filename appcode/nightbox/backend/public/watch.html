@@ -221,9 +221,17 @@
         viewToken = tracking.viewToken;
         minimumWatchSeconds = Number(tracking.minimumWatchSeconds) || 5;
         const resolvedVideoId = await resolveVideoId();
-        const metadata = await fetch(`/video/${encodeURIComponent(resolvedVideoId)}`);
-        if (!metadata.ok) throw new Error('Video metadata unavailable');
-        const video = (await metadata.json()).video;
+        let metadata;
+        let metadataPayload;
+        for (let attempt = 0; attempt < 60; attempt += 1) {
+          metadata = await fetch(`/video/${encodeURIComponent(resolvedVideoId)}`);
+          metadataPayload = await metadata.json().catch(() => ({}));
+          if (metadata.status !== 202) break;
+          document.getElementById('status').innerText = `Video processing… checking again in 5 seconds (${attempt + 1}/60)`;
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+        }
+        if (!metadata?.ok) throw new Error(metadataPayload?.error || 'Video metadata unavailable');
+        const video = metadataPayload.video;
         const directUrl = video.hlsUrl;
         const fallbackUrl = video.streamUrl || `/video/${encodeURIComponent(resolvedVideoId)}/stream`;
         if (/\.mp4(?:$|\?)/i.test(directUrl)) {

@@ -1856,7 +1856,11 @@ app.get('/video/:id', async (req, res) => {
     // A share link can be created as soon as the source reaches storage, but
     // public playback stays hidden until normalization/HLS processing succeeds.
     const playback = store.getVideoPlayback(videoId);
-    if (!playback || playback.playbackStatus !== 'ready') return res.status(404).json({ error: 'Video not found' });
+    if (!playback) return res.status(404).json({ error: 'Video not found' });
+    if (playback.playbackStatus !== 'ready') {
+      res.setHeader('Retry-After', '5');
+      return res.status(202).json({ error: 'Video is still processing', code: 'VIDEO_PROCESSING', playbackStatus: playback.playbackStatus || 'processing' });
+    }
     const v = await bunny.getVideo(videoId);
     const cdnUrl = BUNNY_LOCAL_STORAGE
       ? await bunny.getCdnUrlIfAvailable(videoId)
@@ -1904,7 +1908,11 @@ app.get('/video/:id/stream', async (req, res) => {
     return res.status(400).json({ error: 'Invalid video ID' });
   }
   const playback = store.getVideoPlayback(videoId);
-  if (!playback || playback.playbackStatus !== 'ready') return res.status(404).json({ error: 'Video not found' });
+  if (!playback) return res.status(404).json({ error: 'Video not found' });
+  if (playback.playbackStatus !== 'ready') {
+    res.setHeader('Retry-After', '5');
+    return res.status(202).json({ error: 'Video is still processing', code: 'VIDEO_PROCESSING', playbackStatus: playback.playbackStatus || 'processing' });
+  }
 
   if (BUNNY_LOCAL_STORAGE) {
     const localPath = bunny.getLocalPath(videoId);
