@@ -41,19 +41,44 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Video share links; keep legacy host compatibility during migration. -->
+            <!-- Verified NightBox share links. Keep the filters host-specific so
+                 Android verifies each public domain independently. -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                
-                <data android:scheme="http" />
                 <data android:scheme="https" />
-                <data android:host="video.prernaupin.in" />
-                <data android:host="video.nightbox.in" android:scheme="https" />
-                <data android:host="api.nightbox.in" android:scheme="https" />
-                <data android:host="nightbox.in" android:scheme="https" />
-                <data android:host="www.nightbox.in" android:scheme="https" />
+                <data android:host="nightbox.in" />
+                <data android:pathPrefix="/watch/" />
+                <data android:pathPrefix="/l/" />
+            </intent-filter>
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="www.nightbox.in" />
+                <data android:pathPrefix="/watch/" />
+                <data android:pathPrefix="/l/" />
+            </intent-filter>
+
+            <!-- Legacy/API video links remain supported, but are also verified
+                 separately so one bad host cannot invalidate the main domain. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="api.nightbox.in" />
+                <data android:pathPrefix="/watch/" />
+                <data android:pathPrefix="/l/" />
+            </intent-filter>
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="video.nightbox.in" />
                 <data android:pathPrefix="/watch/" />
                 <data android:pathPrefix="/l/" />
             </intent-filter>

@@ -262,7 +262,9 @@ class MainActivity : AppCompatActivity() {
                 intent.data = null
                 intent.action = null
                 setIntent(Intent())
-                openFileInfo(videoId, data.getQueryParameter("link"))
+                // A verified App Link should enter the app's player directly;
+                // do not send the user through the old browser/info detour.
+                openVideoPlayer(videoId, data.getQueryParameter("link"))
             } else if (pathSegments.size >= 2 && pathSegments[0] == "l") {
                 val slug = pathSegments[1]
                 deepLinkProcessed = true
@@ -285,7 +287,7 @@ class MainActivity : AppCompatActivity() {
                 if (!response.isSuccessful) throw IllegalStateException("Share link not found")
                 val link = JSONObject(response.body?.string().orEmpty()).getJSONObject("link")
                 val videoId = link.getString("videoId")
-                withContext(Dispatchers.Main) { openFileInfo(videoId, slug) }
+                withContext(Dispatchers.Main) { openVideoPlayer(videoId, slug) }
             } catch (_: Exception) {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@MainActivity, "This NightBox link is not available", Toast.LENGTH_LONG).show()
