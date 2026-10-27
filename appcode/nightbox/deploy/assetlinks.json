@@ -1,0 +1,15 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "simple.shayaribygenz",
+      "sha256_cert_fingerprints": [
+        "38:2E:7D:19:F1:36:26:D3:00:98:1A:86:E5:6D:38:DE:15:BA:E7:E3:3F:14:5E:53:23:36:9B:C6:1B:1C:02:9D",
+        "03:2D:A4:3E:C7:99:BE:64:69:01:D5:30:6A:4D:67:8B:5A:25:3F:78:73:69:41:88:A2:C0:20:DC:7D:C1:F5:1A",
+        "14:30:0C:9C:17:B1:0F:AF:A5:A0:50:4A:95:0C:04:F6:ED:C8:D7:3F:32:21:EE:5E:50:36:F6:7B:FD:8C:FF:34",
+        "FA:C6:17:45:DC:09:03:78:6F:B9:ED:E6:2A:96:2B:39:9F:73:48:F0:BB:6F:89:9B:83:32:66:75:91:03:3B:9C"
+      ]
+    }
+  }
+]
