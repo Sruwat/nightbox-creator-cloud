@@ -185,10 +185,10 @@ function LiveBots({token,toast}:{token:string;toast:(s:string)=>void}){
   const bots=[
     {name:"Nightbox connection",handle:"nightbox_connbot",description:"Link this Telegram chat to your creator account.",comingSoon:false},
     {name:"Nightbox Files upload bot",handle:"nightbox_uploadbot",description:"Send supported video or document uploads.",comingSoon:false},
-    {name:"NIghtheast to nightbox converter",handle:"nh_to_nb_bot",description:"Submit a supported Nightheast video link.",comingSoon:true},
-    {name:"Nightbox to Nightbox",handle:"nb_to_nbbot",description:"Submit a supported video link.",comingSoon:true},
-    {name:"TB to Nightbox converter",handle:"tb_to_nb_bot",description:"Submit a supported TeraBox video link.",comingSoon:false},
-    {name:"DW to Nightbox converter",handle:"dw_to_nb_bot",description:"Submit a supported Diskwala video link.",comingSoon:false},
+    {name:"NIghtheast to nightbox converter",handle:"nh_to_nb_bot",description:"Submit a supported Nightheast video link.",comingSoon:false},
+    {name:"Nightbox to Nightbox",handle:"nb_to_nbbot",description:"Submit a supported video link.",comingSoon:false},
+    {name:"TB to Nightbox converter",handle:"tb_to_nb_bot",description:"Submit a supported TeraBox video link.",comingSoon:true},
+    {name:"DW to Nightbox converter",handle:"dw_to_nb_bot",description:"Submit a supported Diskwala video link.",comingSoon:true},
   ];
   const load=()=>getCreatorApiKeys(token).then(x=>setKeys(x.keys)).catch(()=>setKeys([]));
   useEffect(()=>{load()},[token]);
