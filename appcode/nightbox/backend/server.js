@@ -1878,9 +1878,11 @@ app.get('/video/:id', async (req, res) => {
         hlsUrl: playback?.hlsUrl || cdnUrl || `${PUBLIC_API_URL}/video/${videoId}/stream`,
         playbackStatus: playback?.hlsUrl ? 'ready' : (playback?.playbackStatus || 'ready'),
         playbackError: playback?.playbackError || null,
-        // Stable range-capable API playback URL for clients that cannot reliably
-        // consume the Bunny CDN MP4 directly (notably Android WebView/ExoPlayer).
-        streamUrl: `${PUBLIC_API_URL}/video/${videoId}/stream`,
+        // Existing clients read streamUrl for non-HLS playback. Prefer the
+        // Bunny CDN object so ExoPlayer/browser clients can request byte ranges
+        // directly from the edge; retain the API proxy as a local-storage or
+        // temporarily unavailable-CDN fallback.
+        streamUrl: cdnUrl || `${PUBLIC_API_URL}/video/${videoId}/stream`,
         watchUrl: bunny.getWatchUrl(videoId),
         downloadUrl: `${DOMAIN_URL}/download/${videoId}`,
       },
