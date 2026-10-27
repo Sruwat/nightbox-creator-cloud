@@ -444,20 +444,20 @@ export async function submitDmcaReport(payload: { name: string; email: string; v
 
 export async function getCreatorWithdrawals(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/creator/withdrawals`, { headers: authHeaders(token) });
-  return parseCreatorResponse<{ balanceMicros: number; minimumMicros: number; withdrawals: Array<{ id: string; amountMicros: number; currency: string; method: string; status: string; requestedAt: string }> }>(response);
+  return parseCreatorResponse<{ balanceMicros: number; minimumMicros: number; withdrawals: Array<{ id: string; amountMicros: number; currency: string; method: string; payoutAccount: string | null; status: string; requestedAt: string }> }>(response);
 }
 
-export async function createWithdrawal(token: string, amountMicros: number, method: string) {
-  const response = await fetch(`${BACKEND_URL}/api/creator/withdrawals`, { method: "POST", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify({ amountMicros, method }) });
-  return parseCreatorResponse<{ balanceMicros: number; withdrawal: { id: string; amountMicros: number; method: string; status: string } }>(response);
+export async function createWithdrawal(token: string, amountMicros: number, method: string, payoutAccount: string) {
+  const response = await fetch(`${BACKEND_URL}/api/creator/withdrawals`, { method: "POST", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify({ amountMicros, method, payoutAccount }) });
+  return parseCreatorResponse<{ balanceMicros: number; withdrawal: { id: string; amountMicros: number; method: string; payoutAccount: string; status: string } }>(response);
 }
 
 export async function getAdminWithdrawals(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/withdrawals`, { headers: authHeaders(token) });
-  return parseResponse<{ withdrawals: Array<{ id: string; creatorId: string; email: string; amountMicros: number; currency: string; method: string; status: string; note: string | null; requestedAt: string; reviewedAt: string | null; paidAt: string | null }> }>(response);
+  return parseResponse<{ withdrawals: Array<{ id: string; creatorId: string; email: string; amountMicros: number; currency: string; method: string; payoutAccount: string | null; status: string; note: string | null; requestedAt: string; reviewedAt: string | null; paidAt: string | null }> }>(response);
 }
 
-export type AdminWithdrawalUpdate = { status?: "pending" | "approved" | "paid" | "rejected"; amountMicros?: number; method?: string; note?: string };
+export type AdminWithdrawalUpdate = { status?: "pending" | "approved" | "paid" | "rejected"; amountMicros?: number; method?: string; payoutAccount?: string; note?: string };
 
 export async function updateAdminWithdrawal(token: string, id: string, changes: AdminWithdrawalUpdate | "approved" | "paid" | "rejected") {
   const body = typeof changes === "string" ? { status: changes } : changes;

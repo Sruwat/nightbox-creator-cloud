@@ -223,6 +223,7 @@ db.exec(`
     amount_micros INTEGER NOT NULL CHECK (amount_micros > 0),
     currency TEXT NOT NULL DEFAULT 'USD',
     method TEXT NOT NULL,
+    payout_account TEXT,
     status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'paid', 'rejected')),
     note TEXT,
     requested_at TEXT NOT NULL,
@@ -326,6 +327,7 @@ for (const statement of [
   'ALTER TABLE videos ADD COLUMN playback_status TEXT NOT NULL DEFAULT \'processing\'',
   'ALTER TABLE videos ADD COLUMN hls_url TEXT',
   'ALTER TABLE videos ADD COLUMN playback_error TEXT',
+  'ALTER TABLE withdrawal_requests ADD COLUMN payout_account TEXT',
 ]) {
   try { db.exec(statement); } catch (error) {
     if (!String(error.message).includes('duplicate column name')) throw error;

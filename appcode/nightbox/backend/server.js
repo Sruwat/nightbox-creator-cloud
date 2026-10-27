@@ -1110,21 +1110,29 @@ function creatorBalance(creatorId) {
   return Math.max(0, earned - reserved);
 }
 
+function validPayoutAccount(method, account) {
+  if (method === 'UPI') return /^[A-Za-z0-9][A-Za-z0-9._-]{1,253}@[A-Za-z][A-Za-z0-9.-]{1,63}$/.test(account);
+  if (method === 'PayPal') return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account) && account.length <= 254;
+  return false;
+}
+
 app.get('/api/creator/withdrawals', requireUser, (req, res) => {
   const balanceMicros = creatorBalance(req.user.id);
-  const withdrawals = store.db.prepare('SELECT id,amount_micros AS amountMicros,currency,method,status,note,requested_at AS requestedAt,reviewed_at AS reviewedAt,paid_at AS paidAt FROM withdrawal_requests WHERE creator_id=? ORDER BY requested_at DESC').all(req.user.id);
+  const withdrawals = store.db.prepare('SELECT id,amount_micros AS amountMicros,currency,method,payout_account AS payoutAccount,status,note,requested_at AS requestedAt,reviewed_at AS reviewedAt,paid_at AS paidAt FROM withdrawal_requests WHERE creator_id=? ORDER BY requested_at DESC').all(req.user.id);
   res.json({ balanceMicros, minimumMicros: Number(process.env.MIN_WITHDRAWAL_USD_MICROS || 10000000), withdrawals });
 });
 app.post('/api/creator/withdrawals', requireUser, (req, res) => {
   const amountMicros = Number(req.body?.amountMicros);
   const method = sanitizeInput(req.body?.method);
+  const payoutAccount = typeof req.body?.payoutAccount === 'string' ? req.body.payoutAccount.trim() : '';
   const minimumMicros = Number(process.env.MIN_WITHDRAWAL_USD_MICROS || 10000000);
-  if (!Number.isSafeInteger(amountMicros) || amountMicros < minimumMicros || !method) return res.status(400).json({ error: 'A valid amount above the configured minimum and payout method are required' });
+  if (!Number.isSafeInteger(amountMicros) || amountMicros < minimumMicros) return res.status(400).json({ error: 'A valid amount above the configured minimum is required' });
+  if (!validPayoutAccount(method, payoutAccount)) return res.status(400).json({ error: method === 'UPI' ? 'Enter a valid UPI ID (for example, name@bank)' : 'Enter a valid PayPal email address' });
   const balanceMicros = creatorBalance(req.user.id);
   if (amountMicros > balanceMicros) return res.status(409).json({ error: 'Withdrawal exceeds the available creator balance', balanceMicros });
-  const request = { id: store.id(), creatorId: req.user.id, amountMicros, method, requestedAt: store.now() };
-  store.db.prepare('INSERT INTO withdrawal_requests (id,creator_id,amount_micros,method,status,requested_at) VALUES (?,?,?,?,?,?)').run(request.id, request.creatorId, request.amountMicros, request.method, 'pending', request.requestedAt);
-  res.status(201).json({ withdrawal: { id: request.id, amountMicros, method, status: 'pending', requestedAt: request.requestedAt }, balanceMicros: creatorBalance(req.user.id) });
+  const request = { id: store.id(), creatorId: req.user.id, amountMicros, method, payoutAccount, requestedAt: store.now() };
+  store.db.prepare('INSERT INTO withdrawal_requests (id,creator_id,amount_micros,method,payout_account,status,requested_at) VALUES (?,?,?,?,?,?,?)').run(request.id, request.creatorId, request.amountMicros, request.method, payoutAccount, 'pending', request.requestedAt);
+  res.status(201).json({ withdrawal: { id: request.id, amountMicros, method, payoutAccount, status: 'pending', requestedAt: request.requestedAt }, balanceMicros: creatorBalance(req.user.id) });
 });
 
 app.get('/api/admin/cpm', requireAdmin, (req, res) => res.json({ rates: store.db.prepare('SELECT country,cpm_cents AS cpmCents,updated_at AS updatedAt FROM cpm_rates ORDER BY country').all() }));
@@ -1394,7 +1402,7 @@ app.put('/api/admin/plans/:id', requireAdmin, (req, res) => {
   if (!result.changes) return res.status(404).json({ error: 'Plan not found' });
   res.json({ plan: store.db.prepare('SELECT id,name,price_minor AS priceMinor,currency,duration_days AS durationDays,video_ads_removed AS videoAdsRemoved,all_ads_removed AS allAdsRemoved,recurring,active FROM subscription_plans WHERE id=?').get(req.params.id) });
 });
-app.get('/api/admin/withdrawals', requireAdmin, (req, res) => res.json({ withdrawals: store.db.prepare('SELECT w.id,w.creator_id AS creatorId,u.email,w.amount_micros AS amountMicros,w.currency,w.method,w.status,w.note,w.requested_at AS requestedAt,w.reviewed_at AS reviewedAt,w.paid_at AS paidAt FROM withdrawal_requests w JOIN users u ON u.id=w.creator_id ORDER BY w.requested_at DESC').all() }));
+app.get('/api/admin/withdrawals', requireAdmin, (req, res) => res.json({ withdrawals: store.db.prepare('SELECT w.id,w.creator_id AS creatorId,u.email,w.amount_micros AS amountMicros,w.currency,w.method,w.payout_account AS payoutAccount,w.status,w.note,w.requested_at AS requestedAt,w.reviewed_at AS reviewedAt,w.paid_at AS paidAt FROM withdrawal_requests w JOIN users u ON u.id=w.creator_id ORDER BY w.requested_at DESC').all() }));
 app.get('/api/admin/tickets', requireAdmin, (req, res) => {
   const tickets = store.db.prepare('SELECT t.id,t.user_id AS userId,u.email,t.subject,t.message,t.status,t.admin_note AS adminNote,t.created_at AS createdAt,t.updated_at AS updatedAt FROM support_tickets t JOIN users u ON u.id=t.user_id ORDER BY t.created_at DESC').all().map(withSupportMessages);
   res.json({ tickets });
@@ -1508,21 +1516,24 @@ app.put('/api/admin/ads-txt', requireAdmin, (req, res) => {
 app.put('/api/admin/withdrawals/:id', requireAdmin, (req, res) => {
   const requestedStatus = req.body?.status === undefined ? null : String(req.body.status || '');
   if (requestedStatus !== null && !['pending', 'approved', 'paid', 'rejected'].includes(requestedStatus)) return res.status(400).json({ error: 'Invalid withdrawal status' });
-  const current = store.db.prepare('SELECT id,creator_id AS creatorId,amount_micros AS amountMicros,method,status,note FROM withdrawal_requests WHERE id=?').get(req.params.id);
+  const current = store.db.prepare('SELECT id,creator_id AS creatorId,amount_micros AS amountMicros,method,payout_account AS payoutAccount,status,note FROM withdrawal_requests WHERE id=?').get(req.params.id);
   if (!current) return res.status(404).json({ error: 'Withdrawal not found' });
   const editable = ['pending', 'approved'].includes(current.status);
   const hasAmount = req.body?.amountMicros !== undefined;
   const hasMethod = req.body?.method !== undefined;
+  const hasPayoutAccount = req.body?.payoutAccount !== undefined;
   const hasNote = req.body?.note !== undefined;
-  if (!editable && (hasAmount || hasMethod || hasNote)) return res.status(409).json({ error: `Cannot edit a ${current.status} withdrawal` });
+  if (!editable && (hasAmount || hasMethod || hasPayoutAccount || hasNote)) return res.status(409).json({ error: `Cannot edit a ${current.status} withdrawal` });
   const status = requestedStatus || current.status;
   const allowed = { pending: ['pending', 'approved', 'rejected'], approved: ['approved', 'paid', 'rejected'], paid: ['paid'], rejected: ['rejected'] };
   if (!allowed[current.status].includes(status)) return res.status(409).json({ error: `Cannot move withdrawal from ${current.status} to ${status}` });
   const amountMicros = hasAmount ? Number(req.body.amountMicros) : Number(current.amountMicros);
   const method = hasMethod ? sanitizeInput(req.body.method) : current.method;
+  const payoutAccount = hasPayoutAccount && typeof req.body.payoutAccount === 'string' ? req.body.payoutAccount.trim() : current.payoutAccount;
   const note = hasNote ? sanitizeInput(req.body.note) : current.note;
   const minimumMicros = Number(process.env.MIN_WITHDRAWAL_USD_MICROS || 10000000);
   if (editable && (!Number.isSafeInteger(amountMicros) || amountMicros < minimumMicros || !method)) return res.status(400).json({ error: 'Provide a valid payout amount above the configured minimum and payout method' });
+  if (editable && (hasPayoutAccount || hasMethod || status === 'approved' || status === 'paid') && !validPayoutAccount(method, payoutAccount || '')) return res.status(400).json({ error: 'Provide a valid payout account before approving or paying this request' });
   if (editable && ['pending', 'approved'].includes(status)) {
     const earned = Number(store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS amount FROM earnings WHERE creator_id=?').get(current.creatorId).amount)
       + Number(store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS amount FROM referral_earnings WHERE source_creator_id=?').get(current.creatorId).amount);
@@ -1530,8 +1541,8 @@ app.put('/api/admin/withdrawals/:id', requireAdmin, (req, res) => {
     if (amountMicros > Math.max(0, earned - reservedOther)) return res.status(409).json({ error: 'Withdrawal exceeds the available creator balance', balanceMicros: Math.max(0, earned - reservedOther) });
   }
   const timestamp = store.now();
-  store.db.prepare('UPDATE withdrawal_requests SET amount_micros=?,method=?,status=?,note=?,reviewed_at=CASE WHEN ? IN (\'approved\',\'paid\',\'rejected\') THEN COALESCE(reviewed_at,?) ELSE reviewed_at END,paid_at=CASE WHEN ?=\'paid\' THEN COALESCE(paid_at,?) ELSE NULL END WHERE id=?').run(amountMicros, method, status, note, status, timestamp, status, timestamp, req.params.id);
-  res.json({ withdrawal: store.db.prepare('SELECT id,amount_micros AS amountMicros,currency,method,status,note,requested_at AS requestedAt,reviewed_at AS reviewedAt,paid_at AS paidAt FROM withdrawal_requests WHERE id=?').get(req.params.id) });
+  store.db.prepare('UPDATE withdrawal_requests SET amount_micros=?,method=?,payout_account=?,status=?,note=?,reviewed_at=CASE WHEN ? IN (\'approved\',\'paid\',\'rejected\') THEN COALESCE(reviewed_at,?) ELSE reviewed_at END,paid_at=CASE WHEN ?=\'paid\' THEN COALESCE(paid_at,?) ELSE NULL END WHERE id=?').run(amountMicros, method, payoutAccount, status, note, status, timestamp, status, timestamp, req.params.id);
+  res.json({ withdrawal: store.db.prepare('SELECT id,amount_micros AS amountMicros,currency,method,payout_account AS payoutAccount,status,note,requested_at AS requestedAt,reviewed_at AS reviewedAt,paid_at AS paidAt FROM withdrawal_requests WHERE id=?').get(req.params.id) });
 });
 app.post('/api/subscriptions/checkout', requireUser, async (req, res) => {
   const plan = store.db.prepare('SELECT * FROM subscription_plans WHERE id = ? AND active = 1').get(String(req.body?.planId || ''));
