@@ -46,7 +46,9 @@ const CREATOR_MAX_QUOTA_BYTES = null;
 const BUNNY_STORAGE_PASSWORD = process.env.BUNNY_STORAGE_PASSWORD;
 const BUNNY_STORAGE_ZONE = process.env.BUNNY_STORAGE_ZONE;
 const BUNNY_LOCAL_STORAGE = String(process.env.VIDEO_STORAGE_DRIVER || '').toLowerCase() === 'local';
-const HLS_TRANSCODE_ENABLED = process.env.ENABLE_HLS_TRANSCODE !== 'false' && !BUNNY_LOCAL_STORAGE;
+// Both storage drivers can publish HLS: local mode writes segments under the
+// media origin's /nightbox/hls path, which the CDN pulls on demand.
+const HLS_TRANSCODE_ENABLED = process.env.ENABLE_HLS_TRANSCODE !== 'false' && Boolean(process.env.BUNNY_CDN_HOST);
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || crypto.randomBytes(32).toString('hex');
 // Conversion bots can identify a creator by Telegram's verified sender ID.
 // This is deliberately separate from creator API keys: the shared secret
@@ -912,6 +914,35 @@ app.get('/api/links/:slug', (req, res) => {
   res.json({ link });
 });
 
+// Existing local-storage uploads may be marked ready even though only the
+// original (possibly incompatible or slow-starting) MP4 exists. Convert them
+// when first requested, then expose the CDN HLS playlist after it is complete.
+function ensureHlsForLegacyVideo(videoId, playback) {
+  if (!HLS_TRANSCODE_ENABLED || !playback || playback.playbackStatus !== 'ready' || playback.hlsUrl) return playback;
+  const updated = store.db.prepare(`
+    UPDATE videos SET playback_status = 'processing', playback_error = NULL
+    WHERE id = ? AND status <> 'deleted' AND playback_status = 'ready' AND hls_url IS NULL
+  `).run(videoId);
+  if (updated.changes === 1) {
+    const sourcePath = BUNNY_LOCAL_STORAGE
+      ? bunny.getLocalPath(videoId)
+      : path.join(TEMP_DIR, `transcode-${videoId}.mp4`);
+    transcoder.enqueue({
+      videoId,
+      priority: 'background',
+      preserveSource: BUNNY_LOCAL_STORAGE,
+      prepareSource: BUNNY_LOCAL_STORAGE
+        ? () => Promise.resolve(sourcePath)
+        : () => bunny.downloadVideoToFile(videoId, sourcePath).then(() => sourcePath),
+      uploadHlsDirectory: bunny.uploadHlsDirectory,
+      getHlsUrl: bunny.getHlsUrl,
+      onReady: (hlsUrl) => store.updateVideoPlayback(videoId, 'ready', hlsUrl, null),
+      onError: (error) => store.updateVideoPlayback(videoId, 'failed', null, String(error.message || error).slice(0, 2000)),
+    });
+  }
+  return store.getVideoPlayback(videoId);
+}
+
 // Compatibility mode for older Android builds that only call view/start and
 // never send the later qualify callback. The backend remains the source of
 // truth for limits, filtering, earnings, and referral ledger writes.
@@ -960,8 +991,12 @@ function recordViewAtStart(session) {
 app.post('/api/links/:slug/view/start', async (req, res) => {
   const link = store.db.prepare('SELECT id, creator_id AS creatorId FROM creator_links WHERE slug = ?').get(req.params.slug);
   if (!link) return res.status(404).json({ error: 'Link not found' });
-  const playback = store.getVideoPlayback(store.db.prepare('SELECT video_id AS videoId FROM creator_links WHERE id=?').get(link.id)?.videoId);
+  const videoId = store.db.prepare('SELECT video_id AS videoId FROM creator_links WHERE id=?').get(link.id)?.videoId;
+  const playback = ensureHlsForLegacyVideo(videoId, store.getVideoPlayback(videoId));
   if (!playback) return res.status(404).json({ error: 'Video not found' });
+  if (playback.playbackStatus === 'failed') {
+    return res.status(409).json({ error: 'Video processing failed', code: 'VIDEO_PROCESSING_FAILED', playbackStatus: 'failed' });
+  }
   if (playback.playbackStatus !== 'ready') {
     res.setHeader('Retry-After', '5');
     return res.status(202).json({ error: 'Video is still processing', code: 'VIDEO_PROCESSING', playbackStatus: playback.playbackStatus || 'processing' });
@@ -1795,9 +1830,9 @@ app.post('/upload-file', (req, res, next) => {
       watchUrl: bunny.getWatchUrl(videoId),
       embedUrl: bunny.getEmbedUrl(videoId),
       link: creatorLink ? `${DOMAIN_URL}/l/${creatorLink.slug}` : null,
-      status: 'active',
+      status: HLS_TRANSCODE_ENABLED ? 'processing' : 'active',
       playbackStatus: HLS_TRANSCODE_ENABLED ? 'processing' : 'ready',
-      message: 'Video uploaded and active.',
+      message: HLS_TRANSCODE_ENABLED ? 'Video uploaded. Playback will be available after processing.' : 'Video uploaded and ready.',
     });
   } catch (error) {
     console.error('Upload error:', error.message);
@@ -1848,9 +1883,9 @@ app.post('/upload-from-url', async (req, res) => {
       watchUrl: bunny.getWatchUrl(videoId),
       embedUrl: bunny.getEmbedUrl(videoId),
       link: creatorLink ? `${DOMAIN_URL}/l/${creatorLink.slug}` : null,
-      status: 'active',
+      status: HLS_TRANSCODE_ENABLED ? 'processing' : 'active',
       playbackStatus: HLS_TRANSCODE_ENABLED ? 'processing' : 'ready',
-      message: 'Video uploaded from URL and active.',
+      message: HLS_TRANSCODE_ENABLED ? 'Video uploaded from URL. Playback will be available after processing.' : 'Video uploaded from URL and ready.',
     });
   } catch (error) {
     console.error('URL upload error:', error.message);
@@ -1872,16 +1907,23 @@ app.get('/video/:id', async (req, res) => {
   try {
     // A share link can be created as soon as the source reaches storage, but
     // public playback stays hidden until normalization/HLS processing succeeds.
-    const playback = store.getVideoPlayback(videoId);
+    const playback = ensureHlsForLegacyVideo(videoId, store.getVideoPlayback(videoId));
     if (!playback) return res.status(404).json({ error: 'Video not found' });
+    if (playback.playbackStatus === 'failed') {
+      return res.status(409).json({ error: 'Video processing failed', code: 'VIDEO_PROCESSING_FAILED', playbackStatus: 'failed' });
+    }
     if (playback.playbackStatus !== 'ready') {
       res.setHeader('Retry-After', '5');
       return res.status(202).json({ error: 'Video is still processing', code: 'VIDEO_PROCESSING', playbackStatus: playback.playbackStatus || 'processing' });
     }
     const v = await bunny.getVideo(videoId);
-    const cdnUrl = BUNNY_LOCAL_STORAGE
-      ? await bunny.getCdnUrlIfAvailable(videoId)
-      : bunny.getDirectPlayUrl(videoId);
+    // Return the direct CDN URLs without an MP4 HEAD probe on the playback
+    // path. That probe can add several seconds and send the app to the proxy.
+    const cdnUrl = process.env.BUNNY_CDN_HOST ? bunny.getDirectPlayUrl(videoId) : null;
+    const originStreamUrl = `${PUBLIC_API_URL}/video/${videoId}/stream`;
+    const originHlsUrl = playback.hlsUrl && BUNNY_LOCAL_STORAGE
+      ? `${PUBLIC_API_URL}/nightbox/hls/${videoId}/master.m3u8`
+      : null;
     res.json({
       success: true,
       video: {
@@ -1898,15 +1940,17 @@ app.get('/video/:id', async (req, res) => {
         cdnUrl,
         // Keep the Bunny iframe contract for existing feed embeds; native
         // playback clients use cdnUrl/hlsUrl below.
-        embedUrl: BUNNY_LOCAL_STORAGE ? cdnUrl || `${PUBLIC_API_URL}/video/${videoId}/stream` : bunny.getEmbedUrl(videoId),
-        hlsUrl: playback?.hlsUrl || cdnUrl || `${PUBLIC_API_URL}/video/${videoId}/stream`,
+        embedUrl: BUNNY_LOCAL_STORAGE ? cdnUrl || originStreamUrl : bunny.getEmbedUrl(videoId),
+        hlsUrl: playback?.hlsUrl || cdnUrl || originStreamUrl,
+        originHlsUrl,
         playbackStatus: playback?.hlsUrl ? 'ready' : (playback?.playbackStatus || 'ready'),
         playbackError: playback?.playbackError || null,
         // Existing clients read streamUrl for non-HLS playback. Prefer the
         // Bunny CDN object so ExoPlayer/browser clients can request byte ranges
         // directly from the edge; retain the API proxy as a local-storage or
         // temporarily unavailable-CDN fallback.
-        streamUrl: cdnUrl || `${PUBLIC_API_URL}/video/${videoId}/stream`,
+        streamUrl: cdnUrl || originStreamUrl,
+        originStreamUrl,
         watchUrl: bunny.getWatchUrl(videoId),
         downloadUrl: `${DOMAIN_URL}/download/${videoId}`,
       },
@@ -1924,8 +1968,11 @@ app.get('/video/:id/stream', async (req, res) => {
   if (!videoId || !/^[a-f0-9-]+$/i.test(videoId)) {
     return res.status(400).json({ error: 'Invalid video ID' });
   }
-  const playback = store.getVideoPlayback(videoId);
+  const playback = ensureHlsForLegacyVideo(videoId, store.getVideoPlayback(videoId));
   if (!playback) return res.status(404).json({ error: 'Video not found' });
+  if (playback.playbackStatus === 'failed') {
+    return res.status(409).json({ error: 'Video processing failed', code: 'VIDEO_PROCESSING_FAILED', playbackStatus: 'failed' });
+  }
   if (playback.playbackStatus !== 'ready') {
     res.setHeader('Retry-After', '5');
     return res.status(202).json({ error: 'Video is still processing', code: 'VIDEO_PROCESSING', playbackStatus: playback.playbackStatus || 'processing' });
@@ -2124,6 +2171,7 @@ app.get('/ready', (req, res) => {
     adminApiKey: Boolean(process.env.ADMIN_API_KEY && process.env.ADMIN_API_KEY.length >= 32),
     trustedProxy: process.env.TRUST_PROXY === 'true',
     bunny: Boolean(process.env.BUNNY_CDN_HOST && (BUNNY_LOCAL_STORAGE || (process.env.BUNNY_STORAGE_PASSWORD && process.env.BUNNY_STORAGE_ZONE))),
+    hlsTranscode: HLS_TRANSCODE_ENABLED,
     // Reputation lookup is optional; when no provider is configured the
     // traffic filter fails closed in production, which is still safe/ready.
     reputationChecks: Boolean(process.env.IPQUALITYSCORE_API_KEY) || process.env.BLOCK_ON_REPUTATION_FAILURE === 'true',
@@ -2177,22 +2225,27 @@ app.use((req, res) => {
 // Server Start + Graceful Shutdown
 // ─────────────────────────────────────────────
 
-function queueLegacyTranscodes() {
+function resumeInterruptedTranscodes() {
   if (!HLS_TRANSCODE_ENABLED || !bunny.getHlsUrl('probe')) return;
-  const limit = Math.min(Math.max(Number.parseInt(process.env.HLS_BACKFILL_LIMIT || '10', 10) || 10, 1), 100);
-  const pending = store.db.prepare("SELECT id FROM videos WHERE status <> 'deleted' AND hls_url IS NULL ORDER BY created_at ASC LIMIT ?").all(limit);
+  const pending = store.db.prepare("SELECT id FROM videos WHERE status <> 'deleted' AND playback_status = 'processing' AND hls_url IS NULL ORDER BY created_at ASC").all();
   for (const video of pending) {
-    const sourcePath = path.join(TEMP_DIR, `transcode-${video.id}.mp4`);
+    const sourcePath = BUNNY_LOCAL_STORAGE
+      ? bunny.getLocalPath(video.id)
+      : path.join(TEMP_DIR, `transcode-${video.id}.mp4`);
     transcoder.enqueue({
       videoId: video.id,
-      prepareSource: () => bunny.downloadVideoToFile(video.id, sourcePath).then(() => sourcePath),
+      priority: 'background',
+      preserveSource: BUNNY_LOCAL_STORAGE,
+      prepareSource: BUNNY_LOCAL_STORAGE
+        ? () => Promise.resolve(sourcePath)
+        : () => bunny.downloadVideoToFile(video.id, sourcePath).then(() => sourcePath),
       uploadHlsDirectory: bunny.uploadHlsDirectory,
       getHlsUrl: bunny.getHlsUrl,
       onReady: (hlsUrl) => store.updateVideoPlayback(video.id, 'ready', hlsUrl, null),
       onError: (error) => store.updateVideoPlayback(video.id, 'failed', null, String(error.message || error).slice(0, 2000)),
     });
   }
-  if (pending.length) console.log(`[HLS] Queued ${pending.length} legacy video(s) for CDN playback processing.`);
+  if (pending.length) console.log(`[HLS] Resumed ${pending.length} interrupted video transcode(s).`);
 }
 
 const server = app.listen(PORT, '0.0.0.0', () => {
@@ -2201,7 +2254,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🎬 Bunny Storage Zone: ${process.env.BUNNY_STORAGE_ZONE}`);
   console.log(`🔑 Admin API Key: ${ADMIN_API_KEY.substring(0, 8)}...`);
   console.log(`🛡️  Security: helmet + compression + rate limiting\n`);
-  queueLegacyTranscodes();
+  resumeInterruptedTranscodes();
 });
 
 // Graceful shutdown for PM2

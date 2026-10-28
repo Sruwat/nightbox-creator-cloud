@@ -144,7 +144,12 @@ async function uploadHlsDirectory(videoId, directory) {
   if (STORAGE_DRIVER === 'local') {
     const target = path.join(LOCAL_STORAGE_ROOT, 'hls', videoId);
     fs.mkdirSync(target, { recursive: true });
-    for (const fileName of fs.readdirSync(directory)) {
+    // Publish the playlist last so CDN viewers never see an incomplete set of segments.
+    const files = fs.readdirSync(directory).filter((fileName) => /\.(m3u8|ts)$/i.test(fileName));
+    for (const fileName of files.filter((name) => !name.endsWith('.m3u8'))) {
+      fs.copyFileSync(path.join(directory, fileName), path.join(target, fileName));
+    }
+    for (const fileName of files.filter((name) => name.endsWith('.m3u8'))) {
       fs.copyFileSync(path.join(directory, fileName), path.join(target, fileName));
     }
     return;
