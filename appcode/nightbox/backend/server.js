@@ -35,8 +35,8 @@ const ipCountry = require('./ip-country');
 const app = express();
 const googleAuthClient = new OAuth2Client();
 // The production path is Nginx (and optionally Cloudflare) -> Node. Trust one
-// proxy hop so Express rate limiting cannot be bypassed with a forged X-Forwarded-For.
-app.set('trust proxy', process.env.TRUST_PROXY === 'true' ? 1 : false);
+// proxy hop so Express rate limiting uses the real client address.
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
 const DOMAIN_URL = String(process.env.PUBLIC_SITE_URL || 'https://nightbox.in').replace(/\/$/, '');
 const PUBLIC_API_URL = String(process.env.PUBLIC_API_URL || 'https://api.nightbox.in').replace(/\/$/, '');
