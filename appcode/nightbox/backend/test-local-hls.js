@@ -14,6 +14,7 @@ const tempDir = path.join(root, 'temp');
 const fixtureDir = path.join(root, 'fixture');
 const videoId = '12345678-1234-1234-1234-123456789abc';
 const readyVideoId = 'abcdefab-1234-1234-1234-abcdefabcdef';
+const interruptedVideoId = 'fedcba98-7654-3210-1234-567890abcdef';
 const sourcePath = path.join(mediaDir, `${videoId}.mp4`);
 const env = {
   ...process.env,
@@ -68,6 +69,7 @@ async function main() {
   fs.mkdirSync(fixtureDir, { recursive: true });
   fs.writeFileSync(sourcePath, 'test source must survive a failed transcode');
   fs.writeFileSync(path.join(mediaDir, `${readyVideoId}.mp4`), 'ready source');
+  fs.writeFileSync(path.join(mediaDir, `${interruptedVideoId}.mp4`), 'interrupted source');
   fs.writeFileSync(path.join(fixtureDir, 'segment_00000.ts'), 'segment');
   fs.writeFileSync(path.join(fixtureDir, 'master.m3u8'), '#EXTM3U\n');
 
@@ -80,7 +82,7 @@ async function main() {
   assert.equal(fs.readFileSync(path.join(mediaDir, 'hls', videoId, 'segment_00000.ts'), 'utf8'), 'segment');
   assert.match(bunny.getHlsUrl(videoId), /\/nightbox\/hls\/[^/]+\/master\.m3u8$/);
 
-  const seed = spawnSync(process.execPath, ['-e', `const db=require('./database');db.createVideo({id:'${videoId}',title:'Legacy video',status:'active',playbackStatus:'ready',watchUrl:'https://example.test/watch/${videoId}',embedUrl:'https://example.test/${videoId}.mp4'});db.createVideo({id:'${readyVideoId}',title:'Processed video',status:'active',playbackStatus:'ready',hlsUrl:'https://cdn.example.test/nightbox/hls/${readyVideoId}/master.m3u8',watchUrl:'https://example.test/watch/${readyVideoId}',embedUrl:'https://example.test/${readyVideoId}.mp4'})`], {
+  const seed = spawnSync(process.execPath, ['-e', `const db=require('./database');db.createVideo({id:'${videoId}',title:'Legacy video',status:'active',playbackStatus:'ready',watchUrl:'https://example.test/watch/${videoId}',embedUrl:'https://example.test/${videoId}.mp4'});db.createVideo({id:'${readyVideoId}',title:'Processed video',status:'active',playbackStatus:'ready',hlsUrl:'https://cdn.example.test/nightbox/hls/${readyVideoId}/master.m3u8',watchUrl:'https://example.test/watch/${readyVideoId}',embedUrl:'https://example.test/${readyVideoId}.mp4'});db.createVideo({id:'${interruptedVideoId}',title:'Interrupted video',status:'active',playbackStatus:'processing',watchUrl:'https://example.test/watch/${interruptedVideoId}',embedUrl:'https://example.test/${interruptedVideoId}.mp4'})`], {
     cwd: __dirname, env, encoding: 'utf8',
   });
   assert.equal(seed.status, 0, seed.stderr);
@@ -95,12 +97,19 @@ async function main() {
     assert.match(ready.body.video.hlsUrl, /\/master\.m3u8$/);
     assert.equal(ready.body.video.streamUrl, `https://cdn.example.test/nightbox/${readyVideoId}.mp4`);
     assert.match(ready.body.video.originHlsUrl, /\/nightbox\/hls\/[^/]+\/master\.m3u8$/);
+    // A restart must leave interrupted work idle until its video is requested.
+    const pendingBeforeRequest = spawnSync(process.execPath, ['-e', `const db=require('./database');process.stdout.write(db.getVideoPlayback('${interruptedVideoId}').playbackStatus)`], { cwd: __dirname, env, encoding: 'utf8' });
+    assert.equal(pendingBeforeRequest.stdout, 'processing');
     const processing = await waitFor(port, 202);
     assert.equal(processing.body.code, 'VIDEO_PROCESSING');
     const failed = await waitFor(port, 409);
     assert.equal(failed.body.code, 'VIDEO_PROCESSING_FAILED');
+    const resumed = await waitFor(port, 202, interruptedVideoId);
+    assert.equal(resumed.body.code, 'VIDEO_PROCESSING');
+    const resumedFailed = await waitFor(port, 409, interruptedVideoId);
+    assert.equal(resumedFailed.body.code, 'VIDEO_PROCESSING_FAILED');
     assert.equal(fs.existsSync(sourcePath), true, 'local source was deleted');
-    console.log('Local HLS path, ready metadata, processing gate, failure state, and source preservation passed.');
+    console.log('Local HLS path, ready metadata, on-demand recovery, processing gate, failure state, and source preservation passed.');
   } finally {
     child.kill();
     if (child.exitCode === null && child.signalCode === null) await once(child, 'exit');

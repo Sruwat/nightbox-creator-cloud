@@ -42,10 +42,11 @@ function runFfmpeg(sourcePath, outputDir) {
 }
 
 async function processOne(job) {
-  await fs.promises.mkdir(TEMP_ROOT, { recursive: true });
-  const outputDir = await fs.promises.mkdtemp(path.join(TEMP_ROOT, 'nightbox-hls-'));
+  let outputDir = null;
   let sourcePath = job.sourcePath || null;
   try {
+    await fs.promises.mkdir(TEMP_ROOT, { recursive: true });
+    outputDir = await fs.promises.mkdtemp(path.join(TEMP_ROOT, 'nightbox-hls-'));
     if (!sourcePath && job.prepareSource) sourcePath = await job.prepareSource();
     if (!sourcePath) throw new Error('Transcode source is unavailable');
     await runFfmpeg(sourcePath, outputDir);
@@ -54,7 +55,7 @@ async function processOne(job) {
   } catch (error) {
     job.onError(error);
   } finally {
-    await fs.promises.rm(outputDir, { recursive: true, force: true });
+    if (outputDir) await fs.promises.rm(outputDir, { recursive: true, force: true });
     if (sourcePath && !job.preserveSource) await fs.promises.rm(sourcePath, { force: true });
   }
 }
@@ -71,4 +72,9 @@ function enqueue(job) {
   void drain();
 }
 
-module.exports = { enqueue };
+function promote(videoId) {
+  const index = backgroundQueue.findIndex((job) => job.videoId === videoId);
+  if (index >= 0) urgentQueue.push(...backgroundQueue.splice(index, 1));
+}
+
+module.exports = { enqueue, promote };

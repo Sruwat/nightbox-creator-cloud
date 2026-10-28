@@ -917,19 +917,47 @@ app.get('/api/links/:slug', (req, res) => {
 // Existing local-storage uploads may be marked ready even though only the
 // original (possibly incompatible or slow-starting) MP4 exists. Convert them
 // when first requested, then expose the CDN HLS playlist after it is complete.
+const queuedTranscodeIds = new Set();
+
+function enqueueTrackedTranscode(job) {
+  if (queuedTranscodeIds.has(job.videoId)) {
+    if (job.priority !== 'background') transcoder.promote(job.videoId);
+    return false;
+  }
+  queuedTranscodeIds.add(job.videoId);
+  try {
+    transcoder.enqueue({
+      ...job,
+      onReady: (url) => {
+        try { job.onReady(url); } finally { queuedTranscodeIds.delete(job.videoId); }
+      },
+      onError: (error) => {
+        try { job.onError(error); } finally { queuedTranscodeIds.delete(job.videoId); }
+      },
+    });
+    return true;
+  } catch (error) {
+    queuedTranscodeIds.delete(job.videoId);
+    throw error;
+  }
+}
+
 function ensureHlsForLegacyVideo(videoId, playback) {
-  if (!HLS_TRANSCODE_ENABLED || !playback || playback.playbackStatus !== 'ready' || playback.hlsUrl) return playback;
-  const updated = store.db.prepare(`
-    UPDATE videos SET playback_status = 'processing', playback_error = NULL
-    WHERE id = ? AND status <> 'deleted' AND playback_status = 'ready' AND hls_url IS NULL
-  `).run(videoId);
-  if (updated.changes === 1) {
+  if (!HLS_TRANSCODE_ENABLED || !playback || playback.hlsUrl || playback.playbackStatus === 'failed') return playback;
+  if (playback.playbackStatus === 'ready') {
+    store.db.prepare(`
+      UPDATE videos SET playback_status = 'processing', playback_error = NULL
+      WHERE id = ? AND status <> 'deleted' AND playback_status = 'ready' AND hls_url IS NULL
+    `).run(videoId);
+    playback = store.getVideoPlayback(videoId);
+  }
+  if (playback?.playbackStatus === 'processing' && !playback.hlsUrl) {
     const sourcePath = BUNNY_LOCAL_STORAGE
       ? bunny.getLocalPath(videoId)
       : path.join(TEMP_DIR, `transcode-${videoId}.mp4`);
-    transcoder.enqueue({
+    enqueueTrackedTranscode({
       videoId,
-      priority: 'background',
+      priority: 'urgent',
       preserveSource: BUNNY_LOCAL_STORAGE,
       prepareSource: BUNNY_LOCAL_STORAGE
         ? () => Promise.resolve(sourcePath)
@@ -1803,7 +1831,7 @@ app.post('/upload-file', (req, res, next) => {
       // finished. This makes upload responses fast while preserving the raw
       // CDN MP4 as a fallback during processing.
       handedToTranscoder = true;
-      transcoder.enqueue({
+      enqueueTrackedTranscode({
         videoId,
         sourcePath: filePath,
         uploadHlsDirectory: bunny.uploadHlsDirectory,
@@ -1866,7 +1894,7 @@ app.post('/upload-from-url', async (req, res) => {
     store.createVideo({ id: videoId, ownerId: owner?.id, title, status: 'active', playbackStatus: HLS_TRANSCODE_ENABLED ? 'processing' : 'ready', watchUrl: bunny.getWatchUrl(videoId), embedUrl: bunny.getEmbedUrl(videoId) });
     if (HLS_TRANSCODE_ENABLED && bunny.getHlsUrl(videoId)) {
       const sourcePath = path.join(TEMP_DIR, `transcode-${videoId}.mp4`);
-      transcoder.enqueue({
+      enqueueTrackedTranscode({
         videoId,
         prepareSource: () => bunny.downloadVideoToFile(videoId, sourcePath).then(() => sourcePath),
         uploadHlsDirectory: bunny.uploadHlsDirectory,
@@ -2227,25 +2255,8 @@ app.use((req, res) => {
 
 function resumeInterruptedTranscodes() {
   if (!HLS_TRANSCODE_ENABLED || !bunny.getHlsUrl('probe')) return;
-  const pending = store.db.prepare("SELECT id FROM videos WHERE status <> 'deleted' AND playback_status = 'processing' AND hls_url IS NULL ORDER BY created_at ASC").all();
-  for (const video of pending) {
-    const sourcePath = BUNNY_LOCAL_STORAGE
-      ? bunny.getLocalPath(video.id)
-      : path.join(TEMP_DIR, `transcode-${video.id}.mp4`);
-    transcoder.enqueue({
-      videoId: video.id,
-      priority: 'background',
-      preserveSource: BUNNY_LOCAL_STORAGE,
-      prepareSource: BUNNY_LOCAL_STORAGE
-        ? () => Promise.resolve(sourcePath)
-        : () => bunny.downloadVideoToFile(video.id, sourcePath).then(() => sourcePath),
-      uploadHlsDirectory: bunny.uploadHlsDirectory,
-      getHlsUrl: bunny.getHlsUrl,
-      onReady: (hlsUrl) => store.updateVideoPlayback(video.id, 'ready', hlsUrl, null),
-      onError: (error) => store.updateVideoPlayback(video.id, 'failed', null, String(error.message || error).slice(0, 2000)),
-    });
-  }
-  if (pending.length) console.log(`[HLS] Resumed ${pending.length} interrupted video transcode(s).`);
+  const pending = store.db.prepare("SELECT COUNT(*) AS count FROM videos WHERE status <> 'deleted' AND playback_status = 'processing' AND hls_url IS NULL").get().count;
+  if (pending) console.log(`[HLS] ${pending} interrupted video transcode(s) will resume when requested.`);
 }
 
 const server = app.listen(PORT, '0.0.0.0', () => {
