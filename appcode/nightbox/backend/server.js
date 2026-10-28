@@ -445,11 +445,12 @@ app.post('/api/auth/google', async (req, res) => {
 });
 
 app.post('/api/admin/login', (req, res) => {
-  const { email, password } = req.body || {};
-  const configuredEmail = process.env.ADMIN_EMAIL;
+  const submittedEmail = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const password = req.body?.password;
+  const configuredEmail = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
   const configuredPassword = process.env.ADMIN_PASSWORD;
   if (!configuredEmail || !configuredPassword) return res.status(503).json({ error: 'Admin credentials are not configured on the server' });
-  if (email !== configuredEmail || password !== configuredPassword) return res.status(401).json({ error: 'Invalid administrator credentials' });
+  if (submittedEmail !== configuredEmail || password !== configuredPassword) return res.status(401).json({ error: 'Invalid administrator credentials' });
   let admin = store.findUser(configuredEmail);
   if (!admin) admin = store.createUser(configuredEmail, configuredPassword, 'admin');
   if (admin.role !== 'admin') return res.status(403).json({ error: 'Account is not an administrator' });
