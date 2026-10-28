@@ -458,18 +458,21 @@ class VideoPlayerActivity : AppCompatActivity() {
             .setConnectTimeoutMs(8000)
             .setReadTimeoutMs(15000)
 
-        // Persistent 150MB LRU disk cache: eliminates re-downloads on seek/rewind/replay and saves massive bandwidth
-        val cachedDataSourceFactory = VideoCacheManager.buildCacheDataSourceFactory(this, httpDataSourceFactory)
+        // Playback must remain session-only. Do not attach a persistent disk
+        // cache here: HLS/progressive sources should fetch only the segments
+        // needed for the current bounded buffer. The explicit Download action
+        // (when available) remains the only path that should save a full file.
+        val playbackDataSourceFactory = httpDataSourceFactory
 
         // HLS loads short segments; plain MP4 uses Media3's real container metadata
         // and HTTP byte ranges. Never guess a seek map or video duration.
         val isHlsStream = mediaUrl.contains(".m3u8", ignoreCase = true) || mediaUrl.contains("/hls/", ignoreCase = true)
         val mediaSource = if (isHlsStream) {
-            HlsMediaSource.Factory(cachedDataSourceFactory)
+            HlsMediaSource.Factory(playbackDataSourceFactory)
                 .setAllowChunklessPreparation(true)
                 .createMediaSource(MediaItem.fromUri(mediaUrl))
         } else {
-            ProgressiveMediaSource.Factory(cachedDataSourceFactory)
+            ProgressiveMediaSource.Factory(playbackDataSourceFactory)
                 .createMediaSource(MediaItem.fromUri(mediaUrl))
         }
 
