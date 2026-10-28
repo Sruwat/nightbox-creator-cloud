@@ -1147,6 +1147,11 @@ html,body,#root{max-width:100%;overflow-x:hidden}.public-shell,.app-shell,.admin
 .files-table .table-row>button{justify-self:end;white-space:nowrap;font-size:10px;color:var(--blue)!important;font-weight:750;padding:6px 0}
 .files-table .table-row:hover{background:#fbfcff}
 @media(max-width:760px){.files-table .table-head,.files-table .table-row{grid-template-columns:minmax(280px,2.2fr) minmax(90px,.8fr) minmax(70px,.7fr) minmax(90px,.8fr) minmax(100px,.9fr) 80px 80px}}
+/* Analytics has four data cells; keep the generic file-table action columns
+   from shifting CPM and earned values into the wrong visual columns. */
+.files-table.analytics-table .table-head,.files-table.analytics-table .table-row{grid-template-columns:1.5fr repeat(3,minmax(0,1fr));gap:12px;min-width:0}
+.files-table.analytics-table .table-head>span:last-child{grid-column:auto}
+@media(max-width:760px){.files-table.analytics-table .table-head,.files-table.analytics-table .table-row{grid-template-columns:1.3fr repeat(3,minmax(66px,1fr));gap:8px;min-width:0!important}}
 
 /* Keep the mobile app drawer full-height after the legacy bottom-nav rules. */
 @media(max-width:760px){
