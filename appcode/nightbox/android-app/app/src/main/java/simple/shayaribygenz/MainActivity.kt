@@ -294,7 +294,10 @@ class MainActivity : AppCompatActivity() {
                 intent.data = null
                 intent.action = null
                 setIntent(Intent())
-                openVideoPlayer(videoId, data.getQueryParameter("link"))
+                // Every public link must land on the file-info screen first.
+                // Playback is intentionally started only after the user taps
+                // "Open File" there (the same flow as a pasted link).
+                openFileInfo(videoId, data.getQueryParameter("link"))
             } else if (pathSegments.size >= 2 && pathSegments[0] == "l") {
                 val slug = pathSegments[1]
                 deepLinkProcessed = true
@@ -318,7 +321,10 @@ class MainActivity : AppCompatActivity() {
                     val link = JSONObject(response.body?.string().orEmpty()).getJSONObject("link")
                     val videoId = link.getString("videoId")
                     val title = link.optString("title", "")
-                    withContext(Dispatchers.Main) { openVideoPlayer(videoId, slug, title) }
+                    // Keep share links consistent with /watch links and
+                    // pasted links: show metadata first, then let the user
+                    // explicitly start playback from FileInfoActivity.
+                    withContext(Dispatchers.Main) { openFileInfo(videoId, slug, title) }
                 }
             } catch (_: Exception) {
                 withContext(Dispatchers.Main) {
@@ -384,20 +390,6 @@ class MainActivity : AppCompatActivity() {
         intent.putExtra("video_id", videoId)
         linkSlug?.let { intent.putExtra("link_slug", it) }
         videoTitle?.let { intent.putExtra("video_title", it) }
-        intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-        startActivity(intent)
-    }
-
-    /**
-     * External share links should open the player directly. The old flow
-     * opened FileInfoActivity first, fetched metadata twice, and enforced a
-     * seven-second gate before playback could begin.
-     */
-    private fun openVideoPlayer(videoId: String, linkSlug: String? = null, videoTitle: String? = null) {
-        val intent = Intent(this, VideoPlayerActivity::class.java)
-        intent.putExtra("video_id", videoId)
-        linkSlug?.let { intent.putExtra("link_slug", it) }
-        videoTitle?.takeIf { it.isNotBlank() }?.let { intent.putExtra("video_title", it) }
         intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
         startActivity(intent)
     }
