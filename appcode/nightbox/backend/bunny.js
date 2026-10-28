@@ -31,6 +31,19 @@ function hlsObjectPath(videoId, fileName) {
   return `${STORAGE_ZONE}/${STORAGE_PREFIX}/hls/${videoId}/${fileName}`;
 }
 
+function creatorObjectPath(storageKey) {
+  const safeKey = String(storageKey || '').replace(/^\/+/, '');
+  if (!safeKey || safeKey.includes('..') || safeKey.includes('\\')) throw new Error('Invalid creator storage key');
+  return `${STORAGE_ZONE}/${STORAGE_PREFIX}/${safeKey}`;
+}
+
+function creatorLocalPath(storageKey) {
+  const root = path.resolve(LOCAL_STORAGE_ROOT);
+  const candidate = path.resolve(root, String(storageKey || ''));
+  if (candidate !== root && !candidate.startsWith(`${root}${path.sep}`)) throw new Error('Invalid creator storage key');
+  return candidate;
+}
+
 function localPath(videoId) {
   return path.join(LOCAL_STORAGE_ROOT, `${videoId}.mp4`);
 }
@@ -93,6 +106,46 @@ async function uploadVideoFromUrl(videoId, url, tempDir) {
     if (fs.statSync(tempFilePath).size < 1000) throw new Error('Downloaded file too small');
     return await uploadVideo(videoId, tempFilePath);
   } finally { cleanupTempFile(tempFilePath); }
+}
+
+async function uploadCreatorFile(storageKey, filePath, mimeType = 'application/octet-stream') {
+  assertConfigured();
+  const fileStats = fs.statSync(filePath);
+  if (fileStats.size > MAX_VIDEO_BYTES) throw new Error('File exceeds the 2GB upload limit');
+  if (STORAGE_DRIVER === 'local') {
+    const target = creatorLocalPath(storageKey);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    const temporaryTarget = `${target}.uploading`;
+    fs.copyFileSync(filePath, temporaryTarget);
+    fs.renameSync(temporaryTarget, target);
+    return { storageKey, size: fileStats.size };
+  }
+  return withRetry(async () => {
+    const response = await bunnyApi.put(`/${creatorObjectPath(storageKey)}`, fs.createReadStream(filePath), {
+      headers: { 'Content-Type': mimeType || 'application/octet-stream', 'Content-Length': fileStats.size },
+      maxContentLength: Infinity, maxBodyLength: Infinity, timeout: 1800000,
+    });
+    return response.data;
+  }, MAX_RETRIES, 'uploadCreatorFile');
+}
+
+async function deleteCreatorFile(storageKey) {
+  assertConfigured();
+  if (STORAGE_DRIVER === 'local') {
+    try { fs.unlinkSync(creatorLocalPath(storageKey)); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    return { success: true };
+  }
+  return withRetry(async () => (await bunnyApi.delete(`/${creatorObjectPath(storageKey)}`, { timeout: 30000 })).data, MAX_RETRIES, 'deleteCreatorFile');
+}
+
+function getCreatorFilePath(storageKey) {
+  return STORAGE_DRIVER === 'local' ? creatorLocalPath(storageKey) : null;
+}
+
+function getCreatorFileUrl(storageKey) {
+  const host = CDN_HOST || CDN_FALLBACK_HOST;
+  if (!host) throw new Error('Bunny CDN host is not configured');
+  return `https://${host}/${STORAGE_PREFIX}/${String(storageKey || '').replace(/^\/+/, '')}`;
 }
 
 async function downloadVideoToFile(videoId, targetPath) {
@@ -198,4 +251,4 @@ function getWatchUrl(videoId) {
 }
 function cleanupTempFile(filePath) { try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (error) { console.error('[Cleanup] Failed:', error.message); } }
 
-module.exports = { createVideo, uploadVideo, uploadVideoFromUrl, downloadVideoToFile, uploadHlsDirectory, getVideo, deleteVideo, getEmbedUrl, getDirectPlayUrl, getHlsUrl, getCdnUrlIfAvailable, getWatchUrl, cleanupTempFile, getLocalPath: (videoId) => STORAGE_DRIVER === 'local' ? localPath(videoId) : null, isLocalStorage: () => STORAGE_DRIVER === 'local' };
+module.exports = { createVideo, uploadVideo, uploadVideoFromUrl, uploadCreatorFile, deleteCreatorFile, downloadVideoToFile, uploadHlsDirectory, getVideo, deleteVideo, getEmbedUrl, getDirectPlayUrl, getHlsUrl, getCdnUrlIfAvailable, getWatchUrl, getCreatorFilePath, getCreatorFileUrl, cleanupTempFile, getLocalPath: (videoId) => STORAGE_DRIVER === 'local' ? localPath(videoId) : null, isLocalStorage: () => STORAGE_DRIVER === 'local' };
