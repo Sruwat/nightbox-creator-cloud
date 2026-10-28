@@ -231,8 +231,8 @@ export async function getCreatorAnalytics(token: string) {
   return parseCreatorResponse<{ summary: { views: number; earningsMicros: number }; countries: Array<{ country: string; views: number; earningsMicros: number; cpmCents: number }>; rates: Array<{ country: string; cpmCents: number }> }>(response);
 }
 
-export async function getCreatorOverview(token: string) {
-  const response = await fetch(`${BACKEND_URL}/api/creator/overview`, { headers: authHeaders(token) });
+export async function getCreatorOverview(token: string, range: "week" | "all" = "week") {
+  const response = await fetch(`${BACKEND_URL}/api/creator/overview?range=${range}`, { headers: authHeaders(token) });
   return parseCreatorResponse<{ dailyActivity: Array<{ date: string; views: number; earningsMicros: number }> }>(response);
 }
 export type CreatorProfile = { creatorId: string; displayName: string; bio: string; avatarUrl: string | null; brandColor: string; publicSlug: string; updatedAt: string };

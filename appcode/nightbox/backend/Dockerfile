@@ -12,7 +12,7 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends ffmpeg \
   && rm -rf /var/lib/apt/lists/*
 
-COPY server.js database.js bunny.js transcoder.js ./
+COPY server.js database.js bunny.js transcoder.js ip-country.js ./
 COPY public ./public
 
 RUN mkdir -p /app/data /app/temp

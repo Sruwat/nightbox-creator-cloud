@@ -30,6 +30,7 @@ const axios = require('axios');
 const bunny = require('./bunny');
 const store = require('./database');
 const transcoder = require('./transcoder');
+const ipCountry = require('./ip-country');
 
 const app = express();
 const googleAuthClient = new OAuth2Client();
@@ -147,10 +148,9 @@ function requestIp(req) {
 }
 
 function viewerCountry(req) {
-  const header = process.env.TRUST_PROXY === 'true'
-    ? req.headers['cf-ipcountry']
-    : (process.env.NODE_ENV === 'production' ? null : req.headers['x-country-code']);
-  return String(header || 'ZZ').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2) || 'ZZ';
+  const testCountry = process.env.NODE_ENV === 'production' ? null : req.headers['x-country-code'];
+  if (typeof testCountry === 'string' && /^[A-Z]{2}$/i.test(testCountry)) return testCountry.toUpperCase();
+  return ipCountry(requestIp(req));
 }
 
 async function viewerIsBlocked(req) {
@@ -1117,6 +1117,7 @@ app.get('/api/creator/analytics', requireUser, (req, res) => {
 });
 
 app.get('/api/creator/overview', requireUser, (req, res) => {
+  const cutoff = req.query.range === 'all' ? '' : "AND DATE(s.qualified_at) >= DATE('now','-6 days')";
   let dailyActivity = store.db.prepare(`
     SELECT DATE(s.qualified_at) AS date, COUNT(s.id) AS views,
       COALESCE(SUM(e.amount_micros),0) AS earningsMicros
@@ -1124,11 +1125,12 @@ app.get('/api/creator/overview', requireUser, (req, res) => {
     JOIN creator_links l ON l.id=s.link_id
     LEFT JOIN earnings e ON e.view_id=s.id
     WHERE l.creator_id = ? AND s.counted = 1 AND s.qualified_at IS NOT NULL
-      AND DATE(s.qualified_at) >= DATE('now','-6 days')
+      ${cutoff}
     GROUP BY DATE(s.qualified_at)
     ORDER BY DATE(s.qualified_at) ASC
   `).all(req.user.id);
-  const referralDaily = store.db.prepare(`SELECT DATE(created_at) AS date, COALESCE(SUM(amount_micros),0) AS earningsMicros FROM referral_earnings WHERE source_creator_id=? AND DATE(created_at)>=DATE('now','-6 days') GROUP BY DATE(created_at)`).all(req.user.id);
+  const referralCutoff = req.query.range === 'all' ? '' : "AND DATE(created_at)>=DATE('now','-6 days')";
+  const referralDaily = store.db.prepare(`SELECT DATE(created_at) AS date, COALESCE(SUM(amount_micros),0) AS earningsMicros FROM referral_earnings WHERE source_creator_id=? ${referralCutoff} GROUP BY DATE(created_at)`).all(req.user.id);
   const byDate = new Map(referralDaily.map(row => [row.date, Number(row.earningsMicros || 0)]));
   const merged = new Map(dailyActivity.map(row => [row.date, { ...row, views: Number(row.views || 0), earningsMicros: Number(row.earningsMicros || 0) }]));
   for (const row of referralDaily) {
