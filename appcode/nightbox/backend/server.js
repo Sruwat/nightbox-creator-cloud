@@ -293,7 +293,10 @@ const downloadLimiter = rateLimit({
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  // Authentication is shared by creator and admin routes. Count only failed
+  // attempts so normal sign-ins do not consume the same budget as retries.
+  max: 30,
+  skipSuccessfulRequests: true,
   message: { error: 'Too many authentication attempts' },
   standardHeaders: true,
   legacyHeaders: false,
