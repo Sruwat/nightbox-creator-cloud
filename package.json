@@ -14,6 +14,7 @@
     "start": "vite preview",
     "test": "npm run build && node --test tests/rendered-html.test.mjs",
     "test:backend": "node tests/backend-flow-smoke.mjs",
+    "test:upload-cors": "node tests/upload-cors-smoke.mjs",
     "preflight:production": "node scripts/production-preflight.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
