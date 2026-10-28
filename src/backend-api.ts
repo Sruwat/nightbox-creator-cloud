@@ -247,12 +247,14 @@ export async function getPublicCpm() {
 
 export async function getAdminUsers(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/users`, { headers: authHeaders(token) });
-  return parseResponse<{ users: Array<{ id: string; email: string; role: string; status: string; telegramUserId: string | null; createdAt: string; storageQuotaBytes: number | null; storageUsedBytes: number }> }>(response);
+  return parseResponse<{ users: Array<{ id: string; email: string; role: string; status: string; telegramUserId: string | null; createdAt: string; storageQuotaBytes: number | null; storageUsedBytes: number; todayEarningsMicros: number; todayUsers: number }> }>(response);
 }
 export type AdminAccountDetails = {
   account: { id: string; email: string; role: string; status: string; telegramUserId: string | null; createdAt: string; hasGoogleLogin: number; hasPasswordLogin: number };
   profile: { displayName: string; bio: string; avatarUrl: string | null; brandColor: string; publicSlug: string; updatedAt: string } | null;
   summary: { videos: number; files: number; links: number; qualifiedViews: number; viewingSessions: number; tickets: number; payouts: number; subscriptions: number; payments: number; botEvents: number; apiKeys: number; earningsMicros: number; paidMicros: number; pendingMicros: number; availableMicros: number; storage: { usedBytes: number; reservedBytes: number; quotaBytes: number | null; maximumBytes: number | null } | null };
+  todayEarningsMicros: number;
+  todayUsers: number;
   videos: Array<{ id: string; title: string; status: string; playbackStatus: string; fileSize: number | null; createdAt: string }>;
   files: Array<{ id: string; name: string; mimeType: string; sizeBytes: number; shareSlug: string | null; createdAt: string }>;
   links: Array<{ id: string; slug: string; videoId: string; videoTitle: string; createdAt: string }>;

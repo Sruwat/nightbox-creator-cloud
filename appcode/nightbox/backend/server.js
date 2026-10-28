@@ -1225,7 +1225,12 @@ app.put('/api/admin/view-rules', requireAdmin, (req, res) => {
 });
 app.get('/api/admin/users', requireAdmin, (req, res) => res.json({ users: store.db.prepare(`SELECT u.id,u.email,u.role,u.status,u.telegram_user_id AS telegramUserId,u.created_at AS createdAt,
   CASE WHEN u.role='creator' THEN NULL ELSE 0 END AS storageQuotaBytes,
-  CASE WHEN u.role='creator' THEN COALESCE((SELECT SUM(f.size_bytes) FROM creator_files f WHERE f.owner_id=u.id),0)+COALESCE((SELECT SUM(v.file_size) FROM videos v WHERE v.owner_id=u.id AND v.status <> 'deleted'),0)+COALESCE((SELECT SUM(r.size_bytes) FROM creator_storage_reservations r WHERE r.creator_id=u.id),0) ELSE 0 END AS storageUsedBytes
+  CASE WHEN u.role='creator' THEN COALESCE((SELECT SUM(f.size_bytes) FROM creator_files f WHERE f.owner_id=u.id),0)+COALESCE((SELECT SUM(v.file_size) FROM videos v WHERE v.owner_id=u.id AND v.status <> 'deleted'),0)+COALESCE((SELECT SUM(r.size_bytes) FROM creator_storage_reservations r WHERE r.creator_id=u.id),0) ELSE 0 END AS storageUsedBytes,
+  CASE WHEN u.role='creator' THEN
+    COALESCE((SELECT SUM(e.amount_micros) FROM earnings e WHERE e.creator_id=u.id AND DATE(e.created_at)=DATE('now')),0)
+    + COALESCE((SELECT SUM(r.amount_micros) FROM referral_earnings r WHERE r.source_creator_id=u.id AND DATE(r.created_at)=DATE('now')),0)
+  ELSE 0 END AS todayEarningsMicros,
+  CASE WHEN u.role='creator' THEN COALESCE((SELECT COUNT(DISTINCT s.viewer_hash) FROM view_sessions s JOIN creator_links l ON l.id=s.link_id WHERE l.creator_id=u.id AND s.counted=1 AND DATE(s.qualified_at)=DATE('now')),0) ELSE 0 END AS todayUsers
   FROM users u LEFT JOIN creator_storage_limits l ON l.creator_id=u.id ORDER BY u.created_at DESC`).all() }));
 const ACCOUNT_ACTIVITY_QUERIES = {
   videos: "SELECT id,title,status,playback_status AS playbackStatus,file_size AS fileSize,created_at AS createdAt FROM videos WHERE owner_id=? AND status <> 'deleted' ORDER BY created_at DESC LIMIT ? OFFSET ?",
@@ -1272,8 +1277,15 @@ app.get('/api/admin/users/:id/details', requireAdmin, (req, res) => {
   summary.paidMicros = Number(payoutTotals.paid || 0);
   summary.pendingMicros = Number(payoutTotals.pending || 0);
   summary.availableMicros = Math.max(0, summary.earningsMicros - summary.paidMicros - summary.pendingMicros);
+  const todayEarningsMicros = account.role === 'creator'
+    ? Number(store.db.prepare("SELECT COALESCE(SUM(amount_micros),0) AS total FROM earnings WHERE creator_id=? AND DATE(created_at)=DATE('now')").get(id).total || 0)
+      + Number(store.db.prepare("SELECT COALESCE(SUM(amount_micros),0) AS total FROM referral_earnings WHERE source_creator_id=? AND DATE(created_at)=DATE('now')").get(id).total || 0)
+    : 0;
+  const todayUsers = account.role === 'creator'
+    ? count("SELECT COUNT(DISTINCT s.viewer_hash) AS total FROM view_sessions s JOIN creator_links l ON l.id=s.link_id WHERE l.creator_id=? AND s.counted=1 AND DATE(s.qualified_at)=DATE('now')")
+    : 0;
   const activity = Object.fromEntries(Object.keys(ACCOUNT_ACTIVITY_QUERIES).map(section => [section, accountActivity(section, id)]));
-  res.json({ account, profile, summary, ...activity, listLimit: 100 });
+  res.json({ account, profile, summary, todayEarningsMicros, todayUsers, ...activity, listLimit: 100 });
 });
 app.get('/api/admin/users/:id/activity/:section', requireAdmin, (req, res) => {
   if (!Object.hasOwn(ACCOUNT_ACTIVITY_QUERIES, req.params.section)) return res.status(404).json({ error: 'Activity section not found' });
