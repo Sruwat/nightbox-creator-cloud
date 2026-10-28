@@ -2,6 +2,7 @@ package simple.shayaribygenz
 
 import android.annotation.SuppressLint
 import android.app.PictureInPictureParams
+import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
@@ -10,6 +11,7 @@ import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.util.Log
 import android.util.Rational
 import android.view.GestureDetector
@@ -115,6 +117,7 @@ class VideoPlayerActivity : AppCompatActivity() {
     private var processingRetryCount = 0
     private var linkSlug: String? = null
     private var remoteHlsUrl: String? = null
+    private var downloadUrl: String? = null
     private var originHlsUrl: String? = null
     private var originFallbackAttempted = false
     private var durationUpdateRunnable: Runnable? = null
@@ -263,6 +266,13 @@ class VideoPlayerActivity : AppCompatActivity() {
             shareVideo()
         }
 
+        // Download is deliberately separate from playback. Playback uses
+        // bounded network buffering; a full file is fetched only after this
+        // explicit user action.
+        findViewById<LinearLayout>(R.id.btnDownloadVideo)?.applyPressScale {
+            startManualDownload()
+        }
+
         // Telegram join button with modern haptic press feedback
         findViewById<LinearLayout>(R.id.btnTelegramJoin)?.applyPressScale {
             openTelegram()
@@ -335,6 +345,8 @@ class VideoPlayerActivity : AppCompatActivity() {
                         .firstNotNullOfOrNull { key -> video.optString(key).takeIf { it.isNotBlank() } }
                         ?: throw IllegalStateException("Playable video stream missing")
                     val fallbackUrl = video.optString("originHlsUrl").takeIf { it.startsWith("https://") }
+                    val fetchedDownloadUrl = video.optString("downloadUrl")
+                        .takeIf { it.startsWith("https://") }
                     val title = video.optString("title").takeIf { it.isNotBlank() }
                     val videoSize = video.optLong("size", 0L)
                     if (videoSize > 0L) {
@@ -350,6 +362,7 @@ class VideoPlayerActivity : AppCompatActivity() {
                         processingRetryCount = 0
                         remoteHlsUrl = playbackUrl
                         originHlsUrl = fallbackUrl
+                        downloadUrl = fetchedDownloadUrl
                         originFallbackAttempted = false
                         title?.let { resolvedVideoTitle = formatCleanTitle(it) }
                         updateVideoMetaDetails()
@@ -939,6 +952,37 @@ class VideoPlayerActivity : AppCompatActivity() {
             putExtra(Intent.EXTRA_TEXT, "Watch this video on NightBox: $shareUrl")
         }
         startActivity(Intent.createChooser(shareIntent, "Share via"))
+    }
+
+    private fun startManualDownload() {
+        val url = downloadUrl
+        if (url.isNullOrBlank()) {
+            Toast.makeText(this, "Download is not available yet", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val safeTitle = resolvedVideoTitle
+            .replace(Regex("[^a-zA-Z0-9._-]+"), "_")
+            .trim('_')
+            .ifBlank { "nightbox_video" }
+
+        try {
+            val request = DownloadManager.Request(Uri.parse(url)).apply {
+                setTitle("$safeTitle.mp4")
+                setDescription("Downloading from NightBox")
+                setMimeType("video/mp4")
+                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                setAllowedOverMetered(true)
+                setAllowedOverRoaming(false)
+                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "$safeTitle.mp4")
+            }
+            val manager = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+            manager.enqueue(request)
+            Toast.makeText(this, "Download started. Check Downloads.", Toast.LENGTH_LONG).show()
+        } catch (error: Exception) {
+            Log.e(TAG, "Manual download failed", error)
+            Toast.makeText(this, "Unable to start download", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun openTelegram() {
