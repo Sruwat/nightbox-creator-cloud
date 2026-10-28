@@ -249,6 +249,31 @@ export async function getAdminUsers(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/users`, { headers: authHeaders(token) });
   return parseResponse<{ users: Array<{ id: string; email: string; role: string; status: string; telegramUserId: string | null; createdAt: string; storageQuotaBytes: number | null; storageUsedBytes: number }> }>(response);
 }
+export type AdminAccountDetails = {
+  account: { id: string; email: string; role: string; status: string; telegramUserId: string | null; createdAt: string; hasGoogleLogin: number; hasPasswordLogin: number };
+  profile: { displayName: string; bio: string; avatarUrl: string | null; brandColor: string; publicSlug: string; updatedAt: string } | null;
+  summary: { videos: number; files: number; links: number; qualifiedViews: number; viewingSessions: number; tickets: number; payouts: number; subscriptions: number; payments: number; botEvents: number; apiKeys: number; earningsMicros: number; paidMicros: number; pendingMicros: number; availableMicros: number; storage: { usedBytes: number; reservedBytes: number; quotaBytes: number | null; maximumBytes: number | null } | null };
+  videos: Array<{ id: string; title: string; status: string; playbackStatus: string; fileSize: number | null; createdAt: string }>;
+  files: Array<{ id: string; name: string; mimeType: string; sizeBytes: number; shareSlug: string | null; createdAt: string }>;
+  links: Array<{ id: string; slug: string; videoId: string; videoTitle: string; createdAt: string }>;
+  payouts: Array<{ id: string; amountMicros: number; currency: string; method: string; payoutAccount: string | null; status: string; requestedAt: string; paidAt: string | null }>;
+  tickets: Array<{ id: string; subject: string; status: string; createdAt: string; updatedAt: string }>;
+  subscriptions: Array<{ id: string; planName: string; status: string; startedAt: string | null; expiresAt: string | null; createdAt: string }>;
+  payments: Array<{ id: string; provider: string; amountMinor: number; currency: string; status: string; createdAt: string }>;
+  botEvents: Array<{ id: string; botName: string; eventType: string; videoId: string | null; status: string; error: string | null; createdAt: string }>;
+  apiKeys: Array<{ id: string; prefix: string; createdAt: string; lastUsedAt: string | null; revokedAt: string | null }>;
+  viewedVideos: Array<{ id: string; videoTitle: string; country: string; startedAt: string; qualifiedAt: string | null; counted: number }>;
+  listLimit: number;
+};
+export async function getAdminAccountDetails(token: string, id: string) {
+  const response = await fetch(`${BACKEND_URL}/api/admin/users/${encodeURIComponent(id)}/details`, { headers: authHeaders(token) });
+  return parseResponse<AdminAccountDetails>(response);
+}
+export type AdminAccountActivitySection = "videos" | "files" | "links" | "payouts" | "tickets" | "subscriptions" | "payments" | "botEvents" | "apiKeys" | "viewedVideos";
+export async function getAdminAccountActivity<K extends AdminAccountActivitySection>(token: string, id: string, section: K, offset: number) {
+  const response = await fetch(`${BACKEND_URL}/api/admin/users/${encodeURIComponent(id)}/activity/${section}?offset=${offset}`, { headers: authHeaders(token) });
+  return parseResponse<{ records: AdminAccountDetails[K]; limit: number; offset: number }>(response);
+}
 export async function getAdminReferrals(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/referrals`, { headers: authHeaders(token) });
   return parseResponse<{ referrals: Array<{ id: string; videoId: string; viewId: string; percentage: number; amountMicros: number; country: string; createdAt: string; sourceEmail: string; importingEmail: string }> }>(response);
@@ -263,7 +288,7 @@ export async function getAdminCreator(token: string, id: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/creators/${encodeURIComponent(id)}`, { headers: authHeaders(token) });
   return parseResponse<AdminCreatorDetail>(response);
 }
-export async function updateAdminCreator(token: string, id: string, patch: { email?: string; telegramUserId?: string; status?: string }) {
+export async function updateAdminCreator(token: string, id: string, patch: { email?: string; telegramUserId?: string; status?: string; displayName?: string; bio?: string; avatarUrl?: string; brandColor?: string }) {
   const response = await fetch(`${BACKEND_URL}/api/admin/creators/${encodeURIComponent(id)}`, { method: "PUT", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify(patch) });
   return parseResponse<{ creator: AdminCreatorDetail["creator"] }>(response);
 }

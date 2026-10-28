@@ -1225,6 +1225,61 @@ app.get('/api/admin/users', requireAdmin, (req, res) => res.json({ users: store.
   CASE WHEN u.role='creator' THEN NULL ELSE 0 END AS storageQuotaBytes,
   CASE WHEN u.role='creator' THEN COALESCE((SELECT SUM(f.size_bytes) FROM creator_files f WHERE f.owner_id=u.id),0)+COALESCE((SELECT SUM(v.file_size) FROM videos v WHERE v.owner_id=u.id AND v.status <> 'deleted'),0)+COALESCE((SELECT SUM(r.size_bytes) FROM creator_storage_reservations r WHERE r.creator_id=u.id),0) ELSE 0 END AS storageUsedBytes
   FROM users u LEFT JOIN creator_storage_limits l ON l.creator_id=u.id ORDER BY u.created_at DESC`).all() }));
+const ACCOUNT_ACTIVITY_QUERIES = {
+  videos: "SELECT id,title,status,playback_status AS playbackStatus,file_size AS fileSize,created_at AS createdAt FROM videos WHERE owner_id=? AND status <> 'deleted' ORDER BY created_at DESC LIMIT ? OFFSET ?",
+  files: 'SELECT id,original_name AS name,mime_type AS mimeType,size_bytes AS sizeBytes,share_slug AS shareSlug,created_at AS createdAt FROM creator_files WHERE owner_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+  links: 'SELECT l.id,l.slug,l.video_id AS videoId,v.title AS videoTitle,l.created_at AS createdAt FROM creator_links l JOIN videos v ON v.id=l.video_id WHERE l.creator_id=? ORDER BY l.created_at DESC LIMIT ? OFFSET ?',
+  payouts: 'SELECT id,amount_micros AS amountMicros,currency,method,payout_account AS payoutAccount,status,requested_at AS requestedAt,paid_at AS paidAt FROM withdrawal_requests WHERE creator_id=? ORDER BY requested_at DESC LIMIT ? OFFSET ?',
+  tickets: 'SELECT id,subject,status,created_at AS createdAt,updated_at AS updatedAt FROM support_tickets WHERE user_id=? ORDER BY updated_at DESC LIMIT ? OFFSET ?',
+  subscriptions: 'SELECT s.id,p.name AS planName,s.status,s.started_at AS startedAt,s.expires_at AS expiresAt,s.created_at AS createdAt FROM subscriptions s JOIN subscription_plans p ON p.id=s.plan_id WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT ? OFFSET ?',
+  payments: 'SELECT id,provider,amount_minor AS amountMinor,currency,status,created_at AS createdAt FROM payments WHERE user_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+  botEvents: 'SELECT id,bot_name AS botName,event_type AS eventType,video_id AS videoId,status,error,created_at AS createdAt FROM bot_events WHERE user_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+  apiKeys: 'SELECT id,key_prefix AS prefix,created_at AS createdAt,last_used_at AS lastUsedAt,revoked_at AS revokedAt FROM creator_api_keys WHERE user_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+  viewedVideos: 'SELECT s.id,v.title AS videoTitle,s.country,s.started_at AS startedAt,s.qualified_at AS qualifiedAt,s.counted FROM view_sessions s JOIN creator_links l ON l.id=s.link_id JOIN videos v ON v.id=l.video_id WHERE s.viewer_user_id=? ORDER BY s.started_at DESC LIMIT ? OFFSET ?',
+};
+function accountActivity(section, id, limit = 100, offset = 0) {
+  return store.db.prepare(ACCOUNT_ACTIVITY_QUERIES[section]).all(id, limit, offset);
+}
+app.get('/api/admin/users/:id/details', requireAdmin, (req, res) => {
+  const id = req.params.id;
+  const account = store.db.prepare(`SELECT id,email,role,status,telegram_user_id AS telegramUserId,created_at AS createdAt,
+    (google_sub IS NOT NULL) AS hasGoogleLogin,(password_hash IS NOT NULL) AS hasPasswordLogin
+    FROM users WHERE id=?`).get(id);
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+  const profile = account.role === 'creator'
+    ? store.db.prepare('SELECT display_name AS displayName,bio,avatar_url AS avatarUrl,brand_color AS brandColor,public_slug AS publicSlug,updated_at AS updatedAt FROM creator_profiles WHERE creator_id=?').get(id) || null
+    : null;
+  const count = (sql) => Number(store.db.prepare(sql).get(id).total || 0);
+  const summary = {
+    videos: count("SELECT COUNT(*) AS total FROM videos WHERE owner_id=? AND status <> 'deleted'"),
+    files: count('SELECT COUNT(*) AS total FROM creator_files WHERE owner_id=?'),
+    links: count('SELECT COUNT(*) AS total FROM creator_links WHERE creator_id=?'),
+    qualifiedViews: count('SELECT COUNT(*) AS total FROM view_sessions s JOIN creator_links l ON l.id=s.link_id WHERE l.creator_id=? AND s.counted=1'),
+    viewingSessions: count('SELECT COUNT(*) AS total FROM view_sessions WHERE viewer_user_id=?'),
+    tickets: count('SELECT COUNT(*) AS total FROM support_tickets WHERE user_id=?'),
+    payouts: count('SELECT COUNT(*) AS total FROM withdrawal_requests WHERE creator_id=?'),
+    subscriptions: count('SELECT COUNT(*) AS total FROM subscriptions WHERE user_id=?'),
+    payments: count('SELECT COUNT(*) AS total FROM payments WHERE user_id=?'),
+    botEvents: count('SELECT COUNT(*) AS total FROM bot_events WHERE user_id=?'),
+    apiKeys: count('SELECT COUNT(*) AS total FROM creator_api_keys WHERE user_id=?'),
+    earningsMicros: Number(store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS total FROM earnings WHERE creator_id=?').get(id).total || 0)
+      + Number(store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS total FROM referral_earnings WHERE source_creator_id=?').get(id).total || 0),
+    storage: account.role === 'creator' ? creatorStorageUsage(id) : null,
+  };
+  const payoutTotals = store.db.prepare("SELECT COALESCE(SUM(CASE WHEN status='paid' THEN amount_micros ELSE 0 END),0) AS paid,COALESCE(SUM(CASE WHEN status IN ('pending','approved') THEN amount_micros ELSE 0 END),0) AS pending FROM withdrawal_requests WHERE creator_id=?").get(id);
+  summary.paidMicros = Number(payoutTotals.paid || 0);
+  summary.pendingMicros = Number(payoutTotals.pending || 0);
+  summary.availableMicros = Math.max(0, summary.earningsMicros - summary.paidMicros - summary.pendingMicros);
+  const activity = Object.fromEntries(Object.keys(ACCOUNT_ACTIVITY_QUERIES).map(section => [section, accountActivity(section, id)]));
+  res.json({ account, profile, summary, ...activity, listLimit: 100 });
+});
+app.get('/api/admin/users/:id/activity/:section', requireAdmin, (req, res) => {
+  if (!Object.hasOwn(ACCOUNT_ACTIVITY_QUERIES, req.params.section)) return res.status(404).json({ error: 'Activity section not found' });
+  if (!store.db.prepare('SELECT id FROM users WHERE id=?').get(req.params.id)) return res.status(404).json({ error: 'Account not found' });
+  const offset = Number(req.query.offset || 0);
+  if (!Number.isSafeInteger(offset) || offset < 0) return res.status(400).json({ error: 'Invalid offset' });
+  res.json({ records: accountActivity(req.params.section, req.params.id, 100, offset), limit: 100, offset });
+});
 app.get('/api/admin/creators/:id', requireAdmin, (req, res) => {
   const creator = store.db.prepare(`SELECT u.id,u.email,u.status,u.telegram_user_id AS telegramUserId,u.created_at AS createdAt,
     NULL AS storageQuotaBytes,
@@ -1256,8 +1311,25 @@ app.put('/api/admin/creators/:id', requireAdmin, (req, res) => {
   const telegramUserId = String(req.body?.telegramUserId ?? creator.telegramUserId ?? '').trim() || null;
   const status = String(req.body?.status ?? creator.status);
   if (!email || !email.includes('@') || !['active','suspended'].includes(status)) return res.status(400).json({ error: 'Valid email and status are required' });
-  try { store.db.prepare('UPDATE users SET email=?,telegram_user_id=?,status=? WHERE id=? AND role=\'creator\'').run(email, telegramUserId, status, req.params.id); }
-  catch (error) { if (String(error.message).includes('UNIQUE')) return res.status(409).json({ error: 'That email is already in use' }); throw error; }
+  const editProfile = ['displayName','bio','avatarUrl','brandColor'].some(key => Object.hasOwn(req.body || {}, key));
+  const displayName = sanitizeInput(req.body?.displayName).slice(0, 80);
+  const bio = sanitizeInput(req.body?.bio).slice(0, 280);
+  const avatarUrl = sanitizeInput(req.body?.avatarUrl).slice(0, 500) || null;
+  const brandColor = String(req.body?.brandColor || '#2563eb').trim();
+  if (editProfile && !/^#[0-9a-f]{6}$/i.test(brandColor)) return res.status(400).json({ error: 'Brand color must be a six-digit hex color' });
+  try {
+    store.db.exec('BEGIN');
+    store.db.prepare("UPDATE users SET email=?,telegram_user_id=?,status=? WHERE id=? AND role='creator'").run(email, telegramUserId, status, req.params.id);
+    if (editProfile) {
+      ensureCreatorProfile(req.params.id);
+      store.db.prepare('UPDATE creator_profiles SET display_name=?,bio=?,avatar_url=?,brand_color=?,updated_at=? WHERE creator_id=?').run(displayName, bio, avatarUrl, brandColor, store.now(), req.params.id);
+    }
+    store.db.exec('COMMIT');
+  } catch (error) {
+    store.db.exec('ROLLBACK');
+    if (String(error.message).includes('UNIQUE')) return res.status(409).json({ error: 'That email is already in use' });
+    throw error;
+  }
   res.json({ creator: store.db.prepare('SELECT id,email,status,telegram_user_id AS telegramUserId,created_at AS createdAt FROM users WHERE id=?').get(req.params.id) });
 });
 app.put('/api/admin/users/:id', requireAdmin, (req, res) => {

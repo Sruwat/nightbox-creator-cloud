@@ -196,7 +196,7 @@ export default function CreatorFileManager({ token, toast }: { token: string; to
       <div className="creator-storage-stat creator-storage-stat-wide">
         <div className="creator-storage-stat-top"><span>Storage used</span><b>{prettySize(usedBytes)} <small>{quotaBytes ? `of ${prettySize(quotaBytes)}` : "· Unlimited total storage"}</small></b></div>
         <div className="creator-storage-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(usagePercent)} aria-label={`${Math.round(usagePercent)} percent of storage used`}><i style={{ width: `${usagePercent}%` }} /></div>
-        <small>{prettySize(availableBytes)} remaining</small>
+        <small>{quotaBytes ? `${prettySize(Math.max(0, quotaBytes - usedBytes))} remaining` : "Maximum 2 GiB per file"}</small>
       </div>
       <div className="creator-storage-stat"><span>Files here</span><b>{files.length}</b><small>stored uploads</small></div>
       <div className="creator-storage-stat"><span>Folders here</span><b>{visibleFolders.length}</b><small>organise your work</small></div>
