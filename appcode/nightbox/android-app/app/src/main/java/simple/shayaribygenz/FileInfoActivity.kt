@@ -3,27 +3,23 @@ package simple.shayaribygenz
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.CountDownTimer
+import android.os.Handler
+import android.os.Looper
 import android.view.View
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
-import android.os.Handler
-import android.os.Looper
-import android.widget.Button
 import android.widget.ProgressBar
 import android.widget.TextView
-import com.google.android.gms.ads.AdLoader
-import com.google.android.gms.ads.AdRequest
+import android.widget.Toast
+import android.util.Log
+import androidx.appcompat.app.AppCompatActivity
 import com.google.android.gms.ads.AdSize
 import com.google.android.gms.ads.AdView
 import com.google.android.gms.ads.FullScreenContentCallback
 import com.google.android.gms.ads.LoadAdError
-import com.google.android.gms.ads.interstitial.InterstitialAd
-import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
-import com.google.android.gms.ads.nativead.NativeAd
-import com.google.android.gms.ads.nativead.NativeAdView
 import com.google.android.gms.ads.rewarded.RewardedAd
 import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
 import androidx.lifecycle.lifecycleScope
@@ -33,42 +29,48 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
-import java.io.File
-import java.io.FileOutputStream
-import java.net.URL
+import simple.shayaribygenz.UiExtensions.applyPressScale
+import simple.shayaribygenz.UiExtensions.startBreathingPulse
 
 class FileInfoActivity : AppCompatActivity() {
 
     private lateinit var btnBack: ImageView
     private lateinit var btnOpenVideo: LinearLayout
+    private lateinit var tvVideoTitle: TextView
+    private lateinit var tvVideoSubtitle: TextView
     private lateinit var adBannerContainerTop: FrameLayout
-    private lateinit var adBannerContainerBottom: FrameLayout
-    private lateinit var nativeAdContainer1: FrameLayout
-    private lateinit var nativeAdContainer2: FrameLayout
-    
-    private lateinit var icOpenVideo: ImageView
-    private lateinit var pbLoadingVideo: ProgressBar
-    private lateinit var tvOpenVideoText: TextView
+    private lateinit var mrecTopContainer: FrameLayout
+    private lateinit var mrecBottomContainer: FrameLayout
+
+    private var pbLoadingVideo: ProgressBar? = null
+    private var icOpenVideo: ImageView? = null
+    private var tvOpenVideoText: TextView? = null
 
     private var videoId: String? = null
     private var linkSlug: String? = null
-    private var videoTitle: String = "Video"
+    private var videoTitle: String = "NightBox Video"
     private var downloadUrl: String? = null
-    private var nativeAd1: NativeAd? = null
-    private var nativeAd2: NativeAd? = null
-    private val handler = Handler(Looper.getMainLooper())
-    private var timerRunnable: Runnable? = null
-    private var openVideoReady = false
+    private var bannerAdView: AdView? = null
+    private var adsLoaded = false
+    private var bottomMrecLoaded = false
 
-    companion object {
-        private const val INTERSTITIAL_INTERVAL = 3
-    }
+    // Smart Ads View Timer (2-Stage: wait for ad load, then 4s guaranteed view time)
+    private var isViewTimerStarted = false
+    private var isButtonUnlocked = false
+    private var viewCountDownTimer: CountDownTimer? = null
+    private var maxSafetyTimeoutHandler: Handler? = null
+    private var maxSafetyTimeoutRunnable: Runnable? = null
+
+    private var streamUrl: String? = null
+    private var videoDurationSec: Int = 0
+    private var videoSizeBytes: Long = 0L
+
+    private val apiClient get() = NetworkClient.client
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_file_info)
 
-        // Get video ID from intent extras only (deep links are handled by MainActivity)
         videoId = intent?.getStringExtra("video_id")
         linkSlug = intent?.getStringExtra("link_slug")
 
@@ -78,130 +80,310 @@ class FileInfoActivity : AppCompatActivity() {
             return
         }
 
-        // Bind views
         btnBack = findViewById(R.id.btnBack)
         btnOpenVideo = findViewById(R.id.btnOpenVideo)
+        tvVideoTitle = findViewById(R.id.tvVideoTitle)
+        tvVideoSubtitle = findViewById(R.id.tvVideoSubtitle)
         adBannerContainerTop = findViewById(R.id.adBannerContainerTop)
-        adBannerContainerBottom = findViewById(R.id.adBannerContainerBottom)
-        nativeAdContainer1 = findViewById(R.id.nativeAdContainer1)
-        nativeAdContainer2 = findViewById(R.id.nativeAdContainer2)
-        icOpenVideo = findViewById(R.id.icOpenVideo)
-        pbLoadingVideo = findViewById(R.id.pbLoadingVideo)
-        tvOpenVideoText = findViewById(R.id.tvOpenVideoText)
+        mrecTopContainer = findViewById(R.id.mrecTopContainer)
+        mrecBottomContainer = findViewById(R.id.mrecBottomContainer)
 
-        // Fetch video info (title/download link)
-        fetchVideoInfo()
+        pbLoadingVideo = findViewById<ProgressBar>(R.id.pbLoadingVideo)
+        icOpenVideo = findViewById<ImageView>(R.id.icOpenVideo)
+        tvOpenVideoText = findViewById<TextView>(R.id.tvOpenVideoText)
 
-        // Back button
-        btnBack.setOnClickListener { finish() }
+        // Stage 1: Button starts in preparing state while ads load
+        pbLoadingVideo?.visibility = View.VISIBLE
+        icOpenVideo?.visibility = View.GONE
+        tvOpenVideoText?.text = "Connecting to stream..."
 
-        // Open Video button
-        btnOpenVideo.setOnClickListener {
-            val prefs = getSharedPreferences("nightbox_prefs", MODE_PRIVATE)
-            var currentCount = prefs.getInt("open_video_count", 0)
-            currentCount++
-            
-            // Save the updated count immediately so it persists even if user closes the app
-            prefs.edit().putInt("open_video_count", currentCount).apply()
-            
-            val cyclePosition = currentCount % 6
-            
-            when (cyclePosition) {
-                1, 3 -> {
-                    // Click 1 and 3 (and 7, 9, 13, 15...): Interstitial Ad
-                    loadAndShowInterstitial()
-                }
-                5 -> {
-                    // Click 5 (and 11, 17...): Rewarded Ad
-                    loadAndShowRewarded()
-                }
-                else -> {
-                    // Clicks 2, 4, 0 (which means 6) etc: Free (No Ad)
-                    openVideoPlayer(true)
-                }
+        // Safety fallback: auto-unlock if ads take too long (max 10s)
+        maxSafetyTimeoutHandler = Handler(Looper.getMainLooper())
+        maxSafetyTimeoutRunnable = Runnable {
+            if (!isButtonUnlocked) {
+                Log.d("FileInfoActivity", "Safety timeout reached (10s). Unlocking stream button.")
+                unlockButtonForPlayback()
+            }
+        }
+        maxSafetyTimeoutHandler?.postDelayed(maxSafetyTimeoutRunnable!!, 10_000L)
+
+        val passedTitle = intent?.getStringExtra("video_title")
+        if (!passedTitle.isNullOrBlank()) {
+            videoTitle = formatCleanTitle(passedTitle)
+            tvVideoTitle.text = videoTitle
+        }
+
+        btnBack.applyPressScale { finish() }
+
+        // Guide banner click to smoothly scroll down and center "Open File"
+        val scrollView = findViewById<android.widget.ScrollView>(R.id.scrollView)
+        findViewById<View>(R.id.guideBannerLayout)?.applyPressScale {
+            scrollView?.post {
+                val targetY = (btnOpenVideo.top - 140).coerceAtLeast(0)
+                scrollView.smoothScrollTo(0, targetY)
             }
         }
 
-        // Social buttons
-        findViewById<LinearLayout>(R.id.btnJoinTelegram).setOnClickListener {
-            openTelegram()
+        // Gentle bouncing animation for guide arrow matching NightHeast
+        findViewById<ImageView>(R.id.ivGuideArrow)?.let { arrow ->
+            val bounce = android.view.animation.TranslateAnimation(0f, 0f, -3f, 5f).apply {
+                duration = 600
+                repeatMode = android.view.animation.Animation.REVERSE
+                repeatCount = android.view.animation.Animation.INFINITE
+            }
+            arrow.startAnimation(bounce)
         }
 
-        findViewById<LinearLayout>(R.id.btnJoinWhatsApp).setOnClickListener {
-            openWhatsApp()
+        // Fetch video title and details from server
+        fetchVideoInfo()
+
+        // Preload rewarded ad immediately so it is ready on click
+        AdManager.preloadRewarded(this)
+
+        // Open video action: check if unlocked, then show rewarded ad + play
+        btnOpenVideo.applyPressScale {
+            if (!isButtonUnlocked) {
+                Toast.makeText(this, "Preparing secure stream, please wait a moment...", Toast.LENGTH_SHORT).show()
+                return@applyPressScale
+            }
+            showRewardedThenPlay()
         }
 
+        // Social button click listeners with haptic press-scale
+        findViewById<LinearLayout>(R.id.btnJoinTelegram)?.applyPressScale { openTelegram() }
+        findViewById<LinearLayout>(R.id.btnJoinWhatsApp)?.applyPressScale { openWhatsApp() }
+
+        // Load ads once on creation (instantly on entering screen)
+        loadScreenAds()
     }
 
     override fun onResume() {
         super.onResume()
         SecurityUtil.checkVpn(this)
-        
-        lifecycleScope.launch {
-            loadBannerAdWhenReady(adBannerContainerTop)
-            loadBannerAdWhenReady(adBannerContainerBottom)
-            loadNativeAd(nativeAdContainer1, { nativeAd1?.destroy(); nativeAd1 = it })
-            loadNativeAd(nativeAdContainer2, { nativeAd2?.destroy(); nativeAd2 = it })
+        if (adBannerContainerTop.childCount == 0 || (bannerAdView != null && AdManager.canRequestCollapsible("file_info"))) {
+            loadBannerAd()
         }
-        
-        // Start 7-second timer for Open Video button
-        if (!openVideoReady) startOpenVideoTimer()
     }
-    
+
     override fun onDestroy() {
+        viewCountDownTimer?.cancel()
+        maxSafetyTimeoutRunnable?.let { maxSafetyTimeoutHandler?.removeCallbacks(it) }
+        AdComponents.destroyAdViews(adBannerContainerTop)
+        AdComponents.destroyAdViews(mrecTopContainer)
+        AdComponents.destroyAdViews(mrecBottomContainer)
+        bannerAdView = null
         super.onDestroy()
-        nativeAd1?.destroy()
-        nativeAd2?.destroy()
-        timerRunnable?.let { handler.removeCallbacks(it) }
     }
 
-    private fun startOpenVideoTimer() {
-        // Reset button to loading state
-        btnOpenVideo.isClickable = false
-        icOpenVideo.visibility = View.GONE
-        pbLoadingVideo.visibility = View.VISIBLE
-        tvOpenVideoText.text = "Loading..."
-        tvOpenVideoText.alpha = 0.7f
+    /**
+     * Stage 2: Triggered the moment an ad is physically rendered on screen.
+     * Guarantees 4 full seconds of ad viewability before unlocking the open button.
+     */
+    private fun onAdDisplayedStartViewTimer() {
+        if (isViewTimerStarted || isButtonUnlocked || isFinishing || isDestroyed) return
+        isViewTimerStarted = true
+        Log.d("FileInfoActivity", "Ad is now visible on screen. Starting 4s Ads View Timer.")
 
-        // Cancel previous timer if any
-        timerRunnable?.let { handler.removeCallbacks(it) }
+        pbLoadingVideo?.visibility = View.GONE
+        icOpenVideo?.visibility = View.VISIBLE
 
-        // 7 seconds delay
-        timerRunnable = Runnable {
-            openVideoReady = true
-            btnOpenVideo.isClickable = true
-            icOpenVideo.visibility = View.VISIBLE
-            pbLoadingVideo.visibility = View.GONE
-            tvOpenVideoText.text = getString(R.string.open_video)
-            tvOpenVideoText.alpha = 1.0f
-        }
-        handler.postDelayed(timerRunnable!!, 7000)
+        viewCountDownTimer = object : CountDownTimer(4_000L, 1_000L) {
+            override fun onTick(millisUntilFinished: Long) {
+                val secondsLeft = ((millisUntilFinished + 999) / 1000).coerceAtLeast(1)
+                tvOpenVideoText?.text = "Stream ready in ${secondsLeft}s..."
+            }
+
+            override fun onFinish() {
+                unlockButtonForPlayback()
+            }
+        }.start()
     }
 
-    private fun getVideoIdFromDeepLink(): String? {
-        val data: Uri? = intent?.data
-        if (data != null) {
-            val pathSegments = data.pathSegments
-            if (pathSegments.size >= 2 && pathSegments[0] == "watch") {
-                return pathSegments[1]
+    /**
+     * Stage 3: Unlocks the button and enables breathing pulse animation.
+     */
+    private fun unlockButtonForPlayback() {
+        if (isButtonUnlocked || isFinishing || isDestroyed) return
+        isButtonUnlocked = true
+        viewCountDownTimer?.cancel()
+        maxSafetyTimeoutRunnable?.let { maxSafetyTimeoutHandler?.removeCallbacks(it) }
+
+        pbLoadingVideo?.visibility = View.GONE
+        icOpenVideo?.visibility = View.VISIBLE
+        tvOpenVideoText?.text = "Open File"
+
+        btnOpenVideo.startBreathingPulse()
+    }
+
+    private fun loadScreenAds() {
+        if (adsLoaded) return
+        adsLoaded = true
+
+        loadBannerAd()
+        loadMrecTopAd()
+
+        // Lazy load bottom MREC only when user scrolls down to view it
+        val scrollView = findViewById<android.widget.ScrollView>(R.id.scrollView)
+        scrollView?.setOnScrollChangeListener { _, _, scrollY, _, _ ->
+            if (!bottomMrecLoaded && scrollY > 200) {
+                bottomMrecLoaded = true
+                loadMrecBottomAd()
             }
         }
-        return null
     }
 
-    private fun openVideoPlayer(showVastAd: Boolean = false) {
+    private fun loadBannerAd() {
+        // file info banner: ca-app-pub-2964717174761820/2578949845
+        AdComponents.loadSmartCollapsibleBanner(
+            this,
+            adBannerContainerTop,
+            isTop = true,
+            adUnitId = AdManager.BANNER_FILE_INFO,
+            screenKey = "file_info",
+            onLoaded = {
+                bannerAdView = adBannerContainerTop.getChildAt(0) as? com.google.android.gms.ads.AdView
+                onAdDisplayedStartViewTimer()
+            }
+        )
+    }
+
+    private fun loadMrecTopAd() {
+        // merc top info: ca-app-pub-2964717174761820/4920288138
+        AdComponents.loadMrecAd(
+            this,
+            mrecTopContainer,
+            adUnitId = AdManager.MREC_TOP_FILE_INFO,
+            onLoaded = {
+                onAdDisplayedStartViewTimer()
+            }
+        )
+    }
+
+    private fun loadMrecBottomAd() {
+        // merrc bottom info: ca-app-pub-2964717174761820/3926111520
+        AdComponents.loadMrecAd(
+            this,
+            mrecBottomContainer,
+            adUnitId = AdManager.MREC_BOTTOM_FILE_INFO
+        )
+    }
+
+    private fun showRewardedThenPlay() {
+        AdManager.showOrWaitForRewardedAd(
+            activity = this,
+            maxWaitMs = 2000L,
+            onLoadingStateChanged = { isLoading ->
+                pbLoadingVideo?.visibility = if (isLoading) View.VISIBLE else View.GONE
+                icOpenVideo?.visibility = if (isLoading) View.GONE else View.VISIBLE
+                tvOpenVideoText?.text = if (isLoading) "Unlocking..." else "Open File"
+            },
+            onRewardGranted = {
+                openVideoPlayer()
+            },
+            onDismissedEarly = {
+                // If user closes/dismisses ad, navigate directly to player per requirements
+                openVideoPlayer()
+            }
+        )
+    }
+
+    private fun openVideoPlayer() {
         val vid = videoId ?: return
-        val intent = Intent(this, VideoPlayerActivity::class.java)
-        intent.putExtra("video_id", vid)
-        linkSlug?.let { intent.putExtra("link_slug", it) }
-        intent.putExtra("show_vast_ad", showVastAd)
+        val intent = Intent(this, VideoPlayerActivity::class.java).apply {
+            putExtra("video_id", vid)
+            linkSlug?.let { putExtra("link_slug", it) }
+            putExtra("video_title", videoTitle)
+            streamUrl?.let { putExtra("stream_url", it) }
+            if (videoDurationSec > 0) putExtra("video_duration_sec", videoDurationSec)
+            if (videoSizeBytes > 0L) putExtra("video_size_bytes", videoSizeBytes)
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
         startActivity(intent)
+        finish() // Clean transition, no duplicate back-stack trap
+    }
+
+    private fun fetchVideoInfo() {
+        val vid = videoId ?: return
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val client = apiClient
+
+                // If title was not passed, resolve from link slug
+                val currentSlug = linkSlug
+                if (!currentSlug.isNullOrBlank() && (videoTitle == "NightBox Video" || videoTitle == "Exclusive Premium Video")) {
+                    try {
+                        val linkReq = Request.Builder()
+                            .url("${BuildConfig.BACKEND_URL}/api/links/${Uri.encode(currentSlug)}")
+                            .build()
+                        client.newCall(linkReq).execute().use { linkResp ->
+                            if (linkResp.isSuccessful) {
+                                val linkJson = JSONObject(linkResp.body?.string().orEmpty())
+                                val rawTitle = linkJson.optJSONObject("link")?.optString("title")
+                                if (!rawTitle.isNullOrBlank()) {
+                                    videoTitle = formatCleanTitle(rawTitle)
+                                    withContext(Dispatchers.Main) {
+                                        tvVideoTitle.text = videoTitle
+                                    }
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+
+                val request = Request.Builder()
+                    .url("${BuildConfig.BACKEND_URL}/video/$vid")
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val jsonData = response.body?.string()
+                        val json = JSONObject(jsonData ?: "{}")
+                        if (json.optBoolean("success", false)) {
+                            val video = json.optJSONObject("video")
+                            val fetchedTitle = video?.optString("title")
+                            val durationSec = video?.optInt("duration", 0) ?: 0
+                            val sizeBytes = video?.optLong("size", 0L) ?: 0L
+                            val fetchedStream = listOf("hlsUrl", "cdnUrl", "streamUrl")
+                                .firstNotNullOfOrNull { key -> video?.optString(key)?.takeIf { it.isNotBlank() } }
+                            if (!fetchedStream.isNullOrBlank()) {
+                                streamUrl = fetchedStream
+                            }
+                            videoDurationSec = durationSec
+                            videoSizeBytes = sizeBytes
+
+                            withContext(Dispatchers.Main) {
+                                if (!fetchedTitle.isNullOrBlank()) {
+                                    videoTitle = formatCleanTitle(fetchedTitle)
+                                    tvVideoTitle.text = videoTitle
+                                }
+                                if (durationSec > 0) {
+                                    findViewById<TextView>(R.id.tvSpecDuration)?.text =
+                                        String.format("%02d:%02d", durationSec / 60, durationSec % 60)
+                                }
+                                if (sizeBytes > 0) {
+                                    val sizeMb = (sizeBytes / (1024 * 1024)).coerceAtLeast(1)
+                                    findViewById<TextView>(R.id.tvSpecSize)?.text = "~$sizeMb MB"
+                                } else if (durationSec > 0) {
+                                    val sizeMb = ((durationSec * 220) / 1024).coerceAtLeast(42)
+                                    findViewById<TextView>(R.id.tvSpecSize)?.text = "~$sizeMb MB"
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun formatCleanTitle(raw: String): String {
+        return raw.replace("_", " ")
+            .replace(Regex("""\?+"""), "")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
     }
 
     private fun openTelegram() {
         try {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/nightboxupdate"))
-            startActivity(intent)
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/nightboxupdate")))
         } catch (_: Exception) {
             Toast.makeText(this, "Could not open Telegram", Toast.LENGTH_SHORT).show()
         }
@@ -209,182 +391,9 @@ class FileInfoActivity : AppCompatActivity() {
 
     private fun openWhatsApp() {
         try {
-            // Replace with your actual WhatsApp group or channel link
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://whatsapp.com/channel/0029VbDV1LR3GJP5XqCMb309"))
-            startActivity(intent)
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://whatsapp.com/channel/0029VbDV1LR3GJP5XqCMb309")))
         } catch (_: Exception) {
             Toast.makeText(this, "Could not open WhatsApp", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun loadBannerAdWhenReady(container: FrameLayout) {
-        if (NightBoxApp.adsInitialized) {
-            loadBannerAd(container)
-        } else {
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                loadBannerAdWhenReady(container)
-            }, 500)
-        }
-    }
-
-    private fun loadBannerAd(container: FrameLayout) {
-        val adView = AdView(this)
-        
-        // Calculate adaptive banner size
-        val displayMetrics = resources.displayMetrics
-        val adWidthPixels = displayMetrics.widthPixels.toFloat()
-        val density = displayMetrics.density
-        val adWidth = (adWidthPixels / density).toInt()
-        val adSize = AdSize.getCurrentOrientationAnchoredAdaptiveBannerAdSize(this, adWidth)
-        
-        adView.setAdSize(adSize)
-        adView.adUnitId = "ca-app-pub-2964717174761820/7251270834" // Real Banner ID
-        container.removeAllViews()
-        container.addView(adView)
-        adView.loadAd(AdRequest.Builder().build())
-    }
-
-    private fun loadNativeAd(container: FrameLayout, onLoaded: (NativeAd) -> Unit) {
-        val adLoader = AdLoader.Builder(this, "ca-app-pub-2964717174761820/2042116691") // Real Native ID
-            .forNativeAd { ad: NativeAd ->
-                onLoaded(ad)
-                val adView = layoutInflater.inflate(R.layout.layout_native_ad, null) as NativeAdView
-                populateNativeAdView(ad, adView)
-                container.removeAllViews()
-                container.addView(adView)
-                container.background = null // Remove placeholder background if any
-            }
-            .build()
-
-        adLoader.loadAd(AdRequest.Builder().build())
-    }
-
-    private fun populateNativeAdView(nativeAd: NativeAd, adView: NativeAdView) {
-        adView.headlineView = adView.findViewById(R.id.ad_headline)
-        adView.bodyView = adView.findViewById(R.id.ad_body)
-        adView.callToActionView = adView.findViewById(R.id.ad_call_to_action)
-        adView.iconView = adView.findViewById(R.id.ad_app_icon)
-        adView.mediaView = adView.findViewById(R.id.ad_media)
-
-        (adView.headlineView as TextView).text = nativeAd.headline
-        nativeAd.mediaContent?.let { adView.mediaView?.setMediaContent(it) }
-
-        if (nativeAd.body == null) {
-            adView.bodyView?.visibility = View.INVISIBLE
-        } else {
-            adView.bodyView?.visibility = View.VISIBLE
-            (adView.bodyView as TextView).text = nativeAd.body
-        }
-
-        if (nativeAd.callToAction == null) {
-            adView.callToActionView?.visibility = View.INVISIBLE
-        } else {
-            adView.callToActionView?.visibility = View.VISIBLE
-            (adView.callToActionView as Button).text = nativeAd.callToAction
-        }
-
-        if (nativeAd.icon == null) {
-            adView.iconView?.visibility = View.GONE
-        } else {
-            (adView.iconView as ImageView).setImageDrawable(nativeAd.icon?.drawable)
-            adView.iconView?.visibility = View.VISIBLE
-        }
-
-        adView.setNativeAd(nativeAd)
-    }
-
-    private fun loadAndShowInterstitial() {
-        // Use globally preloaded interstitial from NightBoxApp (already ready)
-        val ad = NightBoxApp.preloadedInterstitial
-        if (ad != null) {
-            NightBoxApp.preloadedInterstitial = null
-            ad.fullScreenContentCallback = object : FullScreenContentCallback() {
-                override fun onAdDismissedFullScreenContent() {
-                    openVideoPlayer()
-                }
-                override fun onAdFailedToShowFullScreenContent(e: com.google.android.gms.ads.AdError) {
-                    openVideoPlayer()
-                }
-            }
-            ad.show(this)
-        } else {
-            // Not ready yet — load on-demand and show
-            InterstitialAd.load(
-                this,
-                NightBoxApp.INTERSTITIAL_AD_UNIT,
-                NightBoxApp.adRequest,
-                object : InterstitialAdLoadCallback() {
-                    override fun onAdLoaded(ad: InterstitialAd) {
-                        ad.fullScreenContentCallback = object : FullScreenContentCallback() {
-                            override fun onAdDismissedFullScreenContent() { openVideoPlayer() }
-                            override fun onAdFailedToShowFullScreenContent(e: com.google.android.gms.ads.AdError) { openVideoPlayer() }
-                        }
-                        ad.show(this@FileInfoActivity)
-                    }
-                    override fun onAdFailedToLoad(error: LoadAdError) {
-                        openVideoPlayer() // Ad failed, just open the video
-                    }
-                }
-            )
-        }
-    }
-
-    private fun loadAndShowRewarded() {
-        val ad = NightBoxApp.preloadedRewarded
-        if (ad != null) {
-            NightBoxApp.preloadedRewarded = null
-            ad.fullScreenContentCallback = object : FullScreenContentCallback() {
-                override fun onAdDismissedFullScreenContent() {
-                    openVideoPlayer()
-                }
-                override fun onAdFailedToShowFullScreenContent(e: com.google.android.gms.ads.AdError) {
-                    openVideoPlayer()
-                }
-            }
-            ad.show(this) { /* reward granted */ }
-        } else {
-            // Not ready yet — load on-demand and show
-            RewardedAd.load(
-                this,
-                NightBoxApp.REWARDED_AD_UNIT,
-                NightBoxApp.adRequest,
-                object : RewardedAdLoadCallback() {
-                    override fun onAdLoaded(ad: RewardedAd) {
-                        ad.fullScreenContentCallback = object : FullScreenContentCallback() {
-                            override fun onAdDismissedFullScreenContent() { openVideoPlayer() }
-                            override fun onAdFailedToShowFullScreenContent(e: com.google.android.gms.ads.AdError) { openVideoPlayer() }
-                        }
-                        ad.show(this@FileInfoActivity) { /* reward granted */ }
-                    }
-                    override fun onAdFailedToLoad(error: LoadAdError) {
-                        openVideoPlayer()
-                    }
-                }
-            )
-        }
-    }
-
-    private fun fetchVideoInfo() {
-        val vid = videoId ?: return
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val client = OkHttpClient()
-                val request = Request.Builder()
-                    .url("${BuildConfig.BACKEND_URL}/video/$vid")
-                    .build()
-                val response = client.newCall(request).execute()
-                if (response.isSuccessful) {
-                    val jsonData = response.body?.string()
-                    val json = JSONObject(jsonData ?: "{}")
-                    if (json.getBoolean("success")) {
-                        val video = json.getJSONObject("video")
-                        videoTitle = video.getString("title")
-                        // Use download proxy URL from backend API
-                        val dlUrl = video.optString("downloadUrl", "")
-                        downloadUrl = if (dlUrl.isNotEmpty()) dlUrl else null
-                    }
-                }
-            } catch (_: Exception) {}
         }
     }
 }

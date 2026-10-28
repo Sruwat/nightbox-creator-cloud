@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="utf-8"?>
+<merge xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+  <!-- Transparent / subtle scrim overlay (no solid black bar) -->
+  <View
+      android:id="@id/exo_controls_background"
+      android:layout_width="0dp"
+      android:layout_height="0dp"
+      android:background="#33000000" />
+
+  <!-- Top bar controls: Back button (top-left) & Fullscreen button (top-right) -->
+  <FrameLayout
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_gravity="top"
+      android:padding="8dp">
+
+    <ImageView
+        android:id="@+id/btnBackOverlay"
+        android:layout_width="38dp"
+        android:layout_height="38dp"
+        android:layout_gravity="start|center_vertical"
+        android:background="@drawable/bg_frosted_control"
+        android:padding="8dp"
+        android:src="@drawable/ic_arrow_back"
+        android:contentDescription="Back"
+        app:tint="#FFFFFFFF"
+        android:clickable="true"
+        android:focusable="true" />
+
+    <ImageButton
+        android:id="@id/exo_fullscreen"
+        style="@style/ExoStyledControls.Button.Bottom.FullScreen"
+        android:layout_width="38dp"
+        android:layout_height="38dp"
+        android:layout_gravity="end|center_vertical"
+        android:background="@drawable/bg_frosted_control"
+        android:padding="8dp"
+        android:contentDescription="Fullscreen"
+        app:tint="#FFFFFFFF" />
+  </FrameLayout>
+
+  <!-- Center Playback Controls (NightHeast: Previous, 5s Rewind, Play/Pause, 15s Forward, Next) -->
+  <LinearLayout
+      android:id="@id/exo_center_controls"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_gravity="center"
+      android:background="@android:color/transparent"
+      android:gravity="center"
+      android:orientation="horizontal"
+      android:clipToPadding="false"
+      android:layoutDirection="ltr">
+
+    <!-- Previous Button -->
+    <ImageButton
+        android:id="@id/exo_prev"
+        style="@style/ExoStyledControls.Button.Center.Previous"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:contentDescription="Previous" />
+
+    <!-- Rewind 5s Button -->
+    <include layout="@layout/exo_player_control_rewind_button" />
+
+    <!-- Play/Pause Button with Frosted Backdrop -->
+    <ImageButton
+        android:id="@id/exo_play_pause"
+        style="@style/ExoStyledControls.Button.Center.PlayPause"
+        android:layout_width="58dp"
+        android:layout_height="58dp"
+        android:layout_marginHorizontal="10dp"
+        android:background="@drawable/bg_frosted_control"
+        android:contentDescription="Play or Pause" />
+
+    <!-- Fast Forward 15s Button -->
+    <include layout="@layout/exo_player_control_ffwd_button" />
+
+    <!-- Next Button -->
+    <ImageButton
+        android:id="@id/exo_next"
+        style="@style/ExoStyledControls.Button.Center.Next"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:contentDescription="Next" />
+  </LinearLayout>
+
+  <!-- Bottom Controls Container (NO black bar, completely transparent, sits direct on video) -->
+  <LinearLayout
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_gravity="bottom"
+      android:background="@android:color/transparent"
+      android:orientation="vertical"
+      android:paddingBottom="6dp">
+
+    <!-- Progress seekbar line with clean white scrubber (NightHeast style) -->
+    <androidx.media3.ui.DefaultTimeBar
+        android:id="@id/exo_progress"
+        android:layout_width="match_parent"
+        android:layout_height="26dp"
+        android:layout_marginHorizontal="10dp"
+        app:bar_height="4dp"
+        app:touch_target_height="48dp"
+        app:played_color="#FFFFFFFF"
+        app:scrubber_color="#FFFFFFFF"
+        app:buffered_color="#66FFFFFF"
+        app:unplayed_color="#38FFFFFF" />
+
+    <!-- Under-seekbar row: Time on left (00:04 · 00:06), Settings on right -->
+    <RelativeLayout
+        android:id="@id/exo_bottom_bar"
+        android:layout_width="match_parent"
+        android:layout_height="30dp"
+        android:layout_marginHorizontal="12dp"
+        android:background="@android:color/transparent">
+
+      <!-- Time: Position · Duration -->
+      <LinearLayout
+          android:id="@id/exo_time"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"
+          android:layout_alignParentStart="true"
+          android:layout_centerVertical="true"
+          android:gravity="center_vertical"
+          android:orientation="horizontal">
+
+        <TextView
+            android:id="@id/exo_position"
+            style="@style/ExoStyledControls.TimeText.Position"
+            android:textColor="#FFFFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <TextView
+            style="@style/ExoStyledControls.TimeText.Separator"
+            android:text=" · "
+            android:textColor="#B3FFFFFF"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@id/exo_duration"
+            style="@style/ExoStyledControls.TimeText.Duration"
+            android:textColor="#FFFFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+      </LinearLayout>
+
+      <!-- Settings icon on bottom-right (matching NightHeast gear icon) -->
+      <ImageButton
+          android:id="@+id/exo_settings"
+          style="@style/ExoStyledControls.Button.Bottom.Settings"
+          android:layout_width="28dp"
+          android:layout_height="28dp"
+          android:layout_alignParentEnd="true"
+          android:layout_centerVertical="true"
+          android:background="?attr/selectableItemBackgroundBorderless"
+          android:contentDescription="Settings"
+          app:tint="#FFFFFFFF" />
+    </RelativeLayout>
+  </LinearLayout>
+
+</merge>

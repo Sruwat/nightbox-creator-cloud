@@ -27,7 +27,8 @@ class FeedAdapter(private var videoLinks: List<String>) : RecyclerView.Adapter<F
             settings.javaScriptEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
             settings.domStorageEnabled = true
-            settings.allowContentAccess = true
+            settings.allowFileAccess = false
+            settings.allowContentAccess = false
             settings.loadWithOverviewMode = true
             settings.useWideViewPort = true
             settings.userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
@@ -140,7 +141,9 @@ class FeedAdapter(private var videoLinks: List<String>) : RecyclerView.Adapter<F
 
     override fun onViewRecycled(holder: FeedViewHolder) {
         super.onViewRecycled(holder)
+        holder.webView.stopLoading()
         holder.webView.loadUrl("about:blank")
+        holder.webView.clearHistory()
         holder.webView.onPause()
     }
 

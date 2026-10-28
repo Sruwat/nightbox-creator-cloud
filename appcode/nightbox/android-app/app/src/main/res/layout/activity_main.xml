@@ -83,12 +83,13 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:background="@drawable/bg_pill_button"
-                    android:paddingHorizontal="4dp"
-                    android:paddingVertical="1dp"
-                    android:text="AD"
-                    android:textColor="@color/primary_purple"
-                    android:textSize="10sp"
+                    android:background="@drawable/bg_advertisement_pill"
+                    android:paddingHorizontal="8dp"
+                    android:paddingVertical="2dp"
+                    android:text="ADVERTISEMENT"
+                    android:textColor="#A6FFFFFF"
+                    android:textSize="9sp"
+                    android:letterSpacing="0.08"
                     android:textStyle="bold"
                     android:layout_marginBottom="4dp" />
                 <FrameLayout
@@ -175,81 +176,126 @@
                 </LinearLayout>
             </LinearLayout>
 
-            <!-- Play Local Files Card -->
+            <!-- Play Local Files Card (Modern Single Horizontal Card) -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:background="@drawable/bg_card"
-                android:orientation="vertical"
-                android:gravity="center_horizontal"
-                android:padding="20dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:padding="16dp"
                 android:layout_marginBottom="16dp">
-                <Button
-                    android:id="@+id/btnPlayLocal"
-                    android:layout_width="wrap_content"
+
+                <FrameLayout
+                    android:layout_width="44dp"
                     android:layout_height="44dp"
-                    android:background="@drawable/bg_button_primary"
-                    android:text="@string/play_local_files"
-                    android:textColor="@color/white"
-                    android:textSize="13sp"
-                    android:textStyle="bold"
-                    android:paddingHorizontal="24dp"
-                    android:layout_marginBottom="12dp" />
-                <LinearLayout
-                    android:id="@+id/btnOpenGallery"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
+                    android:background="@drawable/bg_icon_rounded">
                     <ImageView
-                        android:layout_width="20dp"
-                        android:layout_height="20dp"
+                        android:layout_width="22dp"
+                        android:layout_height="22dp"
+                        android:layout_gravity="center"
                         android:src="@drawable/ic_gallery"
-                        app:tint="@color/primary_purple" />
+                        app:tint="@color/accent_violet"
+                        android:contentDescription="Gallery" />
+                </FrameLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="14dp"
+                    android:orientation="vertical">
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:text="@string/open_gallery"
-                        android:textColor="@color/primary_purple"
-                        android:textSize="14sp" />
+                        android:text="@string/play_local_files"
+                        android:textColor="@color/text_primary_dark"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Browse and play offline videos"
+                        android:textColor="@color/text_secondary_dark"
+                        android:textSize="12sp"
+                        android:layout_marginTop="2dp" />
                 </LinearLayout>
+
+                <Button
+                    android:id="@+id/btnPlayLocal"
+                    android:layout_width="wrap_content"
+                    android:layout_height="38dp"
+                    android:background="@drawable/bg_pill_button"
+                    android:text="@string/open_gallery"
+                    android:textColor="@color/white"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:paddingHorizontal="16dp" />
+
+                <!-- Retained hidden view for complete backward compatibility -->
+                <View
+                    android:id="@+id/btnOpenGallery"
+                    android:layout_width="0dp"
+                    android:layout_height="0dp"
+                    android:visibility="gone" />
             </LinearLayout>
 
-            <!-- Access NightBox Links Section -->
+            <!-- Access NightBox Links Hero Card -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:background="@drawable/bg_card"
+                android:background="@drawable/bg_hero_card"
                 android:orientation="vertical"
-                android:gravity="center_horizontal"
                 android:padding="20dp"
                 android:layout_marginBottom="16dp">
-                <Button
-                    android:layout_width="wrap_content"
-                    android:layout_height="40dp"
-                    android:background="@drawable/bg_button_primary"
-                    android:text="@string/access_nightbox_links"
-                    android:textColor="@color/white"
-                    android:textSize="13sp"
-                    android:textStyle="bold"
-                    android:paddingHorizontal="24dp"
-                    android:layout_marginBottom="12dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="8dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Stream Any Link"
+                        android:textColor="@color/text_primary_dark"
+                        android:textSize="17sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_advertisement_pill"
+                        android:paddingHorizontal="8dp"
+                        android:paddingVertical="3dp"
+                        android:text="⚡ INSTANT"
+                        android:textColor="#FFA78BFA"
+                        android:textSize="10sp"
+                        android:letterSpacing="0.05"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
                 <TextView
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="@string/input_nightbox_link"
                     android:textColor="@color/text_secondary_dark"
                     android:textSize="13sp"
-                    android:gravity="center"
-                    android:layout_marginBottom="16dp" />
+                    android:layout_marginBottom="14dp" />
+
+                <!-- Input Box with Inside Paste/Clear Icon -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="50dp"
                     android:background="@drawable/bg_edit_text"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
+                    android:paddingEnd="8dp"
                     android:layout_marginBottom="14dp">
+
                     <EditText
                         android:id="@+id/etPasteLink"
                         android:layout_width="0dp"
@@ -263,61 +309,159 @@
                         android:singleLine="true"
                         android:textColor="@color/text_primary_dark"
                         android:textSize="14sp" />
+
                     <ImageView
                         android:id="@+id/btnClearLink"
                         android:layout_width="32dp"
                         android:layout_height="32dp"
-                        android:padding="8dp"
+                        android:padding="7dp"
                         android:src="@drawable/ic_clear"
                         app:tint="@color/text_secondary_dark"
                         android:visibility="gone" />
+
                     <ImageView
                         android:id="@+id/btnPasteLink"
                         android:layout_width="36dp"
                         android:layout_height="36dp"
                         android:padding="8dp"
                         android:src="@drawable/ic_paste"
-                        app:tint="@color/text_secondary_dark" />
+                        app:tint="@color/accent_violet"
+                        android:contentDescription="Paste Link" />
                 </LinearLayout>
+
+                <!-- Full-Width Electric Gradient Watch Button -->
                 <FrameLayout
                     android:id="@+id/btnWatch"
-                    android:layout_width="48dp"
+                    android:layout_width="match_parent"
                     android:layout_height="48dp"
-                    android:background="@drawable/bg_circle_button">
-                    <ImageView
-                        android:layout_width="24dp"
-                        android:layout_height="24dp"
+                    android:background="@drawable/bg_button_gradient_electric"
+                    android:clickable="true"
+                    android:focusable="true">
+
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
                         android:layout_gravity="center"
-                        android:src="@drawable/ic_arrow_forward"
-                        app:tint="@color/white" />
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Watch Video"
+                            android:textColor="@color/white"
+                            android:textSize="15sp"
+                            android:textStyle="bold" />
+
+                        <ImageView
+                            android:layout_width="18dp"
+                            android:layout_height="18dp"
+                            android:layout_marginStart="8dp"
+                            android:src="@drawable/ic_arrow_forward"
+                            app:tint="@color/white" />
+                    </LinearLayout>
                 </FrameLayout>
             </LinearLayout>
 
-            <!-- Features Section -->
+            <!-- Modern Dynamic Micro-Feature Pills -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:gravity="center_horizontal"
                 android:layout_marginBottom="16dp">
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="36dp"
-                    android:background="@drawable/bg_features_badge"
-                    android:text="@string/features_title"
-                    android:textColor="@color/white"
-                    android:textSize="13sp"
-                    android:textStyle="bold"
-                    android:gravity="center"
-                    android:paddingHorizontal="24dp"
-                    android:layout_marginBottom="16dp" />
-                <!-- Grid items simplified for brevity in replacement -->
+
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="... More Features ..."
-                    android:textColor="@color/text_secondary_dark"
-                    android:textSize="12sp" />
+                    android:text="ENGINE FEATURES"
+                    android:textColor="#80FFFFFF"
+                    android:textSize="11sp"
+                    android:letterSpacing="0.08"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="10dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:weightSum="2"
+                    android:layout_marginBottom="8dp">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="40dp"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="6dp"
+                        android:background="@drawable/bg_chip_feature"
+                        android:gravity="center_vertical"
+                        android:paddingHorizontal="12dp">
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="⚡ Ultra-Fast HLS"
+                            android:textColor="#E6FFFFFF"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="40dp"
+                        android:layout_weight="1"
+                        android:layout_marginStart="6dp"
+                        android:background="@drawable/bg_chip_feature"
+                        android:gravity="center_vertical"
+                        android:paddingHorizontal="12dp">
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="🎬 4K HDR Ready"
+                            android:textColor="#E6FFFFFF"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:weightSum="2">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="40dp"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="6dp"
+                        android:background="@drawable/bg_chip_feature"
+                        android:gravity="center_vertical"
+                        android:paddingHorizontal="12dp">
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="🔒 DRM Protected"
+                            android:textColor="#E6FFFFFF"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="40dp"
+                        android:layout_weight="1"
+                        android:layout_marginStart="6dp"
+                        android:background="@drawable/bg_chip_feature"
+                        android:gravity="center_vertical"
+                        android:paddingHorizontal="12dp">
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="📱 Multi-Mode PiP"
+                            android:textColor="#E6FFFFFF"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+                </LinearLayout>
             </LinearLayout>
 
             <TextView
@@ -331,93 +475,200 @@
         </LinearLayout>
     </ScrollView>
 
-    <!-- FEED SECTION -->
-    <androidx.viewpager2.widget.ViewPager2
-        android:id="@+id/feedSection"
+    <!-- DOWNLOADS SECTION (Coming Soon) -->
+    <LinearLayout
+        android:id="@+id/downloadsSection"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_below="@id/topBar"
         android:layout_above="@id/bottomNav"
-        android:orientation="vertical"
-        android:visibility="gone" />
-
-    <TextView
-        android:id="@+id/tvFeedEmpty"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_below="@id/topBar"
-        android:layout_above="@id/bottomNav"
-        android:layout_centerInParent="true"
         android:gravity="center"
+        android:orientation="vertical"
         android:padding="32dp"
-        android:text="No videos available yet.\nNew Reels will appear here when creators publish."
-        android:textColor="@color/text_secondary_dark"
-        android:textSize="16sp"
-        android:visibility="gone" />
+        android:visibility="gone">
 
-    <!-- CUSTOM BOTTOM NAVIGATION BAR -->
+        <!-- Glowing Icon Circle -->
+        <FrameLayout
+            android:layout_width="88dp"
+            android:layout_height="88dp"
+            android:background="@drawable/bg_icon_rounded"
+            android:layout_marginBottom="20dp">
+
+            <ImageView
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_gravity="center"
+                android:src="@drawable/ic_download"
+                app:tint="@color/accent_violet"
+                android:contentDescription="Downloads" />
+        </FrameLayout>
+
+        <!-- Coming Soon Pill Badge -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_advertisement_pill"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="4dp"
+            android:text="COMING SOON"
+            android:textColor="#FFA78BFA"
+            android:textSize="11sp"
+            android:letterSpacing="0.08"
+            android:textStyle="bold"
+            android:layout_marginBottom="12dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/downloads"
+            android:textColor="@color/text_primary_dark"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:text="@string/downloads_coming_soon_desc"
+            android:textColor="@color/text_secondary_dark"
+            android:textSize="14sp"
+            android:lineSpacingExtra="3dp"
+            android:layout_marginBottom="24dp"
+            android:maxWidth="280dp" />
+
+        <Button
+            android:id="@+id/btnDownloadsBackHome"
+            android:layout_width="wrap_content"
+            android:layout_height="42dp"
+            android:background="@drawable/bg_button_primary"
+            android:text="@string/back_to_home"
+            android:textColor="@color/white"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:paddingHorizontal="24dp" />
+
+    </LinearLayout>
+
+    <!-- Smart Clipboard Link Detected Pill (auto-shown if copied NightBox link is on clipboard) -->
+    <LinearLayout
+        android:id="@+id/chipClipboardLink"
+        android:layout_width="wrap_content"
+        android:layout_height="44dp"
+        android:layout_above="@id/bottomNav"
+        android:layout_centerHorizontal="true"
+        android:layout_marginBottom="12dp"
+        android:background="@drawable/bg_clipboard_pill"
+        android:elevation="16dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="16dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="📋"
+            android:textSize="14sp"
+            android:layout_marginEnd="8dp" />
+
+        <TextView
+            android:id="@+id/tvClipboardText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="NightBox link detected · Tap to Watch"
+            android:textColor="#FFC4B5FD"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <ImageView
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:layout_marginStart="6dp"
+            android:src="@drawable/ic_arrow_forward"
+            app:tint="#FFA78BFA" />
+    </LinearLayout>
+
+    <!-- FLOATING CAPSULE BOTTOM NAVIGATION BAR -->
     <LinearLayout
         android:id="@+id/bottomNav"
         android:layout_width="match_parent"
-        android:layout_height="64dp"
+        android:layout_height="60dp"
         android:layout_alignParentBottom="true"
-        android:background="@color/surface_dark"
-        android:elevation="12dp"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginBottom="12dp"
+        android:background="@drawable/bg_floating_nav"
+        android:elevation="14dp"
         android:orientation="horizontal"
-        android:weightSum="3">
+        android:paddingHorizontal="6dp"
+        android:paddingVertical="5dp"
+        android:weightSum="2">
 
         <!-- Home Tab -->
-        <LinearLayout
-            android:id="@+id/navHome"
+        <FrameLayout
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:gravity="center"
-            android:orientation="vertical"
-            android:clickable="true"
-            android:focusable="true">
-            <ImageView
-                android:id="@+id/ivNavHome"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:src="@drawable/ic_home"
-                app:tint="@color/accent_violet" />
-            <TextView
-                android:id="@+id/tvNavHome"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Home"
-                android:textSize="11sp"
-                android:textColor="@color/accent_violet"
-                android:textStyle="bold"
-                android:layout_marginTop="2dp" />
-        </LinearLayout>
+            android:layout_weight="1">
 
-        <!-- Feed Tab -->
-        <LinearLayout
-            android:id="@+id/navFeed"
+            <LinearLayout
+                android:id="@+id/navHome"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@drawable/bg_nav_active_capsule"
+                android:gravity="center"
+                android:orientation="horizontal"
+                android:clickable="true"
+                android:focusable="true">
+                <ImageView
+                    android:id="@+id/ivNavHome"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:src="@drawable/ic_home"
+                    app:tint="@color/accent_violet" />
+                <TextView
+                    android:id="@+id/tvNavHome"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="Home"
+                    android:textSize="13sp"
+                    android:textColor="@color/accent_violet"
+                    android:textStyle="bold" />
+            </LinearLayout>
+        </FrameLayout>
+
+        <!-- Downloads Tab (replaces Reels) -->
+        <FrameLayout
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:gravity="center"
-            android:orientation="vertical"
-            android:clickable="true"
-            android:focusable="true">
-            <ImageView
-                android:id="@+id/ivNavFeed"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:src="@drawable/ic_video_library"
-                app:tint="@color/text_secondary_dark" />
-            <TextView
-                android:id="@+id/tvNavFeed"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Reels"
-                android:textSize="11sp"
-                android:textColor="@color/text_secondary_dark"
-                android:layout_marginTop="2dp" />
-        </LinearLayout>
+            android:layout_weight="1">
+
+            <LinearLayout
+                android:id="@+id/navDownloads"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:orientation="horizontal"
+                android:clickable="true"
+                android:focusable="true">
+                <ImageView
+                    android:id="@+id/ivNavDownloads"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:src="@drawable/ic_download"
+                    app:tint="@color/text_secondary_dark" />
+                <TextView
+                    android:id="@+id/tvNavDownloads"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="@string/downloads"
+                    android:textSize="13sp"
+                    android:textColor="@color/text_secondary_dark" />
+            </LinearLayout>
+        </FrameLayout>
 
     </LinearLayout>
 

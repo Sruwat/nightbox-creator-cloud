@@ -4,7 +4,6 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="com.google.android.gms.permission.AD_ID" tools:node="replace" />
 
     <application
@@ -25,11 +24,6 @@
             android:name="com.google.android.gms.ads.APPLICATION_ID"
             android:value="ca-app-pub-2964717174761820~4879614553" />
 
-        <!-- Meta App ID -->
-        <meta-data
-            android:name="com.facebook.sdk.ApplicationId"
-            android:value="@string/facebook_app_id" />
-
         <!-- Main Activity (Home Screen) -->
         <activity
             android:name=".MainActivity"
@@ -41,8 +35,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Verified NightBox share links. Keep the filters host-specific so
-                 Android verifies each public domain independently. -->
+            <!-- Verify each public host independently for direct App Links. -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -61,24 +54,12 @@
                 <data android:pathPrefix="/watch/" />
                 <data android:pathPrefix="/l/" />
             </intent-filter>
-
-            <!-- Legacy/API video links remain supported, but are also verified
-                 separately so one bad host cannot invalidate the main domain. -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" />
                 <data android:host="api.nightbox.in" />
-                <data android:pathPrefix="/watch/" />
-                <data android:pathPrefix="/l/" />
-            </intent-filter>
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" />
-                <data android:host="video.nightbox.in" />
                 <data android:pathPrefix="/watch/" />
                 <data android:pathPrefix="/l/" />
             </intent-filter>

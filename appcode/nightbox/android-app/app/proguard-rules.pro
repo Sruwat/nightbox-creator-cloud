@@ -14,11 +14,25 @@
 # ExoPlayer / Media3
 -dontwarn androidx.media3.**
 
-# Facebook Audience Network
--dontwarn com.facebook.infer.annotation.**
--dontwarn com.facebook.ads.**
+# Google AdMob Mediation Adapters
+-keep class com.google.ads.mediation.** { *; }
 
-# Vungle / Liftoff Monetize
--dontwarn com.vungle.**
--keep class com.vungle.** { *; }
--keep class com.google.ads.mediation.vungle.** { *; }
+# Meta Audience Network
+-dontwarn com.facebook.ads.**
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+
+# Unity Ads
+-keep class com.unity3d.ads.** { *; }
+-keep class com.unity3d.services.** { *; }
+-dontwarn com.unity3d.ads.**
+-dontwarn com.unity3d.services.**
+
+# InMobi
+-keep class com.inmobi.** { *; }
+-dontwarn com.inmobi.**
+
+# Liftoff Monetize (Vungle)
+-keep class com.vungle.ads.** { *; }
+-dontwarn com.vungle.ads.**

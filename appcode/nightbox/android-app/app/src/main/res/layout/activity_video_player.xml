@@ -13,7 +13,186 @@
         android:layout_height="match_parent"
         android:orientation="vertical">
 
-        <!-- Scrollable content -->
+        <!-- Top Sticky Banner Ad (Pinned at top, with proper gap above video player) -->
+        <LinearLayout
+            android:id="@+id/topBannerWrapper"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:layout_marginBottom="12dp">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_advertisement_pill"
+                android:paddingHorizontal="8dp"
+                android:paddingVertical="2dp"
+                android:text="ADVERTISEMENT"
+                android:textColor="#A6FFFFFF"
+                android:textSize="9sp"
+                android:letterSpacing="0.08"
+                android:textStyle="bold"
+                android:layout_marginBottom="4dp" />
+            <FrameLayout
+                android:id="@+id/adBannerContainerTop"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="50dp" />
+        </LinearLayout>
+
+        <!-- Video Player Container (Fixed 16:9 on screen, never scrolls away) -->
+        <FrameLayout
+            android:id="@+id/videoPlayerContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@color/black">
+
+            <!-- ExoPlayer PlayerView (NightHeast-style white seekbar) -->
+            <androidx.media3.ui.PlayerView
+                android:id="@+id/playerView"
+                android:layout_width="match_parent"
+                android:layout_height="220dp"
+                app:show_buffering="when_playing"
+                app:use_controller="true"
+                app:auto_show="true"
+                app:hide_on_touch="true"
+                app:resize_mode="fit"
+                app:surface_type="texture_view"
+                app:played_color="#FFFFFFFF"
+                app:scrubber_color="#FFFFFFFF"
+                app:buffered_color="#55FFFFFF"
+                app:unplayed_color="#33FFFFFF" />
+
+            <!-- WebView Fallback Player (hidden by default) -->
+            <WebView
+                android:id="@+id/webViewPlayer"
+                android:layout_width="match_parent"
+                android:layout_height="220dp"
+                android:visibility="gone" />
+
+            <!-- Top Back Arrow Overlay (visible during Loading / Error / Fallback, never duplicates player controller arrow) -->
+            <ImageView
+                android:id="@+id/btnTopBack"
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:layout_gravity="start|top"
+                android:layout_margin="10dp"
+                android:padding="8dp"
+                android:src="@drawable/ic_arrow_back"
+                android:contentDescription="Back"
+                app:tint="@color/white"
+                android:clickable="true"
+                android:focusable="true"
+                android:elevation="30dp"
+                android:visibility="gone" />
+
+            <!-- Fullscreen Toggle Button (Deprecated in favor of player control button) -->
+            <ImageView
+                android:id="@+id/btnFullscreen"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:layout_gravity="end|top"
+                android:layout_margin="12dp"
+                android:padding="6dp"
+                android:src="@drawable/ic_fullscreen"
+                android:contentDescription="Fullscreen"
+                app:tint="@color/white"
+                android:clickable="true"
+                android:focusable="true"
+                android:visibility="gone"
+                android:elevation="8dp" />
+
+            <!-- Advance Player Gesture & Action HUD Indicator -->
+            <LinearLayout
+                android:id="@+id/hudOverlay"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:background="@drawable/bg_pill_button"
+                android:paddingHorizontal="20dp"
+                android:paddingVertical="12dp"
+                android:orientation="horizontal"
+                android:gravity="center"
+                android:elevation="20dp"
+                android:visibility="gone">
+                <TextView
+                    android:id="@+id/tvHudText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/white"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- Loading Overlay -->
+            <LinearLayout
+                android:id="@+id/loadingOverlay"
+                android:layout_width="match_parent"
+                android:layout_height="220dp"
+                android:background="@color/black"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <ProgressBar
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:indeterminateTint="@color/primary_purple"
+                    android:layout_marginBottom="12dp" />
+
+                <TextView
+                    android:id="@+id/tvLoadingText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/loading"
+                    android:textColor="@color/text_secondary_dark"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <!-- Error Overlay -->
+            <LinearLayout
+                android:id="@+id/errorOverlay"
+                android:layout_width="match_parent"
+                android:layout_height="220dp"
+                android:background="@color/black"
+                android:gravity="center"
+                android:orientation="vertical"
+                android:padding="24dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="❌"
+                    android:textSize="36sp"
+                    android:layout_marginBottom="12dp" />
+
+                <TextView
+                    android:id="@+id/tvErrorMessage"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/error_playback"
+                    android:textColor="@color/text_primary_dark"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:layout_marginBottom="16dp" />
+
+                <Button
+                    android:id="@+id/btnRetry"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:background="@drawable/bg_button_primary"
+                    android:text="Retry"
+                    android:textColor="@color/white"
+                    android:textStyle="bold"
+                    android:textSize="13sp"
+                    android:paddingHorizontal="28dp" />
+            </LinearLayout>
+        </FrameLayout>
+
+        <!-- Scrollable content below video player -->
         <ScrollView
             android:id="@+id/scrollContent"
             android:layout_width="match_parent"
@@ -28,266 +207,161 @@
                 android:orientation="vertical"
                 android:paddingBottom="60dp">
 
-                <!-- Top Scrollable Banner Ad -->
+                <!-- NightHeast-Style Video Duration & Details Section -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical">
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:background="@drawable/bg_pill_button"
-                        android:paddingHorizontal="4dp"
-                        android:paddingVertical="1dp"
-                        android:text="AD"
-                        android:textColor="@color/primary_purple"
-                        android:textSize="10sp"
-                        android:textStyle="bold"
-                        android:layout_marginBottom="4dp" />
-                    <FrameLayout
-                        android:id="@+id/adBannerContainerTop"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:minHeight="50dp" />
-                </LinearLayout>
-
-                <!-- Video Player Container (16:9 in portrait) -->
-                <FrameLayout
-                    android:id="@+id/videoPlayerContainer"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:background="@color/black">
-
-                    <!-- ExoPlayer PlayerView -->
-                    <androidx.media3.ui.PlayerView
-                        android:id="@+id/playerView"
-                        android:layout_width="match_parent"
-                        android:layout_height="220dp"
-                        app:show_buffering="when_playing"
-                        app:use_controller="true"
-                        app:auto_show="true"
-                        app:hide_on_touch="true"
-                        app:resize_mode="fit"
-                        app:surface_type="surface_view" />
-
-                    <!-- WebView Fallback Player (hidden by default) -->
-                    <WebView
-                        android:id="@+id/webViewPlayer"
-                        android:layout_width="match_parent"
-                        android:layout_height="220dp"
-                        android:visibility="gone" />
-
-                    <!-- Back Arrow Overlay -->
-                    <ImageView
-                        android:id="@+id/btnBackOverlay"
-                        android:layout_width="36dp"
-                        android:layout_height="36dp"
-                        android:layout_gravity="start|top"
-                        android:layout_margin="12dp"
-                        android:padding="6dp"
-                        android:src="@drawable/ic_arrow_back"
-                        android:contentDescription="Back"
-                        app:tint="@color/white"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:elevation="8dp" />
-
-                    <!-- Fullscreen Toggle Button -->
-                    <ImageView
-                        android:id="@+id/btnFullscreen"
-                        android:layout_width="36dp"
-                        android:layout_height="36dp"
-                        android:layout_gravity="end|top"
-                        android:layout_margin="12dp"
-                        android:padding="6dp"
-                        android:src="@drawable/ic_fullscreen"
-                        android:contentDescription="Fullscreen"
-                        app:tint="@color/white"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:elevation="8dp" />
-
-                    <!-- Loading Overlay -->
-                    <LinearLayout
-                        android:id="@+id/loadingOverlay"
-                        android:layout_width="match_parent"
-                        android:layout_height="220dp"
-                        android:background="@color/black"
-                        android:gravity="center"
-                        android:orientation="vertical">
-
-                        <ProgressBar
-                            android:layout_width="40dp"
-                            android:layout_height="40dp"
-                            android:indeterminateTint="@color/primary_purple"
-                            android:layout_marginBottom="12dp" />
-
-                        <TextView
-                            android:id="@+id/tvLoadingText"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="@string/loading"
-                            android:textColor="@color/text_secondary_dark"
-                            android:textSize="13sp" />
-                    </LinearLayout>
-
-                    <!-- Error Overlay -->
-                    <LinearLayout
-                        android:id="@+id/errorOverlay"
-                        android:layout_width="match_parent"
-                        android:layout_height="220dp"
-                        android:background="@color/black"
-                        android:gravity="center"
-                        android:orientation="vertical"
-                        android:padding="24dp"
-                        android:visibility="gone">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="❌"
-                            android:textSize="36sp"
-                            android:layout_marginBottom="12dp" />
-
-                        <TextView
-                            android:id="@+id/tvErrorMessage"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="@string/error_playback"
-                            android:textColor="@color/text_primary_dark"
-                            android:textSize="14sp"
-                            android:textStyle="bold"
-                            android:gravity="center"
-                            android:layout_marginBottom="16dp" />
-
-                        <Button
-                            android:id="@+id/btnRetry"
-                            android:layout_width="wrap_content"
-                            android:layout_height="40dp"
-                            android:background="@drawable/bg_button_primary"
-                            android:text="Retry"
-                            android:textColor="@color/white"
-                            android:textStyle="bold"
-                            android:textSize="13sp"
-                            android:paddingHorizontal="28dp" />
-                    </LinearLayout>
-                </FrameLayout>
-
-                <!-- Video Meta Details ("1:20 min 30 MB") -->
-                <TextView
-                    android:id="@+id/tvVideoMetaDetails"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Loading..."
-                    android:textColor="@color/white"
-                    android:textSize="16sp"
-                    android:textStyle="bold"
+                    android:orientation="vertical"
                     android:paddingHorizontal="16dp"
-                    android:paddingVertical="12dp"
-                    android:background="@color/bg_dark" />
+                    android:paddingTop="14dp"
+                    android:paddingBottom="6dp">
 
-                <!-- Banner Ad Below Video (Middle) -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical">
                     <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:background="@drawable/bg_pill_button"
-                        android:paddingHorizontal="4dp"
-                        android:paddingVertical="1dp"
-                        android:text="AD"
-                        android:textColor="@color/primary_purple"
-                        android:textSize="10sp"
-                        android:textStyle="bold"
-                        android:layout_marginBottom="4dp"
-                        android:layout_marginTop="8dp" />
-                    <FrameLayout
-                        android:id="@+id/adBannerContainerPlayer"
+                        android:id="@+id/tvVideoMetaDetails"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:minHeight="50dp" />
+                        android:text="NightBox Video"
+                        android:textColor="@color/white"
+                        android:textSize="18sp"
+                        android:textStyle="bold"
+                        android:lineSpacingExtra="3dp"
+                        android:maxLines="3"
+                        android:ellipsize="end" />
+
+                    <!-- Quick Streaming Tags -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginTop="8dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/bg_tag_pill"
+                            android:paddingHorizontal="7dp"
+                            android:paddingVertical="3dp"
+                            android:text="1080p FHD"
+                            android:textColor="#FF38BDF8"
+                            android:textSize="10.5sp"
+                            android:textStyle="bold"
+                            android:layout_marginEnd="6dp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/bg_tag_pill"
+                            android:paddingHorizontal="7dp"
+                            android:paddingVertical="3dp"
+                            android:text="60 FPS"
+                            android:textColor="#FF38BDF8"
+                            android:textSize="10.5sp"
+                            android:textStyle="bold"
+                            android:layout_marginEnd="6dp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/bg_tag_pill"
+                            android:paddingHorizontal="7dp"
+                            android:paddingVertical="3dp"
+                            android:text="STEREO"
+                            android:textColor="#FF38BDF8"
+                            android:textSize="10.5sp"
+                            android:textStyle="bold"
+                            android:layout_marginEnd="6dp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/bg_tag_pill"
+                            android:paddingHorizontal="7dp"
+                            android:paddingVertical="3dp"
+                            android:text="H.264"
+                            android:textColor="#FF38BDF8"
+                            android:textSize="10.5sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
                 </LinearLayout>
 
-                <!-- Action Buttons (Centered) -->
+                <!-- Action Buttons (Share, Telegram) sitting direct in screen with proper spacing -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
                     android:gravity="center"
-                    android:paddingHorizontal="12dp"
-                    android:paddingVertical="16dp">
+                    android:paddingHorizontal="16dp"
+                    android:paddingTop="14dp"
+                    android:paddingBottom="12dp">
 
                     <!-- Share Button Pill -->
                     <LinearLayout
                         android:id="@+id/btnShare"
                         android:layout_width="0dp"
-                        android:layout_height="40dp"
+                        android:layout_height="44dp"
                         android:layout_weight="1"
-                        android:background="@drawable/bg_pill_button"
+                        android:background="@drawable/bg_community_button"
                         android:orientation="horizontal"
                         android:gravity="center"
-                        android:layout_marginEnd="8dp"
+                        android:layout_marginEnd="10dp"
                         android:clickable="true"
                         android:focusable="true">
                         <ImageView
-                            android:layout_width="16dp"
-                            android:layout_height="16dp"
+                            android:layout_width="18dp"
+                            android:layout_height="18dp"
                             android:src="@drawable/ic_share"
-                            app:tint="@color/text_primary_dark" />
+                            app:tint="#FFFFFFFF" />
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginStart="6dp"
+                            android:layout_marginStart="8dp"
                             android:text="@string/share"
-                            android:textColor="@color/text_primary_dark"
-                            android:textSize="11sp"
+                            android:textColor="#FFFFFFFF"
+                            android:textSize="14sp"
                             android:textStyle="bold" />
                     </LinearLayout>
-
 
                     <!-- Telegram Button Pill -->
                     <LinearLayout
                         android:id="@+id/btnTelegramJoin"
                         android:layout_width="0dp"
-                        android:layout_height="40dp"
+                        android:layout_height="44dp"
                         android:layout_weight="1"
-                        android:background="@drawable/bg_pill_button"
+                        android:background="@drawable/bg_community_button"
                         android:orientation="horizontal"
                         android:gravity="center"
                         android:clickable="true"
                         android:focusable="true">
                         <ImageView
-                            android:layout_width="16dp"
-                            android:layout_height="16dp"
+                            android:layout_width="18dp"
+                            android:layout_height="18dp"
                             android:src="@drawable/ic_telegram"
-                            app:tint="@color/text_primary_dark" />
+                            app:tint="#FF29B6F6" />
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginStart="6dp"
+                            android:layout_marginStart="8dp"
                             android:text="Telegram"
-                            android:textColor="@color/text_primary_dark"
-                            android:textSize="11sp"
+                            android:textColor="#FFFFFFFF"
+                            android:textSize="14sp"
                             android:textStyle="bold" />
                     </LinearLayout>
                 </LinearLayout>
 
-                <!-- Native Ad at Bottom -->
+                <!-- MREC Ad Under Player (Proper spacing from action buttons) -->
                 <FrameLayout
-                    android:id="@+id/nativeAdContainerBottom"
+                    android:id="@+id/mrecPlayerContainer"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginHorizontal="16dp"
-                    android:layout_marginBottom="16dp"
-                    android:minHeight="200dp" />
+                    android:minHeight="250dp"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="28dp" />
 
             </LinearLayout>
         </ScrollView>
     </LinearLayout>
 
-    <!-- Fullscreen Player Container (initially hidden, covers entire display) -->
+    <!-- Fullscreen Player Container (covers entire display) -->
     <FrameLayout
         android:id="@+id/fullscreenPlayerContainer"
         android:layout_width="match_parent"
@@ -305,9 +379,35 @@
             app:auto_show="true"
             app:hide_on_touch="true"
             app:resize_mode="fit"
-            app:surface_type="surface_view" />
+            app:surface_type="texture_view"
+            app:played_color="#FFFFFFFF"
+            app:scrubber_color="#FFFFFFFF"
+            app:buffered_color="#55FFFFFF"
+            app:unplayed_color="#33FFFFFF" />
 
-        <!-- Exit Fullscreen Button -->
+        <!-- Advance Player Fullscreen HUD Indicator -->
+        <LinearLayout
+            android:id="@+id/hudOverlayFullscreen"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:background="@drawable/bg_pill_button"
+            android:paddingHorizontal="24dp"
+            android:paddingVertical="14dp"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:elevation="20dp"
+            android:visibility="gone">
+            <TextView
+                android:id="@+id/tvHudTextFullscreen"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- Exit Fullscreen Button (Deprecated in favor of player controls) -->
         <ImageView
             android:id="@+id/btnExitFullscreen"
             android:layout_width="40dp"
@@ -320,32 +420,7 @@
             app:tint="@color/white"
             android:clickable="true"
             android:focusable="true"
+            android:visibility="gone"
             android:elevation="4dp" />
     </FrameLayout>
-    
-    <!-- Sticky Bottom Banner Ad (fixed, doesn't scroll) -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:layout_gravity="bottom"
-        android:background="@color/bg_dark"
-        android:elevation="10dp">
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:background="@drawable/bg_pill_button"
-            android:paddingHorizontal="4dp"
-            android:paddingVertical="1dp"
-            android:text="AD"
-            android:textColor="@color/primary_purple"
-            android:textSize="10sp"
-            android:textStyle="bold"
-            android:layout_marginBottom="2dp" />
-        <FrameLayout
-            android:id="@+id/adBannerContainerSticky"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:minHeight="50dp" />
-    </LinearLayout>
 </FrameLayout>

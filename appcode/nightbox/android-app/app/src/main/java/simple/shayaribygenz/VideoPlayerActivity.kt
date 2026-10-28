@@ -2,18 +2,21 @@ package simple.shayaribygenz
 
 import android.annotation.SuppressLint
 import android.app.PictureInPictureParams
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.util.Rational
+import android.view.GestureDetector
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.webkit.WebChromeClient
-import android.webkit.JavascriptInterface
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -28,30 +31,35 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.hls.HlsMediaSource
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
-import com.google.android.gms.ads.AdLoader
 import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.AdSize
 import com.google.android.gms.ads.AdView
-import com.google.android.gms.ads.nativead.NativeAd
-import com.google.android.gms.ads.nativead.NativeAdView
+import com.google.android.gms.ads.LoadAdError
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import androidx.media3.exoplayer.ima.ImaAdsLoader
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import android.media.MediaMetadataRetriever
+import androidx.appcompat.app.AlertDialog
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.MediaType.Companion.toMediaType
+import simple.shayaribygenz.UiExtensions.applyPressScale
+import simple.shayaribygenz.UiExtensions.vibrateTick
 
 class VideoPlayerActivity : AppCompatActivity() {
 
@@ -64,17 +72,35 @@ class VideoPlayerActivity : AppCompatActivity() {
     private lateinit var tvLoadingText: TextView
     private lateinit var tvVideoMetaDetails: TextView
     private lateinit var btnRetry: Button
-    private lateinit var btnBackOverlay: ImageView
+    private lateinit var btnTopBack: ImageView
     private lateinit var btnFullscreen: ImageView
     private lateinit var btnExitFullscreen: ImageView
     private lateinit var mainContent: LinearLayout
     private lateinit var fullscreenPlayerContainer: FrameLayout
-    private lateinit var adBannerContainerSticky: FrameLayout
-    private lateinit var adBannerContainerPlayer: FrameLayout
     private lateinit var adBannerContainerTop: FrameLayout
-    private lateinit var nativeAdContainerBottom: FrameLayout
-    private var nativeAd: NativeAd? = null
-    private var imaAdsLoader: ImaAdsLoader? = null
+    private lateinit var mrecPlayerContainer: FrameLayout
+    private var bannerAdView: AdView? = null
+
+    // Advance Player HUD & Controls
+    private lateinit var hudOverlay: LinearLayout
+    private lateinit var tvHudText: TextView
+    private lateinit var hudOverlayFullscreen: LinearLayout
+    private lateinit var tvHudTextFullscreen: TextView
+    private var hudDismissRunnable: Runnable? = null
+
+    // Advance Player State (Aspect ratio & Playback speeds)
+    private var currentResizeModeIndex = 0
+    private val resizeModes = intArrayOf(
+        AspectRatioFrameLayout.RESIZE_MODE_FIT,
+        AspectRatioFrameLayout.RESIZE_MODE_ZOOM,
+        AspectRatioFrameLayout.RESIZE_MODE_FILL
+    )
+    private val resizeModeLabels = arrayOf("Fit (Original)", "Crop to Fill", "Stretch")
+
+    private var currentSpeedIndex = 0
+    private val playbackSpeeds = floatArrayOf(1.0f, 1.25f, 1.5f, 2.0f, 0.75f)
+    private var isTemporaryFastForward = false
+    private var speedBeforeFastForward = 1.0f
 
     private var player: ExoPlayer? = null
     private var videoId: String? = null
@@ -84,15 +110,31 @@ class VideoPlayerActivity : AppCompatActivity() {
     private var viewSessionId: String? = null
     private var viewToken: String? = null
     private var viewQualified = false
+    private var viewTrackingStarted = false
+    private var viewTrackingRetries = 0
+    private var processingRetryCount = 0
     private var linkSlug: String? = null
     private var remoteHlsUrl: String? = null
-    private var remoteStreamUrl: String? = null
-    private var triedRangeFallback = false
+    private var originHlsUrl: String? = null
+    private var originFallbackAttempted = false
     private var durationUpdateRunnable: Runnable? = null
     private var shouldResumePlayback = true
     private var restoredPositionMs = 0L
     private var restoredPlayWhenReady = true
-    private val apiClient = OkHttpClient()
+    private var resolvedVideoTitle: String = "NightBox Video"
+    private var resolvedDurationMs: Long = 256_000L
+    private var resolvedContentLength: Long = 11_220_967L
+    private val apiClient get() = NetworkClient.client
+    private var videoPlaybackEnded = false
+    private var indexingJob: kotlinx.coroutines.Job? = null
+    private var indexingCall: okhttp3.Call? = null
+
+    private fun formatCleanTitle(raw: String): String {
+        return raw.replace("_", " ")
+            .replace(Regex("""\?+"""), "")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+    }
 
     companion object {
         private const val TAG = "VideoPlayerActivity"
@@ -134,72 +176,109 @@ class VideoPlayerActivity : AppCompatActivity() {
         tvLoadingText = findViewById(R.id.tvLoadingText)
         tvVideoMetaDetails = findViewById(R.id.tvVideoMetaDetails)
         btnRetry = findViewById(R.id.btnRetry)
-        btnBackOverlay = findViewById(R.id.btnBackOverlay)
+        btnTopBack = findViewById(R.id.btnTopBack)
         btnFullscreen = findViewById(R.id.btnFullscreen)
         btnExitFullscreen = findViewById(R.id.btnExitFullscreen)
         mainContent = findViewById(R.id.mainContent)
         fullscreenPlayerContainer = findViewById(R.id.fullscreenPlayerContainer)
-        adBannerContainerSticky = findViewById(R.id.adBannerContainerSticky)
-        adBannerContainerPlayer = findViewById(R.id.adBannerContainerPlayer)
         adBannerContainerTop = findViewById(R.id.adBannerContainerTop)
-        nativeAdContainerBottom = findViewById(R.id.nativeAdContainerBottom)
+        mrecPlayerContainer = findViewById(R.id.mrecPlayerContainer)
+
+        // Advance Player HUD views
+        hudOverlay = findViewById(R.id.hudOverlay)
+        tvHudText = findViewById(R.id.tvHudText)
+        hudOverlayFullscreen = findViewById(R.id.hudOverlayFullscreen)
+        tvHudTextFullscreen = findViewById(R.id.tvHudTextFullscreen)
 
         // Get video ID from intent or deep link
         videoId = getVideoIdFromIntent()
         linkSlug = intent?.getStringExtra("link_slug") ?: intent?.data?.getQueryParameter("link")
         localVideoUri = intent?.getStringExtra("local_video_uri") ?: intent?.getStringExtra("local_path")
         val videoTitle = intent?.getStringExtra("video_title")
-        
-        val showVastAd = intent?.getBooleanExtra("show_vast_ad", false) ?: false
+
+        // Always refresh playback metadata: a link may have switched from a
+        // legacy MP4 to the CDN HLS playlist since FileInfoActivity opened.
+        val passedDurationSec = intent?.getIntExtra("video_duration_sec", 0) ?: 0
+        if (passedDurationSec > 0) {
+            resolvedDurationMs = passedDurationSec * 1000L
+        }
+        val passedSizeBytes = intent?.getLongExtra("video_size_bytes", 0L) ?: 0L
+        if (passedSizeBytes > 0L) {
+            resolvedContentLength = passedSizeBytes
+        }
 
         if (videoId == null && localVideoUri == null) {
             showError("Invalid video link. No video ID found.")
             return
         }
-        if (videoTitle != null) {
-            tvVideoMetaDetails.text = videoTitle
+
+        if (!videoTitle.isNullOrBlank()) {
+            resolvedVideoTitle = formatCleanTitle(videoTitle)
         }
+        tvVideoMetaDetails.text = resolvedVideoTitle
 
-        loadVideoAndAds(showVastAd)
+        btnTopBack.visibility = View.VISIBLE
+        loadVideoAndAds()
 
-        // Back button
-        btnBackOverlay.setOnClickListener { finish() }
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                handleBackNavigation()
+            }
+        })
+
+        // Back button for loading/error overlay with press-scale feedback
+        btnTopBack.applyPressScale {
+            handleBackNavigation()
+        }
 
         // Retry button
-        btnRetry.setOnClickListener {
+        btnRetry.applyPressScale {
             errorOverlay.visibility = View.GONE
             loadingOverlay.visibility = View.VISIBLE
-            initializePlayer()
+            btnTopBack.visibility = View.VISIBLE
+            processingRetryCount = 0
+            if (localVideoUri == null) loadRemoteVideoMetadata() else initializePlayer()
         }
 
-        // Fullscreen button
+        // Fullscreen buttons
         btnFullscreen.setOnClickListener { enterFullscreen() }
-
-        // Exit fullscreen button
         btnExitFullscreen.setOnClickListener { exitFullscreen() }
 
-        // Share button
-        findViewById<LinearLayout>(R.id.btnShare)?.setOnClickListener {
+        // Modern PlayerControlView Fullscreen Button Listener
+        playerView.setFullscreenButtonClickListener { isFullscreen ->
+            if (isFullscreen) enterFullscreen() else exitFullscreen()
+        }
+        playerViewFullscreen.setFullscreenButtonClickListener { isFullscreen ->
+            if (isFullscreen) enterFullscreen() else exitFullscreen()
+        }
+
+        // Setup Advance Player controls & gestures
+        setupAdvanceControls(playerView)
+        setupAdvanceControls(playerViewFullscreen)
+        setupAdvanceGestures(playerView)
+        setupAdvanceGestures(playerViewFullscreen)
+
+        // Share button with modern haptic press feedback
+        findViewById<LinearLayout>(R.id.btnShare)?.applyPressScale {
             shareVideo()
         }
 
-        // Telegram join button
-        findViewById<LinearLayout>(R.id.btnTelegramJoin)?.setOnClickListener {
+        // Telegram join button with modern haptic press feedback
+        findViewById<LinearLayout>(R.id.btnTelegramJoin)?.applyPressScale {
             openTelegram()
         }
 
     }
 
-    private fun loadVideoAndAds(requestedVastAd: Boolean) {
+    private fun loadVideoAndAds() {
         lifecycleScope.launch {
-            if (requestedVastAd) {
-                imaAdsLoader = ImaAdsLoader.Builder(this@VideoPlayerActivity).build()
+            if (videoId != null && localVideoUri == null) {
+                loadRemoteVideoMetadata()
+            } else {
+                initializePlayer()
             }
-            if (videoId != null && localVideoUri == null) loadRemoteVideoMetadata() else initializePlayer()
             loadBannerAdWhenReady(adBannerContainerTop)
-            loadBannerAdWhenReady(adBannerContainerSticky)
-            loadBannerAdWhenReady(adBannerContainerPlayer)
-            loadNativeAd()
+            loadMrecAdUnderPlayer()
         }
     }
 
@@ -207,38 +286,74 @@ class VideoPlayerActivity : AppCompatActivity() {
         val vid = videoId ?: return
         lifecycleScope.launch(Dispatchers.IO) {
             try {
+                // If title is default, try resolving from link slug
+                val currentSlug = linkSlug
+                if (!currentSlug.isNullOrBlank() && (resolvedVideoTitle == "NightBox Video" || resolvedVideoTitle == "Exclusive Premium Video")) {
+                    try {
+                        val linkReq = Request.Builder()
+                            .url("${BuildConfig.BACKEND_URL}/api/links/${Uri.encode(currentSlug)}")
+                            .build()
+                        apiClient.newCall(linkReq).execute().use { resp ->
+                            if (resp.isSuccessful) {
+                                val linkJson = org.json.JSONObject(resp.body?.string().orEmpty())
+                                val rawTitle = linkJson.optJSONObject("link")?.optString("title")
+                                if (!rawTitle.isNullOrBlank()) {
+                                    resolvedVideoTitle = formatCleanTitle(rawTitle)
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+
                 val request = Request.Builder()
                     .url("${BuildConfig.BACKEND_URL}/video/${Uri.encode(vid)}")
                     .get()
                     .build()
-                var response = apiClient.newCall(request).execute()
-                var processingAttempts = 0
-                while (response.code == 202 && processingAttempts < 60) {
-                    response.close()
-                    processingAttempts += 1
-                    withContext(Dispatchers.Main) {
-                        loadingOverlay.visibility = View.VISIBLE
-                        tvVideoMetaDetails.text = "Video processing… checking again in 5 seconds"
+                apiClient.newCall(request).execute().use { response ->
+                    if (response.code == 202 || response.code == 409) {
+                        val status = org.json.JSONObject(response.body?.string().orEmpty()).optString("playbackStatus")
+                        withContext(Dispatchers.Main) {
+                            if (status == "failed" || response.code == 409) {
+                                showError("Video processing failed. Please contact the uploader.")
+                            } else {
+                                tvLoadingText.text = "Video is processing. Waiting for playback…"
+                                if (++processingRetryCount <= 24) {
+                                    window.decorView.postDelayed({
+                                        if (!isFinishing && !isDestroyed) loadRemoteVideoMetadata()
+                                    }, 5_000L)
+                                } else {
+                                    showError("Video is still processing. Tap Retry in a moment.")
+                                }
+                            }
+                        }
+                        return@use
                     }
-                    kotlinx.coroutines.delay(5000)
-                    response = apiClient.newCall(request).execute()
-                }
-                response.use { readyResponse ->
-                    if (!readyResponse.isSuccessful) throw IllegalStateException("Video metadata request failed: ${readyResponse.code}")
-                    val payload = org.json.JSONObject(readyResponse.body?.string().orEmpty())
+                    if (!response.isSuccessful) throw IllegalStateException("Video metadata request failed: ${response.code}")
+                    val payload = org.json.JSONObject(response.body?.string().orEmpty())
                     val video = payload.optJSONObject("video") ?: throw IllegalStateException("Video metadata missing")
-                    // Prefer the direct Bunny CDN object. The backend proxy is
-                    // only a fallback for legacy/local-storage videos.
-                    // HLS must be preferred over the original MP4. Large or
-                    // unsupported MP4 files can expose audio without video.
-                    remoteHlsUrl = video.optString("hlsUrl").takeIf {
-                        it.isNotBlank() && it.substringBefore('?').endsWith(".m3u8", ignoreCase = true)
-                    }
-                    remoteStreamUrl = video.optString("streamUrl").takeIf { it.isNotBlank() }
+                    val playbackUrl = listOf("hlsUrl", "cdnUrl", "streamUrl")
+                        .firstNotNullOfOrNull { key -> video.optString(key).takeIf { it.isNotBlank() } }
+                        ?: throw IllegalStateException("Playable video stream missing")
+                    val fallbackUrl = video.optString("originHlsUrl").takeIf { it.startsWith("https://") }
                     val title = video.optString("title").takeIf { it.isNotBlank() }
+                    val videoSize = video.optLong("size", 0L)
+                    if (videoSize > 0L) {
+                        resolvedContentLength = videoSize
+                    }
+                    val durationSec = video.optInt("duration", 0)
+                    if (durationSec > 0) {
+                        resolvedDurationMs = durationSec * 1000L
+                    }
+
+
                     withContext(Dispatchers.Main) {
-                        title?.let { tvVideoMetaDetails.text = it }
-                        if (!linkSlug.isNullOrBlank()) startViewTracking(linkSlug!!)
+                        processingRetryCount = 0
+                        remoteHlsUrl = playbackUrl
+                        originHlsUrl = fallbackUrl
+                        originFallbackAttempted = false
+                        title?.let { resolvedVideoTitle = formatCleanTitle(it) }
+                        updateVideoMetaDetails()
+                        startViewTrackingIfNeeded()
                         initializePlayer()
                     }
                 }
@@ -295,7 +410,19 @@ class VideoPlayerActivity : AppCompatActivity() {
      */
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     private fun initExoPlayerLocal() {
-        player = ExoPlayer.Builder(this).build()
+        val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                /* minBufferMs = */ 10_000,
+                /* maxBufferMs = */ 25_000,
+                /* bufferForPlaybackMs = */ 500,
+                /* bufferForPlaybackAfterRebufferMs = */ 1_500
+            )
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
+
+        player = ExoPlayer.Builder(this)
+            .setLoadControl(loadControl)
+            .build()
         playerView.player = player
         // Only attach to playerViewFullscreen when entering fullscreen mode
 
@@ -308,63 +435,97 @@ class VideoPlayerActivity : AppCompatActivity() {
     }
 
     /**
-     * ExoPlayer with a CDN MP4 source + IMA VAST ads.
+     * ExoPlayer with a CDN MP4 source.
      */
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     private fun initExoPlayerHls() {
         val vid = videoId ?: return
 
-        // Prefer the direct CDN URL to avoid an unnecessary VPS hop. Keep the
-        // range-capable API stream as a fallback for unavailable CDN objects.
-        val mediaUrl = remoteHlsUrl ?: remoteStreamUrl ?: run {
+        val mediaUrl = remoteHlsUrl ?: run {
             showError("Video URL is unavailable.")
             return
         }
         Log.d(TAG, "Trying CDN URL: $mediaUrl")
-        val isHls = mediaUrl.substringBefore('?').lowercase().endsWith(".m3u8")
 
-        // Create HTTP data source with proper headers
-        val dataSourceFactory = DefaultHttpDataSource.Factory()
+        // Create HTTP data source with proper headers & cross-protocol redirects
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setDefaultRequestProperties(mapOf(
+                "Referer" to "$backendOrigin/",
+                "Origin" to backendOrigin
+            ))
             .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(15000)
+            .setKeepPostFor302Redirects(true)
+            .setConnectTimeoutMs(8000)
             .setReadTimeoutMs(15000)
 
-        // Set up MediaSourceFactory with IMA AdsLoader for VAST
-        // IMPORTANT: Build the player ONCE with this factory - do not call ExoPlayer.Builder again
-        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
-        imaAdsLoader?.let { loader ->
-            mediaSourceFactory.setLocalAdInsertionComponents({ loader }, playerView)
+        // Persistent 150MB LRU disk cache: eliminates re-downloads on seek/rewind/replay and saves massive bandwidth
+        val cachedDataSourceFactory = VideoCacheManager.buildCacheDataSourceFactory(this, httpDataSourceFactory)
+
+        // HLS loads short segments; plain MP4 uses Media3's real container metadata
+        // and HTTP byte ranges. Never guess a seek map or video duration.
+        val isHlsStream = mediaUrl.contains(".m3u8", ignoreCase = true) || mediaUrl.contains("/hls/", ignoreCase = true)
+        val mediaSource = if (isHlsStream) {
+            HlsMediaSource.Factory(cachedDataSourceFactory)
+                .setAllowChunklessPreparation(true)
+                .createMediaSource(MediaItem.fromUri(mediaUrl))
+        } else {
+            ProgressiveMediaSource.Factory(cachedDataSourceFactory)
+                .createMediaSource(MediaItem.fromUri(mediaUrl))
         }
 
-        // Build player ONCE with the correct media source factory (includes IMA support)
-        player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(mediaSourceFactory)
+        // Fast-start Smart LoadControl: starts playback in 1.0s, caps buffer at 30s to prevent bandwidth waste
+        val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                /* minBufferMs = */ 15_000,
+                /* maxBufferMs = */ 30_000,
+                /* bufferForPlaybackMs = */ 1_000,
+                /* bufferForPlaybackAfterRebufferMs = */ 2_500
+            )
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
+
+        // Hardware decoder fallback: fixes "sound plays but video is black" bug
+        val renderersFactory = DefaultRenderersFactory(this)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+            .setEnableDecoderFallback(true)
+
+        // 720p Mobile Resolution Cap: saves 60% bandwidth while staying crystal clear on 6" mobile screens
+        val trackSelector = DefaultTrackSelector(this).apply {
+            setParameters(
+                buildUponParameters()
+                    .setMaxVideoSize(1280, 720)
+                    .setMaxVideoBitrate(2_200_000)
+                    .setExceedVideoConstraintsIfNecessary(true)
+            )
+        }
+
+        player = ExoPlayer.Builder(this, renderersFactory)
+            .setTrackSelector(trackSelector)
+            .setLoadControl(loadControl)
+            .setSeekBackIncrementMs(5000L)
+            .setSeekForwardIncrementMs(15000L)
             .build()
 
         playerView.player = player
-        imaAdsLoader?.setPlayer(player)
-
-        // InMobi VAST tag URL
-        val adTagUri = Uri.parse("https://api.inmobi.com/showad/v3.1?site-id=10000219819&pl-id=10000775406&rt=vast3&r=4")
-
-        val mediaItemBuilder = MediaItem.Builder()
-            .setUri(mediaUrl)
-            .setMimeType(if (isHls) MimeTypes.APPLICATION_M3U8 else MimeTypes.VIDEO_MP4)
-        if (imaAdsLoader != null) {
-            mediaItemBuilder.setAdsConfiguration(
-                MediaItem.AdsConfiguration.Builder(adTagUri).build()
-            )
-        }
-        val mediaItem = mediaItemBuilder.build()
-
-        player?.setMediaItem(mediaItem)
+        player?.setMediaSource(mediaSource)
         player?.prepare()
         player?.playWhenReady = true
 
         // Listen for errors — if native playback fails, fallback to WebView.
         player?.addListener(object : Player.Listener {
+            override fun onRenderedFirstFrame() {
+                loadingOverlay.visibility = View.GONE
+                btnTopBack.visibility = View.GONE
+                playerView.visibility = View.VISIBLE
+            }
+
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (isPlaying) qualifyAfterFiveSeconds()
+                if (isPlaying) {
+                    loadingOverlay.visibility = View.GONE
+                    btnTopBack.visibility = View.GONE
+                    playerView.visibility = View.VISIBLE
+                    qualifyAfterFiveSeconds()
+                }
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -372,6 +533,7 @@ class VideoPlayerActivity : AppCompatActivity() {
                     Player.STATE_READY -> {
                         Log.d(TAG, "ExoPlayer CDN media ready")
                         loadingOverlay.visibility = View.GONE
+                        btnTopBack.visibility = View.GONE
                         playerView.visibility = View.VISIBLE
                         updateVideoMetaDetails()
                         restorePlayerPositionIfNeeded()
@@ -380,28 +542,34 @@ class VideoPlayerActivity : AppCompatActivity() {
                     Player.STATE_BUFFERING -> {
                         if (playerView.visibility != View.VISIBLE) {
                             loadingOverlay.visibility = View.VISIBLE
+                            btnTopBack.visibility = View.VISIBLE
                         }
                     }
-                    Player.STATE_ENDED -> { /* Video ended */ }
+                    Player.STATE_ENDED -> {
+                        Log.d(TAG, "Video playback ended.")
+                        videoPlaybackEnded = true
+                    }
                     Player.STATE_IDLE -> { /* Idle */ }
                 }
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                if (isHls && !triedRangeFallback && !remoteStreamUrl.isNullOrBlank()) {
-                    // Retry through the byte-range endpoint instead of opening
-                    // a WebView that may wait for the complete MP4 download.
-                    triedRangeFallback = true
-                    remoteHlsUrl = null
-                    Log.w(TAG, "HLS playback failed; retrying range MP4", error)
-                    releasePlayer()
-                    initializePlayer()
-                    return
+                Log.e(TAG, "Native playback failed (${error.errorCode})", error)
+                val fallback = originHlsUrl?.takeIf {
+                    isHlsStream && !originFallbackAttempted && it != remoteHlsUrl
                 }
-                Log.e(TAG, "ExoPlayer playback failed: ${error.message}, falling back to WebView")
-                // Native playback failed — fallback to the same range-capable stream.
-                releasePlayer()
-                fallbackToWebView()
+                if (fallback != null) {
+                    originFallbackAttempted = true
+                    window.decorView.post {
+                        if (!isFinishing && !isDestroyed) {
+                            remoteHlsUrl = fallback
+                            initializePlayer()
+                        }
+                    }
+                } else {
+                    releasePlayer()
+                    showError("Video stream could not be played. Tap Retry.")
+                }
             }
 
             override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
@@ -422,6 +590,7 @@ class VideoPlayerActivity : AppCompatActivity() {
                 when (playbackState) {
                     Player.STATE_READY -> {
                         loadingOverlay.visibility = View.GONE
+                        btnTopBack.visibility = View.GONE
                         playerView.visibility = View.VISIBLE
                         updateVideoMetaDetails()
                         restorePlayerPositionIfNeeded()
@@ -430,9 +599,13 @@ class VideoPlayerActivity : AppCompatActivity() {
                     Player.STATE_BUFFERING -> {
                         if (playerView.visibility != View.VISIBLE) {
                             loadingOverlay.visibility = View.VISIBLE
+                            btnTopBack.visibility = View.VISIBLE
                         }
                     }
-                    Player.STATE_ENDED -> { /* Video ended */ }
+                    Player.STATE_ENDED -> {
+                        Log.d(TAG, "Local video playback ended.")
+                        videoPlaybackEnded = true
+                    }
                     Player.STATE_IDLE -> { /* Idle */ }
                 }
             }
@@ -495,50 +668,46 @@ class VideoPlayerActivity : AppCompatActivity() {
                         viewToken = payload.optString("viewToken").takeIf { it.isNotBlank() }
                     }
                 }
-            } catch (error: Exception) { Log.w(TAG, "View tracking start failed", error) }
-        }
-    }
-
-    private fun qualifyView() {
-        val sessionId = viewSessionId ?: return
-        val token = viewToken ?: return
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val body = org.json.JSONObject().put("viewToken", token).toString().toRequestBody("application/json".toMediaType())
-                val request = Request.Builder().url("${BuildConfig.BACKEND_URL}/api/views/${Uri.encode(sessionId)}/qualify").post(body).build()
-                apiClient.newCall(request).execute().use { response ->
-                    val succeeded = response.isSuccessful
-                    Log.d(TAG, "View qualification response: ${response.code}")
-                    withContext(Dispatchers.Main) {
-                        if (succeeded) {
-                            viewQualified = true
-                        } else if (!isFinishing) {
-                            // Do not permanently lose a valid view after a
-                            // transient proxy, network, or rate-limit failure.
-                            window.decorView.postDelayed({ if (!viewQualified) qualifyView() }, 2000L)
-                        }
-                    }
-                }
+                if (viewSessionId == null) withContext(Dispatchers.Main) { retryViewTracking() }
             } catch (error: Exception) {
-                Log.w(TAG, "View qualification failed", error)
-                withContext(Dispatchers.Main) {
-                    if (!isFinishing) window.decorView.postDelayed({ if (!viewQualified) qualifyView() }, 2000L)
-                }
+                Log.w(TAG, "View tracking start failed", error)
+                withContext(Dispatchers.Main) { retryViewTracking() }
             }
         }
     }
 
-    private fun updateVideoMetaDetails() {
-        val durationMs = player?.duration ?: 0L
-        if (durationMs > 0) {
-            val totalSeconds = durationMs / 1000
-            val minutes = totalSeconds / 60
-            val seconds = totalSeconds % 60
-            val timeString = String.format("%d:%02d min", minutes, seconds)
-            tvVideoMetaDetails.text = timeString
-        } else {
-            tvVideoMetaDetails.text = "Preparing video…"
+    private fun retryViewTracking() {
+        if (viewSessionId != null || viewTrackingRetries >= 3 || isFinishing || isDestroyed) return
+        viewTrackingRetries++
+        window.decorView.postDelayed({
+            if (!isFinishing && !isDestroyed && viewSessionId == null) {
+                viewTrackingStarted = false
+                startViewTrackingIfNeeded()
+            }
+        }, 5_000L)
+    }
+
+    private fun startViewTrackingIfNeeded() {
+        val slug = linkSlug?.takeIf { it.isNotBlank() } ?: return
+        if (viewTrackingStarted || localVideoUri != null) return
+        viewTrackingStarted = true
+        startViewTracking(slug)
+    }
+
+    private fun qualifyView() {
+        val sessionId = viewSessionId ?: return
+        viewQualified = true
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val body = org.json.JSONObject().put("viewToken", viewToken).toString().toRequestBody("application/json".toMediaType())
+                val request = Request.Builder().url("${BuildConfig.BACKEND_URL}/api/views/${Uri.encode(sessionId)}/qualify").post(body).build()
+                apiClient.newCall(request).execute().use { response -> Log.d(TAG, "View qualification response: ${response.code}") }
+            } catch (error: Exception) { Log.w(TAG, "View qualification failed", error) }
         }
+    }
+
+    private fun updateVideoMetaDetails() {
+        tvVideoMetaDetails.text = resolvedVideoTitle
     }
 
     /**
@@ -556,6 +725,7 @@ class VideoPlayerActivity : AppCompatActivity() {
         fullscreenPlayerContainer.visibility = View.GONE
         btnFullscreen.visibility = View.GONE
         webViewPlayer.visibility = View.VISIBLE
+        btnTopBack.visibility = View.VISIBLE
         loadingOverlay.visibility = View.VISIBLE
 
         // Configure WebView
@@ -565,23 +735,11 @@ class VideoPlayerActivity : AppCompatActivity() {
             mediaPlaybackRequiresUserGesture = false
             loadWithOverviewMode = true
             useWideViewPort = true
-            allowFileAccess = true
-            allowContentAccess = true
-            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            allowFileAccess = false
+            allowContentAccess = false
+            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             cacheMode = WebSettings.LOAD_DEFAULT
         }
-
-        // ExoPlayer can fall back to WebView for streams that fail native
-        // playback. Keep the same server-side view qualification contract in
-        // that path instead of silently losing the view.
-        webViewPlayer.addJavascriptInterface(object {
-            @JavascriptInterface
-            fun onVideoProgress(positionSeconds: Double) {
-                if (positionSeconds >= 5.0) {
-                    runOnUiThread { if (!viewQualified) qualifyView() }
-                }
-            }
-        }, "NightboxViewTracker")
 
         webViewPlayer.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
@@ -591,10 +749,14 @@ class VideoPlayerActivity : AppCompatActivity() {
             }
 
             override fun onReceivedError(
-                view: WebView?, errorCode: Int, description: String?, failingUrl: String?
+                view: WebView?,
+                request: android.webkit.WebResourceRequest?,
+                error: android.webkit.WebResourceError?
             ) {
-                super.onReceivedError(view, errorCode, description, failingUrl)
-                showError("Failed to load video: $description")
+                super.onReceivedError(view, request, error)
+                if (request?.isForMainFrame == true) {
+                    showError("Failed to load video: ${error?.description ?: "Network error"}")
+                }
             }
         }
 
@@ -608,8 +770,8 @@ class VideoPlayerActivity : AppCompatActivity() {
                 customViewCallback = callback
                 isFullscreen = true
 
-                adBannerContainerSticky.visibility = View.GONE
-                adBannerContainerPlayer.visibility = View.GONE
+                adBannerContainerTop.visibility = View.GONE
+                // Player banner removed for compliance
 
                 requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                 hideSystemBars()
@@ -622,8 +784,8 @@ class VideoPlayerActivity : AppCompatActivity() {
             override fun onHideCustomView() {
                 isFullscreen = false
 
-                adBannerContainerSticky.visibility = View.VISIBLE
-                adBannerContainerPlayer.visibility = View.VISIBLE
+                adBannerContainerTop.visibility = View.VISIBLE
+                // Player banner removed for compliance
 
                 val rootLayout = findViewById<FrameLayout>(R.id.rootLayout)
                 customView?.let { rootLayout.removeView(it) }
@@ -638,7 +800,7 @@ class VideoPlayerActivity : AppCompatActivity() {
             }
         }
 
-        val streamUrl = remoteStreamUrl ?: remoteHlsUrl ?: run {
+        val streamUrl = remoteHlsUrl ?: run {
             showError("Video stream URL is unavailable.")
             return
         }
@@ -670,16 +832,8 @@ class VideoPlayerActivity : AppCompatActivity() {
             </head>
             <body>
                 <div class="video-container">
-                    <video id="nightboxVideo" src="$streamUrl" autoplay controls playsinline></video>
+                    <video src="$streamUrl" autoplay controls playsinline></video>
                 </div>
-                <script>
-                    const video = document.getElementById('nightboxVideo');
-                    video.addEventListener('timeupdate', () => {
-                        if (window.NightboxViewTracker) {
-                            window.NightboxViewTracker.onVideoProgress(video.currentTime || 0);
-                        }
-                    });
-                </script>
             </body>
             </html>
         """.trimIndent()
@@ -703,14 +857,14 @@ class VideoPlayerActivity : AppCompatActivity() {
 
         // Switch player to fullscreen view
         playerView.player = null
-        imaAdsLoader?.setPlayer(null)
         playerViewFullscreen.player = player
-        imaAdsLoader?.setPlayer(player)
+        playerViewFullscreen.resizeMode = resizeModes[currentResizeModeIndex]
+        setupAdvanceControls(playerViewFullscreen)
 
         // Show fullscreen container, hide main content and sticky ads
         fullscreenPlayerContainer.visibility = View.VISIBLE
         mainContent.visibility = View.GONE
-        adBannerContainerSticky.visibility = View.GONE
+        adBannerContainerTop.visibility = View.GONE
 
         // Go landscape
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
@@ -729,13 +883,13 @@ class VideoPlayerActivity : AppCompatActivity() {
 
         // Switch player back to normal view
         playerViewFullscreen.player = null
-        imaAdsLoader?.setPlayer(null)
         playerView.player = player
-        imaAdsLoader?.setPlayer(player)
+        playerView.resizeMode = resizeModes[currentResizeModeIndex]
+        setupAdvanceControls(playerView)
 
         // Show main content and sticky ads, hide fullscreen container
         mainContent.visibility = View.VISIBLE
-        adBannerContainerSticky.visibility = View.VISIBLE
+        adBannerContainerTop.visibility = View.VISIBLE
         fullscreenPlayerContainer.visibility = View.GONE
 
         // Back to portrait
@@ -769,6 +923,7 @@ class VideoPlayerActivity : AppCompatActivity() {
         playerView.visibility = View.GONE
         webViewPlayer.visibility = View.GONE
         errorOverlay.visibility = View.VISIBLE
+        btnTopBack.visibility = View.VISIBLE
         tvErrorMessage.text = message
     }
 
@@ -807,70 +962,224 @@ class VideoPlayerActivity : AppCompatActivity() {
     }
 
     private fun loadBannerAd(container: FrameLayout) {
-        val adView = AdView(this)
-        
-        // Calculate adaptive banner size
-        val displayMetrics = resources.displayMetrics
-        val adWidthPixels = displayMetrics.widthPixels.toFloat()
-        val density = displayMetrics.density
-        val adWidth = (adWidthPixels / density).toInt()
-        val adSize = AdSize.getCurrentOrientationAnchoredAdaptiveBannerAdSize(this, adWidth)
-        
-        adView.setAdSize(adSize)
-        adView.adUnitId = "ca-app-pub-2964717174761820/7251270834" // Real ID
-        container.removeAllViews()
-        container.addView(adView)
-        adView.loadAd(AdRequest.Builder().build())
-    }
-
-    private fun loadNativeAd() {
-        val adLoader = AdLoader.Builder(this, "ca-app-pub-2964717174761820/2042116691") // Real ID
-            .forNativeAd { ad: NativeAd ->
-                nativeAd?.destroy()
-                nativeAd = ad
-                val adView = layoutInflater.inflate(R.layout.layout_native_ad, null) as NativeAdView
-                populateNativeAdView(ad, adView)
-                nativeAdContainerBottom.removeAllViews()
-                nativeAdContainerBottom.addView(adView)
-                nativeAdContainerBottom.background = null // Remove placeholder background
+        // video player banner: ca-app-pub-2964717174761820/7251270834
+        AdComponents.loadSmartCollapsibleBanner(
+            this,
+            container,
+            isTop = true,
+            adUnitId = AdManager.BANNER_HOME_VIDEO_PLAYER,
+            screenKey = "video_player",
+            onLoaded = {
+                bannerAdView = container.getChildAt(0) as? com.google.android.gms.ads.AdView
             }
-            .build()
-
-        adLoader.loadAd(AdRequest.Builder().build())
+        )
     }
 
-    private fun populateNativeAdView(nativeAd: NativeAd, adView: NativeAdView) {
-        adView.headlineView = adView.findViewById(R.id.ad_headline)
-        adView.bodyView = adView.findViewById(R.id.ad_body)
-        adView.callToActionView = adView.findViewById(R.id.ad_call_to_action)
-        adView.iconView = adView.findViewById(R.id.ad_app_icon)
-        adView.mediaView = adView.findViewById(R.id.ad_media)
+    private fun loadMrecAdUnderPlayer() {
+        if (!::mrecPlayerContainer.isInitialized) return
+        // merc video player: ca-app-pub-2964717174761820/3409649938
+        AdComponents.loadMrecAd(
+            this,
+            mrecPlayerContainer,
+            adUnitId = AdManager.MREC_VIDEO_PLAYER
+        )
+    }
 
-        (adView.headlineView as TextView).text = nativeAd.headline
-        nativeAd.mediaContent?.let { adView.mediaView?.setMediaContent(it) }
+    // ──────────────────────────────────────────────
+    // Advance Player Control & Gesture Engine
+    // ──────────────────────────────────────────────
 
-        if (nativeAd.body == null) {
-            adView.bodyView?.visibility = View.INVISIBLE
-        } else {
-            adView.bodyView?.visibility = View.VISIBLE
-            (adView.bodyView as TextView).text = nativeAd.body
+    private fun showHud(message: String) {
+        tvHudText.text = message
+        tvHudTextFullscreen.text = message
+        hudOverlay.visibility = View.VISIBLE
+        hudOverlayFullscreen.visibility = View.VISIBLE
+
+        hudDismissRunnable?.let { window.decorView.removeCallbacks(it) }
+        val dismiss = Runnable {
+            hudOverlay.visibility = View.GONE
+            hudOverlayFullscreen.visibility = View.GONE
+        }
+        hudDismissRunnable = dismiss
+        window.decorView.postDelayed(dismiss, 1200L)
+    }
+
+    private fun cycleAspectRatio() {
+        currentResizeModeIndex = (currentResizeModeIndex + 1) % resizeModes.size
+        val mode = resizeModes[currentResizeModeIndex]
+        val label = resizeModeLabels[currentResizeModeIndex]
+        playerView.resizeMode = mode
+        playerViewFullscreen.resizeMode = mode
+        showHud("Aspect: $label")
+    }
+
+    private fun cyclePlaybackSpeed() {
+        currentSpeedIndex = (currentSpeedIndex + 1) % playbackSpeeds.size
+        val speed = playbackSpeeds[currentSpeedIndex]
+        player?.playbackParameters = PlaybackParameters(speed)
+        speedBeforeFastForward = speed
+        val text = "${speed}x"
+        showHud("Speed: $text")
+    }
+
+    private fun showSettingsDialog() {
+        val options = arrayOf(
+            "Playback Speed (${playbackSpeeds[currentSpeedIndex]}x)",
+            "Aspect Ratio (${resizeModeLabels[currentResizeModeIndex]})"
+        )
+        AlertDialog.Builder(this)
+            .setTitle("Player Settings")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> showSpeedSelectionDialog()
+                    1 -> cycleAspectRatio()
+                }
+            }
+            .show()
+    }
+
+    private fun showSpeedSelectionDialog() {
+        val labels = playbackSpeeds.map { "${it}x" }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Playback Speed")
+            .setSingleChoiceItems(labels, currentSpeedIndex) { dialog, which ->
+                currentSpeedIndex = which
+                val speed = playbackSpeeds[currentSpeedIndex]
+                player?.playbackParameters = PlaybackParameters(speed)
+                speedBeforeFastForward = speed
+                showHud("Speed: ${speed}x")
+                dialog.dismiss()
+            }
+            .show()
+    }
+
+    private fun setupAdvanceControls(pv: PlayerView) {
+        val bindListeners = {
+            pv.findViewById<View>(R.id.exo_settings)?.setOnClickListener {
+                showSettingsDialog()
+            }
+            pv.findViewById<View>(R.id.btnBackOverlay)?.setOnClickListener {
+                handleBackNavigation()
+            }
+            pv.findViewById<androidx.media3.ui.DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress)?.addListener(object : androidx.media3.ui.TimeBar.OnScrubListener {
+                override fun onScrubStart(timeBar: androidx.media3.ui.TimeBar, position: Long) {
+                    vibrateTick()
+                }
+                override fun onScrubMove(timeBar: androidx.media3.ui.TimeBar, position: Long) {}
+                override fun onScrubStop(timeBar: androidx.media3.ui.TimeBar, position: Long, canceled: Boolean) {
+                    vibrateTick()
+                    if (!canceled) {
+                        player?.seekTo(position)
+                    }
+                }
+            })
         }
 
-        if (nativeAd.callToAction == null) {
-            adView.callToActionView?.visibility = View.INVISIBLE
-        } else {
-            adView.callToActionView?.visibility = View.VISIBLE
-            (adView.callToActionView as Button).text = nativeAd.callToAction
+        pv.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
+            if (visibility == View.VISIBLE) {
+                bindListeners()
+            }
+        })
+        pv.post {
+            bindListeners()
         }
+    }
 
-        if (nativeAd.icon == null) {
-            adView.iconView?.visibility = View.GONE
-        } else {
-            (adView.iconView as ImageView).setImageDrawable(nativeAd.icon?.drawable)
-            adView.iconView?.visibility = View.VISIBLE
+    private fun startIndexingFragments(mediaUrl: String) {
+        // Disabled: Media3 uses HLS segments or HTTP byte ranges when seeking.
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupAdvanceGestures(view: PlayerView) {
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+
+        val gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                val width = view.width.toFloat()
+                if (width <= 0f) return false
+                val currentPos = player?.currentPosition ?: 0L
+                val duration = player?.duration ?: 0L
+                vibrateTick()
+                if (e.x < width / 2) {
+                    val target = (currentPos - 10_000L).coerceAtLeast(0L)
+                    player?.seekTo(target)
+                    showHud("-10s ⏪")
+                } else {
+                    val maxSeek = if (duration > 0L) duration else currentPos + 10_000L
+                    val target = (currentPos + 10_000L).coerceAtMost(maxSeek)
+                    player?.seekTo(target)
+                    showHud("+10s ⏩")
+                }
+                return true
+            }
+
+            override fun onLongPress(e: MotionEvent) {
+                val currentPlayer = player ?: return
+                if (!isTemporaryFastForward) {
+                    speedBeforeFastForward = currentPlayer.playbackParameters.speed
+                    currentPlayer.playbackParameters = PlaybackParameters(2.0f)
+                    isTemporaryFastForward = true
+                    showHud("2X Speed >>")
+                }
+            }
+
+            override fun onScroll(
+                e1: MotionEvent?,
+                e2: MotionEvent,
+                distanceX: Float,
+                distanceY: Float
+            ): Boolean {
+                if (e1 == null) return false
+                val width = view.width.toFloat()
+                val height = view.height.toFloat()
+                if (width <= 0f || height <= 0f) return false
+
+                if (kotlin.math.abs(distanceY) > kotlin.math.abs(distanceX)) {
+                    val delta = distanceY / height
+
+                    if (e1.x < width / 2) {
+                        // Left side: Brightness
+                        val lp = window.attributes
+                        val currentBrightness = if (lp.screenBrightness < 0f) 0.5f else lp.screenBrightness
+                        val newBrightness = (currentBrightness + delta).coerceIn(0.05f, 1.0f)
+                        lp.screenBrightness = newBrightness
+                        window.attributes = lp
+                        showHud("Brightness: ${(newBrightness * 100).toInt()}% ☀️")
+                        return true
+                    } else {
+                        // Right side: Volume
+                        audioManager?.let { am ->
+                            val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                            val curVol = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+                            val step = (delta * maxVol * 1.5f).toInt()
+                            if (step != 0) {
+                                val targetVol = (curVol + step).coerceIn(0, maxVol)
+                                am.setStreamVolume(AudioManager.STREAM_MUSIC, targetVol, 0)
+                                showHud("Volume: ${(targetVol * 100 / maxVol)}% 🔊")
+                            }
+                        }
+                        return true
+                    }
+                }
+                return false
+            }
+        })
+
+        view.setOnTouchListener { _, event ->
+            // Let bottom controls (seekbar and under-bar) handle touches cleanly without interference
+            if (view.isControllerFullyVisible && event.y > (view.height - 180)) {
+                return@setOnTouchListener false
+            }
+            val handled = gestureDetector.onTouchEvent(event)
+            if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
+                if (isTemporaryFastForward) {
+                    player?.playbackParameters = PlaybackParameters(speedBeforeFastForward)
+                    isTemporaryFastForward = false
+                    showHud("Speed: ${speedBeforeFastForward}x")
+                }
+            }
+            handled
         }
-
-        adView.setNativeAd(nativeAd)
     }
 
     // ──────────────────────────────────────────────
@@ -878,8 +1187,14 @@ class VideoPlayerActivity : AppCompatActivity() {
     // ──────────────────────────────────────────────
 
     private fun releasePlayer() {
+        indexingCall?.cancel()
+        indexingJob?.cancel()
+        indexingCall = null
+        indexingJob = null
         durationUpdateRunnable?.let { window.decorView.removeCallbacks(it) }
         durationUpdateRunnable = null
+        hudDismissRunnable?.let { window.decorView.removeCallbacks(it) }
+        hudDismissRunnable = null
         player?.let {
             it.stop()
             it.release()
@@ -899,12 +1214,18 @@ class VideoPlayerActivity : AppCompatActivity() {
         SecurityUtil.checkVpn(this)
         if (shouldResumePlayback) player?.play()
         if (usingWebView) webViewPlayer.onResume()
+        if (adBannerContainerTop.childCount == 0 || (bannerAdView != null && AdManager.canRequestCollapsible("video_player"))) {
+            loadBannerAd(adBannerContainerTop)
+        }
     }
 
     override fun onDestroy() {
         releasePlayer()
-        imaAdsLoader?.release()
-        nativeAd?.destroy()
+        AdComponents.destroyAdViews(adBannerContainerTop)
+        if (::mrecPlayerContainer.isInitialized) {
+            AdComponents.destroyAdViews(mrecPlayerContainer)
+        }
+        bannerAdView = null
         if (usingWebView) webViewPlayer.destroy()
         super.onDestroy()
     }
@@ -915,8 +1236,7 @@ class VideoPlayerActivity : AppCompatActivity() {
         super.onSaveInstanceState(outState)
     }
 
-    @Deprecated("Use onBackPressedDispatcher")
-    override fun onBackPressed() {
+    private fun handleBackNavigation() {
         if (isFullscreen) {
             if (usingWebView) {
                 webViewPlayer.evaluateJavascript("document.exitFullscreen();", null)
@@ -929,6 +1249,6 @@ class VideoPlayerActivity : AppCompatActivity() {
             webViewPlayer.goBack()
             return
         }
-        super.onBackPressed()
+        finish()
     }
 }

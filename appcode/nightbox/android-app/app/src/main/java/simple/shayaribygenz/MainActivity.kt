@@ -31,11 +31,9 @@ import android.text.style.ClickableSpan
 import android.widget.Button
 import android.widget.TextView
 import com.google.android.material.bottomsheet.BottomSheetDialog
-import com.google.android.gms.ads.AdLoader
-import com.google.android.gms.ads.nativead.NativeAd
-import com.google.android.gms.ads.nativead.NativeAdView
 import com.google.android.play.core.appupdate.AppUpdateManager
 import com.google.android.play.core.appupdate.AppUpdateManagerFactory
+import com.google.android.play.core.appupdate.AppUpdateOptions
 import com.google.android.play.core.install.model.AppUpdateType
 import com.google.android.play.core.install.model.UpdateAvailability
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -47,6 +45,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import simple.shayaribygenz.UiExtensions.applyPressScale
 
 class MainActivity : AppCompatActivity() {
 
@@ -55,27 +54,50 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnPasteLink: ImageView
     private lateinit var btnWatch: FrameLayout
     private lateinit var adBannerContainer: FrameLayout
+    private lateinit var chipClipboardLink: LinearLayout
+    private var lastCheckedClipText: String? = null
 
     private lateinit var btnSettings: ImageView
     private lateinit var prefs: SharedPreferences
-    private var nativeAd: NativeAd? = null
+    private var bannerAdView: AdView? = null
     private var deepLinkProcessed = false
-    private val apiClient = OkHttpClient()
-    private lateinit var feedAdapter: FeedAdapter
-    
+    private val apiClient get() = NetworkClient.client
+    private val videoPickerLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            val videoUri = result.data?.data
+            if (videoUri != null) {
+                try {
+                    contentResolver.takePersistableUriPermission(
+                        videoUri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                } catch (_: Exception) { }
+
+                val intent = Intent(this, VideoPlayerActivity::class.java)
+                intent.putExtra("local_video_uri", videoUri.toString())
+                startActivity(intent)
+            }
+        }
+    }
     private lateinit var appUpdateManager: AppUpdateManager
-    private val UPDATE_REQUEST_CODE = 1002
+    private val appUpdateLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode != RESULT_OK) {
+            // Update cancelled or failed - continue gracefully
+        }
+    }
 
     // Navigation Views
     private lateinit var homeSection: View
-    private lateinit var feedSection: androidx.viewpager2.widget.ViewPager2
-    private lateinit var tvFeedEmpty: TextView
+    private lateinit var downloadsSection: LinearLayout
     private lateinit var navHome: LinearLayout
-    private lateinit var navFeed: LinearLayout
+    private lateinit var navDownloads: LinearLayout
     private lateinit var ivNavHome: ImageView
-    private lateinit var ivNavFeed: ImageView
+    private lateinit var ivNavDownloads: ImageView
     private lateinit var tvNavHome: TextView
-    private lateinit var tvNavFeed: TextView
+    private lateinit var tvNavDownloads: TextView
 
     companion object {
         private const val PREFS_NAME = "nightbox_prefs"
@@ -110,23 +132,34 @@ class MainActivity : AppCompatActivity() {
         
         // Initialize Navigation Views
         homeSection = findViewById(R.id.homeSection)
-        feedSection = findViewById(R.id.feedSection)
-        tvFeedEmpty = findViewById(R.id.tvFeedEmpty)
+        downloadsSection = findViewById(R.id.downloadsSection)
         navHome = findViewById(R.id.navHome)
-        navFeed = findViewById(R.id.navFeed)
+        navDownloads = findViewById(R.id.navDownloads)
         ivNavHome = findViewById(R.id.ivNavHome)
-        ivNavFeed = findViewById(R.id.ivNavFeed)
+        ivNavDownloads = findViewById(R.id.ivNavDownloads)
         tvNavHome = findViewById(R.id.tvNavHome)
-        tvNavFeed = findViewById(R.id.tvNavFeed)
+        tvNavDownloads = findViewById(R.id.tvNavDownloads)
 
-        // Feed content is loaded from the connected backend, not bundled demo links.
-        feedAdapter = FeedAdapter(emptyList())
-        feedSection.adapter = feedAdapter
-        loadBackendFeed()
+        // Floating Smart Clipboard Pill
+        chipClipboardLink = findViewById(R.id.chipClipboardLink)
+        chipClipboardLink.applyPressScale {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            val clipText = clipboard?.primaryClip?.getItemAt(0)?.text?.toString()?.trim()
+            if (!clipText.isNullOrEmpty()) {
+                etPasteLink.setText(clipText)
+                etPasteLink.setSelection(etPasteLink.text.length)
+                chipClipboardLink.visibility = View.GONE
+                btnWatch.performClick()
+            }
+        }
 
-        // Set Navigation Listeners
-        navHome.setOnClickListener { showHome() }
-        navFeed.setOnClickListener { showFeed() }
+        findViewById<Button>(R.id.btnDownloadsBackHome)?.applyPressScale {
+            showHome()
+        }
+
+        // Set Navigation Listeners with press-scale feedback
+        navHome.applyPressScale { showHome() }
+        navDownloads.applyPressScale { showDownloads() }
 
         // Check for first launch
         if (prefs.getBoolean("first_launch", true)) {
@@ -136,9 +169,8 @@ class MainActivity : AppCompatActivity() {
         // Load banner ad — wait for AdMob SDK init to complete first
         loadAds()
 
-
         // Settings Bottom Sheet
-        btnSettings.setOnClickListener {
+        btnSettings.applyPressScale {
             showSettingsBottomSheet()
         }
 
@@ -158,12 +190,12 @@ class MainActivity : AppCompatActivity() {
         })
 
         // Clear button click
-        btnClearLink.setOnClickListener {
+        btnClearLink.applyPressScale {
             etPasteLink.text.clear()
         }
 
         // Paste button click
-        btnPasteLink.setOnClickListener {
+        btnPasteLink.applyPressScale {
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             if (clipboard.hasPrimaryClip() && (clipboard.primaryClip?.itemCount ?: 0) > 0) {
                 val pastedText = clipboard.primaryClip?.getItemAt(0)?.text
@@ -176,12 +208,12 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Watch button click — resolve and play NightBox links immediately.
-        btnWatch.setOnClickListener {
+        // Watch button click with modern press feedback
+        btnWatch.applyPressScale {
             val input = etPasteLink.text.toString().trim()
             if (input.isEmpty()) {
                 Toast.makeText(this, "Please paste a NightBox video link", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
+                return@applyPressScale
             }
 
             val shareSlug = extractLinkSlug(input)
@@ -189,27 +221,27 @@ class MainActivity : AppCompatActivity() {
             if (shareSlug != null && !isWatchPath(input)) {
                 resolveShareLink(shareSlug)
             } else if (videoId != null) {
-                openVideoPlayer(videoId, shareSlug)
+                openFileInfo(videoId, shareSlug)
             } else {
                 Toast.makeText(this, getString(R.string.error_invalid_link), Toast.LENGTH_LONG).show()
             }
         }
 
         // Play local files button
-        findViewById<android.widget.Button>(R.id.btnPlayLocal)?.setOnClickListener {
+        findViewById<android.widget.Button>(R.id.btnPlayLocal)?.applyPressScale {
             openGalleryPicker()
         }
 
         // Open Gallery link
-        findViewById<LinearLayout>(R.id.btnOpenGallery)?.setOnClickListener {
+        findViewById<View>(R.id.btnOpenGallery)?.applyPressScale {
             openGalleryPicker()
         }
 
         // Social section click listeners
-        findViewById<LinearLayout>(R.id.btnJoinTelegram)?.setOnClickListener {
+        findViewById<LinearLayout>(R.id.btnJoinTelegram)?.applyPressScale {
             openTelegram()
         }
-        findViewById<LinearLayout>(R.id.btnJoinWhatsApp)?.setOnClickListener {
+        findViewById<LinearLayout>(R.id.btnJoinWhatsApp)?.applyPressScale {
             openWhatsApp()
         }
 
@@ -217,14 +249,15 @@ class MainActivity : AppCompatActivity() {
         if (savedInstanceState == null) {
             handleDeepLink(intent)
         }
-        
-        // Preload rewarded ads removed
     }
 
     override fun onResume() {
         super.onResume()
         SecurityUtil.checkVpn(this)
-        loadAds()
+        checkClipboardForNightBoxLink()
+        if (adBannerContainer.childCount == 0 || (bannerAdView != null && AdManager.canRequestCollapsible("home"))) {
+            loadAds()
+        }
         
         // Resume update if it was already in progress
         appUpdateManager.appUpdateInfo.addOnSuccessListener { appUpdateInfo ->
@@ -232,9 +265,8 @@ class MainActivity : AppCompatActivity() {
                 try {
                     appUpdateManager.startUpdateFlowForResult(
                         appUpdateInfo,
-                        AppUpdateType.IMMEDIATE,
-                        this,
-                        UPDATE_REQUEST_CODE
+                        appUpdateLauncher,
+                        AppUpdateOptions.defaultOptions(AppUpdateType.IMMEDIATE)
                     )
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -262,8 +294,6 @@ class MainActivity : AppCompatActivity() {
                 intent.data = null
                 intent.action = null
                 setIntent(Intent())
-                // A verified App Link should enter the app's player directly;
-                // do not send the user through the old browser/info detour.
                 openVideoPlayer(videoId, data.getQueryParameter("link"))
             } else if (pathSegments.size >= 2 && pathSegments[0] == "l") {
                 val slug = pathSegments[1]
@@ -283,11 +313,13 @@ class MainActivity : AppCompatActivity() {
                     .url("${BuildConfig.BACKEND_URL}/api/links/${Uri.encode(slug)}")
                     .get()
                     .build()
-                val response = apiClient.newCall(request).execute()
-                if (!response.isSuccessful) throw IllegalStateException("Share link not found")
-                val link = JSONObject(response.body?.string().orEmpty()).getJSONObject("link")
-                val videoId = link.getString("videoId")
-                withContext(Dispatchers.Main) { openVideoPlayer(videoId, slug) }
+                apiClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) throw IllegalStateException("Share link not found")
+                    val link = JSONObject(response.body?.string().orEmpty()).getJSONObject("link")
+                    val videoId = link.getString("videoId")
+                    val title = link.optString("title", "")
+                    withContext(Dispatchers.Main) { openVideoPlayer(videoId, slug, title) }
+                }
             } catch (_: Exception) {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@MainActivity, "This NightBox link is not available", Toast.LENGTH_LONG).show()
@@ -347,10 +379,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun openFileInfo(videoId: String, linkSlug: String? = null) {
+    private fun openFileInfo(videoId: String, linkSlug: String? = null, videoTitle: String? = null) {
         val intent = Intent(this, FileInfoActivity::class.java)
         intent.putExtra("video_id", videoId)
         linkSlug?.let { intent.putExtra("link_slug", it) }
+        videoTitle?.let { intent.putExtra("video_title", it) }
         intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
         startActivity(intent)
     }
@@ -360,11 +393,11 @@ class MainActivity : AppCompatActivity() {
      * opened FileInfoActivity first, fetched metadata twice, and enforced a
      * seven-second gate before playback could begin.
      */
-    private fun openVideoPlayer(videoId: String, linkSlug: String? = null) {
+    private fun openVideoPlayer(videoId: String, linkSlug: String? = null, videoTitle: String? = null) {
         val intent = Intent(this, VideoPlayerActivity::class.java)
         intent.putExtra("video_id", videoId)
         linkSlug?.let { intent.putExtra("link_slug", it) }
-        intent.putExtra("show_vast_ad", false)
+        videoTitle?.takeIf { it.isNotBlank() }?.let { intent.putExtra("video_title", it) }
         intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
         startActivity(intent)
     }
@@ -375,38 +408,13 @@ class MainActivity : AppCompatActivity() {
             type = "video/*"
         }
         try {
-            @Suppress("DEPRECATION")
-            startActivityForResult(intent, REQUEST_VIDEO_PICK)
+            videoPickerLauncher.launch(intent)
         } catch (e: Exception) {
             Toast.makeText(this, "No file manager found", Toast.LENGTH_SHORT).show()
         }
     }
 
-    @Deprecated("Use Activity Result API")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_VIDEO_PICK && resultCode == RESULT_OK) {
-            val videoUri = data?.data
-            if (videoUri != null) {
-                // Grant persistent URI permission
-                try {
-                    contentResolver.takePersistableUriPermission(
-                        videoUri, Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    )
-                } catch (_: Exception) { }
 
-                val intent = Intent(this, VideoPlayerActivity::class.java)
-                intent.putExtra("local_video_uri", videoUri.toString())
-                startActivity(intent)
-            }
-        }
-        if (requestCode == UPDATE_REQUEST_CODE) {
-            if (resultCode != RESULT_OK) {
-                // UPDATE IS COMPULSORY: If user cancels or it fails, trigger it again immediately
-                checkForAppUpdate()
-            }
-        }
-    }
 
     private fun openTelegram() {
         try {
@@ -438,23 +446,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadBannerAd() {
-        val adView = AdView(this)
-        
-        // Calculate adaptive banner size
-        val displayMetrics = resources.displayMetrics
-        val adWidthPixels = displayMetrics.widthPixels.toFloat()
-        val density = displayMetrics.density
-        val adWidth = (adWidthPixels / density).toInt()
-        val adSize = AdSize.getCurrentOrientationAnchoredAdaptiveBannerAdSize(this, adWidth)
-        
-        adView.setAdSize(adSize)
-        // Real banner ad unit ID
-        adView.adUnitId = "ca-app-pub-2964717174761820/7251270834"
-        adBannerContainer.removeAllViews()
-        adBannerContainer.addView(adView)
-
-        val adRequest = AdRequest.Builder().build()
-        adView.loadAd(adRequest)
+        AdComponents.loadSmartCollapsibleBanner(
+            this,
+            adBannerContainer,
+            isTop = true,
+            adUnitId = AdManager.BANNER_HOME_VIDEO_PLAYER,
+            screenKey = "home",
+            onLoaded = {
+                bannerAdView = adBannerContainer.getChildAt(0) as? com.google.android.gms.ads.AdView
+            }
+        )
     }
 
     private fun applyTheme(isDark: Boolean, recreateActivity: Boolean) {
@@ -556,68 +557,9 @@ class MainActivity : AppCompatActivity() {
         startActivity(intent)
     }
 
-
-
-    private fun populateNativeAdView(nativeAd: NativeAd, adView: NativeAdView) {
-        adView.headlineView = adView.findViewById(R.id.ad_headline)
-        adView.bodyView = adView.findViewById(R.id.ad_body)
-        adView.callToActionView = adView.findViewById(R.id.ad_call_to_action)
-        adView.iconView = adView.findViewById(R.id.ad_app_icon)
-        adView.mediaView = adView.findViewById(R.id.ad_media)
-
-        (adView.headlineView as TextView).text = nativeAd.headline
-        nativeAd.mediaContent?.let { adView.mediaView?.setMediaContent(it) }
-
-        if (nativeAd.body == null) {
-            adView.bodyView?.visibility = View.INVISIBLE
-        } else {
-            adView.bodyView?.visibility = View.VISIBLE
-            (adView.bodyView as TextView).text = nativeAd.body
-        }
-
-        if (nativeAd.callToAction == null) {
-            adView.callToActionView?.visibility = View.INVISIBLE
-        } else {
-            adView.callToActionView?.visibility = View.VISIBLE
-            (adView.callToActionView as Button).text = nativeAd.callToAction
-        }
-
-        if (nativeAd.icon == null) {
-            adView.iconView?.visibility = View.GONE
-        } else {
-            (adView.iconView as ImageView).setImageDrawable(nativeAd.icon?.drawable)
-            adView.iconView?.visibility = View.VISIBLE
-        }
-
-        adView.setNativeAd(nativeAd)
-    }
-
-    private fun loadBackendFeed() {
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val request = Request.Builder().url("${BuildConfig.BACKEND_URL}/api/feed?limit=30").get().build()
-                val links = apiClient.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) emptyList() else {
-                        val videos = org.json.JSONObject(response.body?.string().orEmpty()).optJSONArray("videos")
-                        (0 until (videos?.length() ?: 0)).mapNotNull { index -> videos?.optJSONObject(index)?.optString("embedUrl")?.takeIf { it.isNotBlank() } }
-                    }
-                }
-                withContext(Dispatchers.Main) {
-                    feedAdapter.submitList(links)
-                    tvFeedEmpty.visibility = if (links.isEmpty()) View.VISIBLE else View.GONE
-                }
-            } catch (_: Exception) {
-                withContext(Dispatchers.Main) {
-                    feedAdapter.submitList(emptyList())
-                    tvFeedEmpty.text = "Reels are temporarily unavailable.\nPlease start the NightBox backend and try again."
-                    tvFeedEmpty.visibility = View.VISIBLE
-                }
-            }
-        }
-    }
-
     override fun onDestroy() {
-        nativeAd?.destroy()
+        AdComponents.destroyAdViews(adBannerContainer)
+        bannerAdView = null
         super.onDestroy()
     }
 
@@ -630,9 +572,8 @@ class MainActivity : AppCompatActivity() {
                 try {
                     appUpdateManager.startUpdateFlowForResult(
                         appUpdateInfo,
-                        AppUpdateType.IMMEDIATE,
-                        this,
-                        UPDATE_REQUEST_CODE
+                        appUpdateLauncher,
+                        AppUpdateOptions.defaultOptions(AppUpdateType.IMMEDIATE)
                     )
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -643,32 +584,68 @@ class MainActivity : AppCompatActivity() {
 
     private fun showHome() {
         homeSection.visibility = View.VISIBLE
-        feedSection.visibility = View.GONE
-        tvFeedEmpty.visibility = View.GONE
+        downloadsSection.visibility = View.GONE
         
+        navHome.setBackgroundResource(R.drawable.bg_nav_active_capsule)
         ivNavHome.setColorFilter(getColor(R.color.accent_violet))
         tvNavHome.setTextColor(getColor(R.color.accent_violet))
         tvNavHome.setTypeface(null, android.graphics.Typeface.BOLD)
         
-        ivNavFeed.setColorFilter(getColor(R.color.text_secondary_dark))
-        tvNavFeed.setTextColor(getColor(R.color.text_secondary_dark))
-        tvNavFeed.setTypeface(null, android.graphics.Typeface.NORMAL)
+        navDownloads.background = null
+        val inactiveColor = android.graphics.Color.parseColor("#80FFFFFF")
+        ivNavDownloads.setColorFilter(inactiveColor)
+        tvNavDownloads.setTextColor(inactiveColor)
+        tvNavDownloads.setTypeface(null, android.graphics.Typeface.NORMAL)
+
+        if (adBannerContainer.childCount == 0 && AdManager.canRequestCollapsible("home")) {
+            loadAds()
+        }
     }
 
-    private fun showFeed() {
+    private fun showDownloads() {
         homeSection.visibility = View.GONE
-        feedSection.visibility = View.VISIBLE
-        tvFeedEmpty.visibility = if (feedAdapter.itemCount == 0) View.VISIBLE else View.GONE
+        downloadsSection.visibility = View.VISIBLE
         
-        ivNavFeed.setColorFilter(getColor(R.color.accent_violet))
-        tvNavFeed.setTextColor(getColor(R.color.accent_violet))
-        tvNavFeed.setTypeface(null, android.graphics.Typeface.BOLD)
+        navDownloads.setBackgroundResource(R.drawable.bg_nav_active_capsule)
+        ivNavDownloads.setColorFilter(getColor(R.color.accent_violet))
+        tvNavDownloads.setTextColor(getColor(R.color.accent_violet))
+        tvNavDownloads.setTypeface(null, android.graphics.Typeface.BOLD)
         
-        ivNavHome.setColorFilter(getColor(R.color.text_secondary_dark))
-        tvNavHome.setTextColor(getColor(R.color.text_secondary_dark))
+        navHome.background = null
+        val inactiveColor = android.graphics.Color.parseColor("#80FFFFFF")
+        ivNavHome.setColorFilter(inactiveColor)
+        tvNavHome.setTextColor(inactiveColor)
         tvNavHome.setTypeface(null, android.graphics.Typeface.NORMAL)
+
+        Toast.makeText(this, "Downloads feature coming soon!", Toast.LENGTH_SHORT).show()
+
+        if (adBannerContainer.childCount == 0 && AdManager.canRequestCollapsible("home")) {
+            loadAds()
+        }
     }
 
-    // Deprecated Downloads feature removed.
-
+    private fun checkClipboardForNightBoxLink() {
+        try {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+            if (clipboard.hasPrimaryClip() && (clipboard.primaryClip?.itemCount ?: 0) > 0) {
+                val clipText = clipboard.primaryClip?.getItemAt(0)?.text?.toString()?.trim().orEmpty()
+                if (clipText.isNotEmpty() && clipText != lastCheckedClipText) {
+                    val isCandidate = clipText.contains("nightbox", ignoreCase = true) ||
+                            clipText.contains("/watch/") ||
+                            clipText.contains("/l/")
+                    val alreadyInInput = etPasteLink.text.toString().trim() == clipText
+                    if (isCandidate && !alreadyInInput) {
+                        val vid = extractVideoId(clipText)
+                        val slug = extractLinkSlug(clipText)
+                        if (vid != null || slug != null) {
+                            lastCheckedClipText = clipText
+                            chipClipboardLink.visibility = View.VISIBLE
+                            return
+                        }
+                    }
+                }
+            }
+            chipClipboardLink.visibility = View.GONE
+        } catch (_: Exception) {}
+    }
 }

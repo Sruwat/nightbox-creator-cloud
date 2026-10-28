@@ -1,6 +1,5 @@
 <resources>
     <string name="app_name">NightBox : video player</string>
-    <string name="facebook_app_id">977476141884984</string>
     <string name="app_tagline">Video Streaming</string>
 
     <!-- Home Screen -->
@@ -42,5 +41,9 @@
     <string name="no_videos_yet">No videos yet</string>
     <string name="settings">Settings</string>
     <string name="theme_toggle">Toggle Theme</string>
+    <string name="downloads">Downloads</string>
+    <string name="downloads_coming_soon">Downloads Coming Soon</string>
+    <string name="downloads_coming_soon_desc">Offline video saving &amp; background downloading will be available in an upcoming update.</string>
+    <string name="back_to_home">Back to Home</string>
     <string name="footer_text">NightBox : video player v4.1.4 • Video Streaming</string>
 </resources>
