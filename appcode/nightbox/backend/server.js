@@ -943,7 +943,12 @@ function enqueueTrackedTranscode(job) {
 }
 
 function ensureHlsForLegacyVideo(videoId, playback) {
-  if (!HLS_TRANSCODE_ENABLED || !playback || playback.hlsUrl || playback.playbackStatus === 'failed') return playback;
+  if (!HLS_TRANSCODE_ENABLED || !playback || playback.playbackStatus === 'failed') return playback;
+  // A Pull Zone hostname can be replaced without changing the stored HLS
+  // object. Always publish the current configured host for local media.
+  if (playback.hlsUrl) return BUNNY_LOCAL_STORAGE
+    ? { ...playback, hlsUrl: bunny.getHlsUrl(videoId) }
+    : playback;
   if (playback.playbackStatus === 'ready') {
     store.db.prepare(`
       UPDATE videos SET playback_status = 'processing', playback_error = NULL

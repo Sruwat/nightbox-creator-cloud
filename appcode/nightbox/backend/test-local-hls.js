@@ -82,7 +82,7 @@ async function main() {
   assert.equal(fs.readFileSync(path.join(mediaDir, 'hls', videoId, 'segment_00000.ts'), 'utf8'), 'segment');
   assert.match(bunny.getHlsUrl(videoId), /\/nightbox\/hls\/[^/]+\/master\.m3u8$/);
 
-  const seed = spawnSync(process.execPath, ['-e', `const db=require('./database');db.createVideo({id:'${videoId}',title:'Legacy video',status:'active',playbackStatus:'ready',watchUrl:'https://example.test/watch/${videoId}',embedUrl:'https://example.test/${videoId}.mp4'});db.createVideo({id:'${readyVideoId}',title:'Processed video',status:'active',playbackStatus:'ready',hlsUrl:'https://cdn.example.test/nightbox/hls/${readyVideoId}/master.m3u8',watchUrl:'https://example.test/watch/${readyVideoId}',embedUrl:'https://example.test/${readyVideoId}.mp4'});db.createVideo({id:'${interruptedVideoId}',title:'Interrupted video',status:'active',playbackStatus:'processing',watchUrl:'https://example.test/watch/${interruptedVideoId}',embedUrl:'https://example.test/${interruptedVideoId}.mp4'})`], {
+  const seed = spawnSync(process.execPath, ['-e', `const db=require('./database');db.createVideo({id:'${videoId}',title:'Legacy video',status:'active',playbackStatus:'ready',watchUrl:'https://example.test/watch/${videoId}',embedUrl:'https://example.test/${videoId}.mp4'});db.createVideo({id:'${readyVideoId}',title:'Processed video',status:'active',playbackStatus:'ready',hlsUrl:'https://retired-cdn.example.test/nightbox/hls/${readyVideoId}/master.m3u8',watchUrl:'https://example.test/watch/${readyVideoId}',embedUrl:'https://example.test/${readyVideoId}.mp4'});db.createVideo({id:'${interruptedVideoId}',title:'Interrupted video',status:'active',playbackStatus:'processing',watchUrl:'https://example.test/watch/${interruptedVideoId}',embedUrl:'https://example.test/${interruptedVideoId}.mp4'})`], {
     cwd: __dirname, env, encoding: 'utf8',
   });
   assert.equal(seed.status, 0, seed.stderr);
@@ -94,7 +94,7 @@ async function main() {
   try {
     const ready = await waitFor(port, 200, readyVideoId);
     assert.equal(ready.status, 200);
-    assert.match(ready.body.video.hlsUrl, /\/master\.m3u8$/);
+    assert.equal(ready.body.video.hlsUrl, `https://cdn.example.test/nightbox/hls/${readyVideoId}/master.m3u8`);
     assert.equal(ready.body.video.streamUrl, `https://cdn.example.test/nightbox/${readyVideoId}.mp4`);
     assert.match(ready.body.video.originHlsUrl, /\/nightbox\/hls\/[^/]+\/master\.m3u8$/);
     // A restart must leave interrupted work idle until its video is requested.
