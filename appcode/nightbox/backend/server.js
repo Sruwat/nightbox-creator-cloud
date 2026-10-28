@@ -2038,10 +2038,23 @@ app.get('/video/:id', async (req, res) => {
       res.setHeader('Retry-After', '5');
       return res.status(202).json({ error: 'Video is still processing', code: 'VIDEO_PROCESSING', playbackStatus: playback.playbackStatus || 'processing' });
     }
-    const v = await bunny.getVideo(videoId);
-    // Return the direct CDN URLs without an MP4 HEAD probe on the playback
-    // path. That probe can add several seconds and send the app to the proxy.
-    const cdnUrl = process.env.BUNNY_CDN_HOST ? bunny.getDirectPlayUrl(videoId) : null;
+    // Do not make playback depend on a Bunny Storage HEAD request. Existing
+    // uploads already have a verified HLS URL in the database, and a missing
+    // storage-zone credential must not turn a playable CDN video into a 404.
+    const storedVideo = store.db.prepare(`
+      SELECT title, status, file_size AS fileSize, created_at AS createdAt, embed_url AS embedUrl
+      FROM videos WHERE id = ?
+    `).get(videoId) || {};
+    const v = {
+      guid: videoId,
+      title: storedVideo.title || 'NightBox Video',
+      status: storedVideo.status || 'active',
+      storageSize: Number(storedVideo.fileSize || 0),
+      dateUploaded: storedVideo.createdAt || null,
+    };
+    const cdnUrl = playback.hlsUrl
+      ? playback.hlsUrl.replace(/\/hls\/[^/]+\/master\.m3u8$/i, `/${String(process.env.BUNNY_STORAGE_PREFIX || 'nightbox').replace(/^\/+|\/+$/g, '')}/${videoId}.mp4`)
+      : (storedVideo.embedUrl || null);
     const originStreamUrl = `${PUBLIC_API_URL}/video/${videoId}/stream`;
     const originHlsUrl = playback.hlsUrl && BUNNY_LOCAL_STORAGE
       ? `${PUBLIC_API_URL}/nightbox/hls/${videoId}/master.m3u8`
@@ -2062,7 +2075,7 @@ app.get('/video/:id', async (req, res) => {
         cdnUrl,
         // Keep the Bunny iframe contract for existing feed embeds; native
         // playback clients use cdnUrl/hlsUrl below.
-        embedUrl: BUNNY_LOCAL_STORAGE ? cdnUrl || originStreamUrl : bunny.getEmbedUrl(videoId),
+        embedUrl: storedVideo.embedUrl || cdnUrl || originStreamUrl,
         hlsUrl: playback?.hlsUrl || cdnUrl || originStreamUrl,
         originHlsUrl,
         playbackStatus: playback?.hlsUrl ? 'ready' : (playback?.playbackStatus || 'ready'),
