@@ -2052,9 +2052,14 @@ app.get('/video/:id', async (req, res) => {
       storageSize: Number(storedVideo.fileSize || 0),
       dateUploaded: storedVideo.createdAt || null,
     };
-    const cdnUrl = playback.hlsUrl
-      ? playback.hlsUrl.replace(/\/hls\/[^/]+\/master\.m3u8$/i, `/${String(process.env.BUNNY_STORAGE_PREFIX || 'nightbox').replace(/^\/+|\/+$/g, '')}/${videoId}.mp4`)
+    const cdnHost = String(process.env.BUNNY_CDN_HOST || '').trim();
+    const storagePrefix = String(process.env.BUNNY_STORAGE_PREFIX || 'nightbox').replace(/^\/+|\/+$/g, '');
+    const cdnUrl = cdnHost
+      ? `https://${cdnHost}/${storagePrefix}/${videoId}.mp4`
       : (storedVideo.embedUrl || null);
+    const hlsUrl = cdnHost
+      ? `https://${cdnHost}/${storagePrefix}/hls/${videoId}/master.m3u8`
+      : (playback.hlsUrl || cdnUrl);
     const originStreamUrl = `${PUBLIC_API_URL}/video/${videoId}/stream`;
     const originHlsUrl = playback.hlsUrl && BUNNY_LOCAL_STORAGE
       ? `${PUBLIC_API_URL}/nightbox/hls/${videoId}/master.m3u8`
@@ -2076,9 +2081,9 @@ app.get('/video/:id', async (req, res) => {
         // Keep the Bunny iframe contract for existing feed embeds; native
         // playback clients use cdnUrl/hlsUrl below.
         embedUrl: storedVideo.embedUrl || cdnUrl || originStreamUrl,
-        hlsUrl: playback?.hlsUrl || cdnUrl || originStreamUrl,
+        hlsUrl: hlsUrl || originStreamUrl,
         originHlsUrl,
-        playbackStatus: playback?.hlsUrl ? 'ready' : (playback?.playbackStatus || 'ready'),
+        playbackStatus: hlsUrl ? 'ready' : (playback?.playbackStatus || 'ready'),
         playbackError: playback?.playbackError || null,
         // Existing clients read streamUrl for non-HLS playback. Prefer the
         // Bunny CDN object so ExoPlayer/browser clients can request byte ranges
