@@ -238,28 +238,47 @@ async function verifyHls(videoId) {
   return { manifestUrl, segmentUrl };
 }
 
-function signCdnPath(pathname, expiresAt = Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS) {
+function base64Url(buffer) {
+  return buffer.toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+/**
+ * Bunny CDN Token Authentication V2 signer.
+ * The signature is HMAC-SHA256(key, signaturePath + expires + signingData)
+ * and the token must include the HS256- prefix.
+ */
+function signCdnPath(pathname, expiresAt = Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS, extraParams = {}) {
   if (!TOKEN_AUTH_KEY) throw new Error('BUNNY_TOKEN_AUTH_KEY is not configured');
   const normalizedPath = pathname.startsWith('/') ? pathname : `/${pathname}`;
-  const hash = crypto.createHash('sha256').update(`${TOKEN_AUTH_KEY}${normalizedPath}${expiresAt}`).digest('base64url');
-  return { token: hash, expiresAt };
+  const params = Object.entries(extraParams)
+    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .sort(([a], [b]) => a.localeCompare(b));
+  const signingData = params.map(([key, value]) => `${key}=${value}`).join('&');
+  const payload = `${extraParams.token_path || normalizedPath}${expiresAt}${signingData}`;
+  const token = `HS256-${base64Url(crypto.createHmac('sha256', TOKEN_AUTH_KEY).update(payload).digest())}`;
+  return { token, expiresAt, params };
+}
+
+function appendSignedQuery(url, signed) {
+  const target = new URL(url);
+  target.searchParams.set('token', signed.token);
+  for (const [key, value] of signed.params) target.searchParams.set(key, String(value));
+  target.searchParams.set('expires', String(signed.expiresAt));
+  return target.toString();
 }
 
 function getSignedHlsUrl(videoId, expiresAt = Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS) {
   const base = new URL(getHlsUrl(videoId));
-  const signed = signCdnPath(base.pathname, expiresAt);
-  base.searchParams.set('token', signed.token);
-  base.searchParams.set('expires', String(signed.expiresAt));
-  base.searchParams.set('token_path', `/` + STORAGE_PREFIX + `/hls/${videoId}/`);
-  return base.toString();
+  const tokenPath = `/${STORAGE_PREFIX}/hls/${videoId}/`;
+  return appendSignedQuery(base.toString(), signCdnPath(base.pathname, expiresAt, { token_path: tokenPath }));
 }
 
 function getSignedCdnUrl(url, expiresAt = Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS) {
   const target = new URL(url);
-  const signed = signCdnPath(target.pathname, expiresAt);
-  target.searchParams.set('token', signed.token);
-  target.searchParams.set('expires', String(signed.expiresAt));
-  return target.toString();
+  return appendSignedQuery(target.toString(), signCdnPath(target.pathname, expiresAt));
 }
 
 function getDirectPlayUrl(videoId) { assertConfigured(); return `https://${CDN_HOST}/${STORAGE_PREFIX}/${videoId}.mp4`; }
