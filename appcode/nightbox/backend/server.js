@@ -2398,6 +2398,31 @@ app.get('/video/:id', async (req, res) => {
 // GET /video/:id/stream — range-capable playback for local VPS storage.
 // ExoPlayer and browser video elements both use byte ranges, so sendFile is
 // intentionally used here instead of buffering the whole MP4 in memory.
+// Bunny Pull Zone origin for local HLS storage. Bunny validates the signed
+// CDN URL before requesting this path, then pulls only the manifest/segment
+// requested by the player. Keep the path strict so arbitrary files cannot be
+// exposed from the media directory.
+app.get('/nightbox/hls/:id/:fileName', (req, res) => {
+  const videoId = String(req.params.id || '');
+  const fileName = String(req.params.fileName || '');
+  if (!BUNNY_LOCAL_STORAGE || !/^[a-f0-9-]{36}$/i.test(videoId) || !/^[a-zA-Z0-9._-]+\.(?:m3u8|ts|m4s)$/i.test(fileName)) {
+    return res.status(404).end();
+  }
+  const sourcePath = bunny.getLocalPath(videoId);
+  if (!sourcePath) return res.status(404).end();
+  const hlsRoot = path.resolve(path.dirname(sourcePath), 'hls', videoId);
+  const filePath = path.resolve(hlsRoot, fileName);
+  if (filePath !== path.join(hlsRoot, fileName) || !filePath.startsWith(`${hlsRoot}${path.sep}`)) {
+    return res.status(404).end();
+  }
+  if (!fs.existsSync(filePath)) return res.status(404).end();
+  res.setHeader('Cache-Control', fileName.endsWith('.m3u8') ? 'public, max-age=60' : 'public, max-age=31536000, immutable');
+  res.setHeader('Content-Type', fileName.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : fileName.endsWith('.m4s') ? 'video/iso.segment' : 'video/mp2t');
+  return res.sendFile(filePath, { acceptRanges: true, cacheControl: false }, (error) => {
+    if (error && !res.headersSent) res.status(error.statusCode || 500).end();
+  });
+});
+
 app.get('/video/:id/stream', async (req, res) => {
   const videoId = req.params.id;
   if (!videoId || !/^[a-f0-9-]+$/i.test(videoId)) {
