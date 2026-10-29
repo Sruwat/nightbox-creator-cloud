@@ -947,7 +947,7 @@ function enqueueTrackedTranscode(job) {
 }
 
 function ensureHlsForLegacyVideo(videoId, playback) {
-  if (!HLS_TRANSCODE_ENABLED || !playback || playback.playbackStatus === 'failed') return playback;
+  if (!HLS_TRANSCODE_ENABLED || !playback) return playback;
   if (BUNNY_LOCAL_STORAGE) {
     // Local mode must not trust a stale database URL: an older Bunny-backed
     // record can say "ready" even when its source/HLS files are no longer on
@@ -963,10 +963,18 @@ function ensureHlsForLegacyVideo(videoId, playback) {
       }
       return store.getVideoPlayback(videoId);
     }
-    if (hlsExists && playback.hlsUrl) {
-      return { ...playback, hlsUrl: bunny.getHlsUrl(videoId) };
+    if (hlsExists) {
+      // A previous transcode can have completed successfully while the
+      // database was left in a stale failed state (for example after a
+      // container restart). Trust the verified local HLS artifact and heal
+      // the status instead of making an otherwise playable video return 409.
+      const hlsUrl = bunny.getHlsUrl(videoId);
+      if (playback.playbackStatus !== 'ready' || playback.hlsUrl !== hlsUrl || playback.playbackError) {
+        store.updateVideoPlayback(videoId, 'ready', hlsUrl, null);
+      }
+      return { ...playback, playbackStatus: 'ready', hlsUrl, playbackError: null };
     }
-    if (playback.playbackStatus === 'ready' || playback.hlsUrl) {
+    if (playback.playbackStatus === 'ready' || playback.hlsUrl || playback.playbackStatus === 'failed') {
       store.db.prepare(`
         UPDATE videos SET playback_status = 'processing', playback_error = NULL
         WHERE id = ? AND status <> 'deleted'
