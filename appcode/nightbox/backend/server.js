@@ -1930,7 +1930,16 @@ app.post('/upload-file', (req, res, next) => {
   try {
     const contentHash = await fileSha256(filePath);
     const existing = store.findVideoByHash(contentHash, owner?.id);
-    if (existing) {
+    const existingPlayback = existing ? store.getVideoPlayback(existing.id) : null;
+    const existingSourcePath = existing && BUNNY_LOCAL_STORAGE ? bunny.getLocalPath(existing.id) : null;
+    const existingMediaAvailable = !existing || !BUNNY_LOCAL_STORAGE || Boolean(
+      (existingSourcePath && fs.existsSync(existingSourcePath))
+      || (existingSourcePath && fs.existsSync(path.join(path.dirname(existingSourcePath), 'hls', existing.id, 'master.m3u8'))),
+    );
+    const reusableDuplicate = existing
+      && existingPlayback?.playbackStatus !== 'failed'
+      && existingMediaAvailable;
+    if (reusableDuplicate) {
       const creatorLink = owner ? store.createLink(existing.id, owner.id) : null;
       if (owner && isBotRequest(req)) store.db.prepare('INSERT INTO bot_events (id,user_id,bot_name,event_type,external_id,video_id,status,created_at) VALUES (?,?,?,?,?,?,?,?)').run(store.id(), owner.id, botName, 'upload', botExternalId, existing.id, 'duplicate', store.now());
       return res.json({ success: true, duplicate: true, videoId: existing.id, watchUrl: existing.watchUrl, embedUrl: existing.embedUrl, link: creatorLink ? `${DOMAIN_URL}/l/${creatorLink.slug}` : null, message: 'Exact duplicate detected; existing video reused.' });
