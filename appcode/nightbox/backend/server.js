@@ -2124,7 +2124,9 @@ app.get('/video/:id', async (req, res) => {
         cdnUrl,
         // Keep the Bunny iframe contract for existing feed embeds; native
         // playback clients use cdnUrl/hlsUrl below.
-        embedUrl: storedVideo.embedUrl || cdnUrl || originStreamUrl,
+        // Always prefer the currently configured Pull Zone for playback.
+        // Stored embed URLs may point to an old/retired Bunny hostname.
+        embedUrl: cdnUrl || storedVideo.embedUrl || originStreamUrl,
         hlsUrl: hlsUrl || originStreamUrl,
         originHlsUrl,
         playbackStatus: hlsUrl ? 'ready' : (playback?.playbackStatus || 'ready'),
