@@ -866,7 +866,7 @@ app.post('/api/creator/videos/:id/link', requireUser, (req, res) => {
 
 // Let the NightBox-to-NightBox bot create a new earning link for an existing
 // NightBox video without copying the media. The source link must be a public
-// NightBox /l/ link, and the destination creator must authenticate with a
+// NightBox /l/ or /watch/ link, and the destination creator must authenticate with a
 // valid creator API key.
 app.post('/api/creator/import-link', (req, res) => {
   const owner = uploadOwner(req);
@@ -884,14 +884,20 @@ app.post('/api/creator/import-link', (req, res) => {
   if (!allowedHosts.has(parsed.hostname.toLowerCase())) {
     return res.status(400).json({ error: 'Only NightBox links can be imported' });
   }
-  const match = parsed.pathname.match(/^\/l\/([^/]+)$/);
-  if (!match) return res.status(400).json({ error: 'Use a NightBox /l/ link' });
+  const linkMatch = parsed.pathname.match(/^\/l\/([^/]+)$/);
+  const watchMatch = parsed.pathname.match(/^\/watch\/([a-f0-9-]+)$/i);
+  if (!linkMatch && !watchMatch) return res.status(400).json({ error: 'Use a NightBox /l/ or /watch/ link' });
 
-  const source = store.db.prepare(`
-    SELECT v.id, v.status, v.title, v.embed_url AS embedUrl, v.watch_url AS watchUrl
-    FROM creator_links l JOIN videos v ON v.id = l.video_id
-    WHERE l.slug = ? AND v.status <> 'deleted'
-  `).get(match[1]);
+  const source = linkMatch
+    ? store.db.prepare(`
+        SELECT v.id, v.status, v.title, v.embed_url AS embedUrl, v.watch_url AS watchUrl
+        FROM creator_links l JOIN videos v ON v.id = l.video_id
+        WHERE l.slug = ? AND v.status <> 'deleted'
+      `).get(linkMatch[1])
+    : store.db.prepare(`
+        SELECT id, status, title, embed_url AS embedUrl, watch_url AS watchUrl
+        FROM videos WHERE id = ? AND status <> 'deleted'
+      `).get(watchMatch[1]);
   if (!source) return res.status(404).json({ error: 'NightBox link not found' });
 
   // Reuse the existing video/media row, but keep a canonical earning link

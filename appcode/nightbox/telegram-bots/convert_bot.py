@@ -669,12 +669,12 @@ async def handle(c, m):
             ignored = 0
             for candidate in urls:
                 parsed = urlparse(candidate)
-                if parsed.hostname and parsed.hostname.lower() in {"nightbox.in", "www.nightbox.in", "api.nightbox.in"} and re.fullmatch(r"/l/[^/]+", parsed.path):
+                if parsed.hostname and parsed.hostname.lower() in {"nightbox.in", "www.nightbox.in", "api.nightbox.in"} and re.fullmatch(r"/(?:l|watch)/[^/]+", parsed.path):
                     valid_urls.append(candidate)
                 else:
                     ignored += 1
             if not valid_urls:
-                raise Exception("No valid NightBox /l/ link found. Other links were ignored.")
+                raise Exception("No valid NightBox /l/ or /watch/ link found. Other links were ignored.")
             replacements = {}
             errors = []
             for index, url in enumerate(valid_urls, 1):
