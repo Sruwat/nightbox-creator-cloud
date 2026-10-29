@@ -63,6 +63,16 @@
                 <data android:pathPrefix="/watch/" />
                 <data android:pathPrefix="/l/" />
             </intent-filter>
+            <!-- Explicit fallback for Telegram/in-app browsers that block
+                 intent:// navigation before verified App Links are resolved. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="nightbox" />
+                <data android:host="watch" />
+                <data android:host="l" />
+            </intent-filter>
         </activity>
 
         <!-- File Info Activity (Intermediate Screen) -->

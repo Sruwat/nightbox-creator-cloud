@@ -286,8 +286,10 @@ class MainActivity : AppCompatActivity() {
         if (deepLinkProcessed) return
         val data: Uri? = intent.data
         if (data != null) {
-            val pathSegments = data.pathSegments
-            if (pathSegments.size >= 2 && pathSegments[0] == "watch") {
+            val pathSegments = if (data.scheme.equals("nightbox", ignoreCase = true)) {
+                listOf(data.host.orEmpty()) + data.pathSegments
+            } else data.pathSegments
+            if (pathSegments.size >= 2 && pathSegments[0].equals("watch", ignoreCase = true)) {
                 val videoId = pathSegments[1]
                 deepLinkProcessed = true
                 // Clear intent data so it's not processed again
@@ -298,7 +300,7 @@ class MainActivity : AppCompatActivity() {
                 // Playback is intentionally started only after the user taps
                 // "Open File" there (the same flow as a pasted link).
                 openFileInfo(videoId, data.getQueryParameter("link"))
-            } else if (pathSegments.size >= 2 && pathSegments[0] == "l") {
+            } else if (pathSegments.size >= 2 && pathSegments[0].equals("l", ignoreCase = true)) {
                 val slug = pathSegments[1]
                 deepLinkProcessed = true
                 intent.data = null

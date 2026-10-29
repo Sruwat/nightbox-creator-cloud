@@ -211,6 +211,11 @@
       return `intent://${intentHost}${targetPath}#Intent;scheme=https;package=simple.shayaribygenz;S.browser_fallback_url=${encodeURIComponent(PLAY_STORE_URL)};end`;
     }
 
+    function buildAppSchemeUrl() {
+      const targetPath = linkSlug ? `/l/${encodeURIComponent(linkSlug)}` : `/watch/${encodeURIComponent(videoId || '')}`;
+      return `nightbox://${targetPath.replace(/^\//, '')}`;
+    }
+
     async function startBrowserView() {
       if (!linkSlug || /android/i.test(navigator.userAgent)) return;
       try {
@@ -309,7 +314,12 @@
       }
       appLaunchAttempted = true;
       document.getElementById('openBtn').href = buildIntentUrl();
-      window.location.href = buildIntentUrl();
+      // Telegram's embedded browser can block intent:// navigation. Try the
+      // app-owned scheme first, then retain the verified App Link fallback.
+      window.location.href = buildAppSchemeUrl();
+      setTimeout(() => {
+        if (document.visibilityState === 'visible') window.location.href = buildIntentUrl();
+      }, 450);
       clearTimeout(fallbackTimer);
       fallbackTimer = setTimeout(() => {
         if (document.visibilityState === 'visible') window.location.href = PLAY_STORE_URL;
