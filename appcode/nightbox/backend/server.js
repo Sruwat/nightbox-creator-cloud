@@ -948,6 +948,32 @@ function enqueueTrackedTranscode(job) {
 
 function ensureHlsForLegacyVideo(videoId, playback) {
   if (!HLS_TRANSCODE_ENABLED || !playback || playback.playbackStatus === 'failed') return playback;
+  if (BUNNY_LOCAL_STORAGE) {
+    // Local mode must not trust a stale database URL: an older Bunny-backed
+    // record can say "ready" even when its source/HLS files are no longer on
+    // this VPS. Requeue valid sources, and expose a clear failure for missing
+    // media instead of returning a dead 200 playback URL.
+    const sourcePath = bunny.getLocalPath(videoId);
+    const hlsPath = sourcePath ? path.join(path.dirname(sourcePath), 'hls', videoId, 'master.m3u8') : null;
+    const sourceExists = Boolean(sourcePath && fs.existsSync(sourcePath));
+    const hlsExists = Boolean(hlsPath && fs.existsSync(hlsPath));
+    if (!sourceExists) {
+      if (playback.playbackStatus !== 'failed') {
+        store.updateVideoPlayback(videoId, 'failed', null, 'Media file is missing from local storage. Please upload the video again.');
+      }
+      return store.getVideoPlayback(videoId);
+    }
+    if (hlsExists && playback.hlsUrl) {
+      return { ...playback, hlsUrl: bunny.getHlsUrl(videoId) };
+    }
+    if (playback.playbackStatus === 'ready' || playback.hlsUrl) {
+      store.db.prepare(`
+        UPDATE videos SET playback_status = 'processing', playback_error = NULL
+        WHERE id = ? AND status <> 'deleted'
+      `).run(videoId);
+      playback = store.getVideoPlayback(videoId);
+    }
+  }
   // A Pull Zone hostname can be replaced without changing the stored HLS
   // object. Always publish the current configured host for local media.
   if (playback.hlsUrl) return BUNNY_LOCAL_STORAGE
