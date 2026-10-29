@@ -414,6 +414,21 @@ async def upload_video(fpath, title, chat_id, telegram_id=""):
                 err = await resp.text()
                 raise Exception(f"Upload error: {err[:100]}")
 
+async def wait_for_approved_watch(video_id, chat_id, telegram_id="", timeout_seconds=3600):
+    headers = backend_headers(chat_id, telegram_id)
+    deadline = time.time() + timeout_seconds
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+        while time.time() < deadline:
+            async with session.get(f"{BACKEND_URL}/api/videos/{video_id}/status", headers=headers) as resp:
+                data = await resp.json(content_type=None)
+            if data.get("state") == "ready" and data.get("playable") and data.get("watchUrl"):
+                return data["watchUrl"]
+            if data.get("state") in {"failed", "rejected"}:
+                reason = data.get("video", {}).get("processingError") or data.get("video", {}).get("rejectionReason") or data.get("state")
+                raise Exception(f"Video was not approved: {reason}")
+            await asyncio.sleep(5)
+    raise Exception("Video is still processing; the playable link will be sent after approval.")
+
 async def import_nightbox_link(url, chat_id, telegram_id=""):
     headers = backend_headers(chat_id, telegram_id)
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
@@ -682,6 +697,8 @@ async def handle(c, m):
                 try:
                     res = await import_nightbox_link(url, m.chat.id, telegram_id)
                     replacement = res.get('link', '')
+                    if not replacement and res.get('videoId'):
+                        replacement = await wait_for_approved_watch(res['videoId'], m.chat.id, telegram_id)
                     if not replacement:
                         raise Exception("Backend did not return a NightBox link")
                     replacements[url] = replacement
@@ -721,6 +738,9 @@ async def handle(c, m):
         await status.edit_text("\u2601 **Uploading to server...**")
         res = await upload_video(info["path"], info["title"], m.chat.id, telegram_id)
         watch = res.get("link") or res.get("watchUrl", "")
+        if not watch and res.get("videoId"):
+            await status.edit_text("⏳ Upload received. Waiting for HLS conversion, CDN verification and admin approval...")
+            watch = await wait_for_approved_watch(res["videoId"], m.chat.id, telegram_id)
         if not watch:
             raise Exception("Backend did not return a NightBox link")
 

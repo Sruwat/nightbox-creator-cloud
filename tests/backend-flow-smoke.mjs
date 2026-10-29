@@ -67,6 +67,7 @@ try {
     embedUrl: `${baseUrl}/embed/${videoId}`,
     status: "ready",
   });
+  store.db.prepare("UPDATE videos SET playback_status='ready',processing_status='completed',processing_stage='completed',copyright_status='approved',approval_status='approved',visibility='visible',cdn_verified_at=?,hls_ready_at=? WHERE id=?").run(store.now(), store.now(), videoId);
   const link = store.createLink(videoId, userId);
   const creatorVideos = await json("/api/creator/videos", {
     headers: { authorization: `Bearer ${registered.token}` },

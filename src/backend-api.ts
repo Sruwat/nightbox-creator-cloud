@@ -19,19 +19,21 @@ export type BackendVideo = {
   views?: number;
   dateUploaded?: string;
   thumbnailUrl?: string | null;
-  /** Direct Bunny CDN playback URL; clients should prefer this over the API proxy. */
+  /** Playback URLs are intentionally omitted; the app requests a signed token on Play. */
   cdnUrl?: string | null;
-  embedUrl: string;
-  hlsUrl: string;
-  watchUrl: string;
+  embedUrl?: string | null;
+  hlsUrl?: string | null;
+  watchUrl?: string | null;
   downloadUrl: string;
 };
 
 export type UploadResult = {
   success: boolean;
   videoId: string;
-  watchUrl: string;
-  embedUrl: string;
+  watchUrl?: string | null;
+  embedUrl?: string | null;
+  approvalStatus?: string;
+  playable?: boolean;
   link?: string | null;
   message: string;
 };
@@ -305,7 +307,15 @@ export async function updateAdminUser(token: string, id: string, status: string)
 
 export async function getAdminVideos(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/videos`, { headers: authHeaders(token) });
-  return parseResponse<{ videos: Array<{ id: string; title: string; status: string; playbackStatus?: string; playbackError?: string | null; ownerId: string | null; ownerEmail: string | null; ownerTelegramUserId: string | null; uploadSource: string; uploadEventType: string | null; fileSize: number | null; createdAt: string; eligibleViews: number }> }>(response);
+  return parseResponse<{ videos: Array<{ id: string; title: string; status: string; playbackStatus?: string; playbackError?: string | null; ownerId: string | null; ownerEmail: string | null; ownerTelegramUserId: string | null; uploadSource: string; uploadEventType: string | null; fileSize: number | null; createdAt: string; eligibleViews: number; processingStatus?: string; copyrightStatus?: string; approvalStatus?: string; visibility?: string; processingStage?: string; rejectionReason?: string | null; cdnVerifiedAt?: string | null; thumbnailUrl?: string | null }> }>(response);
+}
+export async function approveAdminVideo(token: string, id: string) {
+  const response = await fetch(`${BACKEND_URL}/api/admin/videos/${encodeURIComponent(id)}/approve`, { method: "POST", headers: authHeaders(token) });
+  return parseResponse<{ video: unknown; playable: boolean; state: string }>(response);
+}
+export async function rejectAdminVideo(token: string, id: string, reason: string) {
+  const response = await fetch(`${BACKEND_URL}/api/admin/videos/${encodeURIComponent(id)}/reject`, { method: "POST", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify({ reason }) });
+  return parseResponse<{ video: unknown; playable: boolean; state: string }>(response);
 }
 export async function deleteAdminVideo(token: string, id: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/videos/${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders(token) });

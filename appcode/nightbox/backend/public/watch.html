@@ -231,42 +231,29 @@
         }
         if (!metadata?.ok) throw new Error(metadataPayload?.error || 'Video metadata unavailable');
         const video = metadataPayload.video;
-        const response = await fetch(`/api/links/${encodeURIComponent(linkSlug)}/view/start`, { method: 'POST' });
-        if (!response.ok) throw new Error('Traffic quality check failed');
-        const tracking = await response.json();
-        viewSessionId = tracking.sessionId;
-        viewToken = tracking.viewToken;
-        minimumWatchSeconds = Number(tracking.minimumWatchSeconds) || 5;
-        const directUrl = video.hlsUrl;
-        const fallbackUrl = video.streamUrl || `/video/${encodeURIComponent(resolvedVideoId)}/stream`;
-        if (/\.mp4(?:$|\?)/i.test(directUrl)) {
-          browserPlayer.src = directUrl;
-        } else if (browserPlayer.canPlayType('application/vnd.apple.mpegurl')) {
+        const response = await fetch(`/api/videos/${encodeURIComponent(resolvedVideoId)}/playback-token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ linkSlug }) });
+        const playback = await response.json().catch(() => ({}));
+        if (response.status === 202) throw new Error('Video is still processing');
+        if (response.status === 403) throw new Error(playback.error || 'Video is awaiting approval');
+        if (!response.ok || !playback.manifestUrl) throw new Error(playback.error || 'Playback authorization failed');
+        viewSessionId = playback.sessionId;
+        viewToken = playback.viewToken;
+        minimumWatchSeconds = Number(playback.minWatchSeconds) || 5;
+        const directUrl = playback.manifestUrl;
+        if (browserPlayer.canPlayType('application/vnd.apple.mpegurl')) {
           browserPlayer.src = directUrl;
         } else if (window.Hls && window.Hls.isSupported()) {
           const hls = new window.Hls({ enableWorker: true });
           hls.loadSource(directUrl);
           hls.attachMedia(browserPlayer);
-          hls.on(window.Hls.Events.ERROR, (_event, data) => {
-            if (!data?.fatal || browserPlayer.dataset.fallbackAttempted === 'true') return;
-            browserPlayer.dataset.fallbackAttempted = 'true';
-            hls.destroy();
-            window.nightboxHls = null;
-            browserPlayer.src = fallbackUrl;
-            browserPlayer.load();
-          });
+          hls.on(window.Hls.Events.ERROR, (_event, data) => { if (data?.fatal) document.getElementById('status').innerText = 'Signed video stream failed. Please retry.'; });
           window.nightboxHls = hls;
         } else {
           throw new Error('HLS playback is not supported by this browser');
         }
         browserPlayer.style.display = 'block';
         browserPlayer.load();
-        browserPlayer.addEventListener('error', () => {
-          if (browserPlayer.dataset.fallbackAttempted === 'true') return;
-          browserPlayer.dataset.fallbackAttempted = 'true';
-          browserPlayer.src = fallbackUrl;
-          browserPlayer.load();
-        }, { once: true });
+        browserPlayer.addEventListener('error', () => { document.getElementById('status').innerText = 'Signed video stream failed. Please retry.'; }, { once: true });
         document.getElementById('status').innerText = 'Watch here or open the NightBox app.';
       } catch (error) {
         document.getElementById('status').innerText = 'This video is not available in the browser.';

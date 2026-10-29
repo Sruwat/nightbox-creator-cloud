@@ -342,11 +342,9 @@ class FileInfoActivity : AppCompatActivity() {
                             val fetchedTitle = video?.optString("title")
                             val durationSec = video?.optInt("duration", 0) ?: 0
                             val sizeBytes = video?.optLong("size", 0L) ?: 0L
-                            val fetchedStream = listOf("hlsUrl", "cdnUrl", "streamUrl")
-                                .firstNotNullOfOrNull { key -> video?.optString(key)?.takeIf { it.isNotBlank() } }
-                            if (!fetchedStream.isNullOrBlank()) {
-                                streamUrl = fetchedStream
-                            }
+                            // Playback is authorized only after the user presses
+                            // Play. Do not cache or pass unsigned HLS/MP4 URLs.
+                            streamUrl = null
                             videoDurationSec = durationSec
                             videoSizeBytes = sizeBytes
 

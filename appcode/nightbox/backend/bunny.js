@@ -17,6 +17,8 @@ const LOCAL_STORAGE_ROOT = path.resolve(process.env.VIDEO_STORAGE_ROOT || path.j
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
 const MAX_VIDEO_BYTES = 2 * 1024 * 1024 * 1024;
+const TOKEN_AUTH_KEY = String(process.env.BUNNY_TOKEN_AUTH_KEY || '').trim();
+const TOKEN_TTL_SECONDS = Math.max(60, Number(process.env.BUNNY_TOKEN_TTL_SECONDS || 600));
 
 const bunnyApi = axios.create({
   baseURL: 'https://storage.bunnycdn.com',
@@ -218,6 +220,48 @@ async function uploadHlsDirectory(videoId, directory) {
   }
 }
 
+async function verifyHls(videoId) {
+  const unsignedManifestUrl = getHlsUrl(videoId);
+  const manifestUrl = TOKEN_AUTH_KEY ? getSignedHlsUrl(videoId) : unsignedManifestUrl;
+  if (!manifestUrl) throw new Error('Bunny CDN host is not configured');
+  const manifest = await axios.get(manifestUrl, { timeout: 15000, responseType: 'text', validateStatus: () => true });
+  if (manifest.status < 200 || manifest.status >= 300 || !String(manifest.data || '').includes('#EXTM3U')) {
+    throw new Error(`CDN HLS manifest verification failed (${manifest.status})`);
+  }
+  const segment = String(manifest.data).split(/\r?\n/).map((line) => line.trim()).find((line) => line && !line.startsWith('#') && /\.(ts|m4s)(\?|$)/i.test(line));
+  if (!segment) throw new Error('CDN HLS manifest contains no media segment');
+  const segmentUrl = TOKEN_AUTH_KEY
+    ? getSignedCdnUrl(new URL(segment, unsignedManifestUrl).toString(), Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS)
+    : new URL(segment, unsignedManifestUrl).toString();
+  const response = await axios.head(segmentUrl, { timeout: 10000, validateStatus: () => true });
+  if (response.status < 200 || response.status >= 400) throw new Error(`CDN HLS segment verification failed (${response.status})`);
+  return { manifestUrl, segmentUrl };
+}
+
+function signCdnPath(pathname, expiresAt = Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS) {
+  if (!TOKEN_AUTH_KEY) throw new Error('BUNNY_TOKEN_AUTH_KEY is not configured');
+  const normalizedPath = pathname.startsWith('/') ? pathname : `/${pathname}`;
+  const hash = crypto.createHash('sha256').update(`${TOKEN_AUTH_KEY}${normalizedPath}${expiresAt}`).digest('base64url');
+  return { token: hash, expiresAt };
+}
+
+function getSignedHlsUrl(videoId, expiresAt = Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS) {
+  const base = new URL(getHlsUrl(videoId));
+  const signed = signCdnPath(base.pathname, expiresAt);
+  base.searchParams.set('token', signed.token);
+  base.searchParams.set('expires', String(signed.expiresAt));
+  base.searchParams.set('token_path', `/` + STORAGE_PREFIX + `/hls/${videoId}/`);
+  return base.toString();
+}
+
+function getSignedCdnUrl(url, expiresAt = Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS) {
+  const target = new URL(url);
+  const signed = signCdnPath(target.pathname, expiresAt);
+  target.searchParams.set('token', signed.token);
+  target.searchParams.set('expires', String(signed.expiresAt));
+  return target.toString();
+}
+
 function getDirectPlayUrl(videoId) { assertConfigured(); return `https://${CDN_HOST}/${STORAGE_PREFIX}/${videoId}.mp4`; }
 function getHlsUrl(videoId) {
   if (!CDN_HOST) return null;
@@ -251,4 +295,4 @@ function getWatchUrl(videoId) {
 }
 function cleanupTempFile(filePath) { try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (error) { console.error('[Cleanup] Failed:', error.message); } }
 
-module.exports = { createVideo, uploadVideo, uploadVideoFromUrl, uploadCreatorFile, deleteCreatorFile, downloadVideoToFile, uploadHlsDirectory, getVideo, deleteVideo, getEmbedUrl, getDirectPlayUrl, getHlsUrl, getCdnUrlIfAvailable, getWatchUrl, getCreatorFilePath, getCreatorFileUrl, cleanupTempFile, getLocalPath: (videoId) => STORAGE_DRIVER === 'local' ? localPath(videoId) : null, isLocalStorage: () => STORAGE_DRIVER === 'local' };
+module.exports = { createVideo, uploadVideo, uploadVideoFromUrl, uploadCreatorFile, deleteCreatorFile, downloadVideoToFile, uploadHlsDirectory, verifyHls, signCdnPath, getSignedHlsUrl, getSignedCdnUrl, getVideo, deleteVideo, getEmbedUrl, getDirectPlayUrl, getHlsUrl, getCdnUrlIfAvailable, getWatchUrl, getCreatorFilePath, getCreatorFileUrl, cleanupTempFile, getLocalPath: (videoId) => STORAGE_DRIVER === 'local' ? localPath(videoId) : null, isLocalStorage: () => STORAGE_DRIVER === 'local', hasTokenAuth: () => Boolean(TOKEN_AUTH_KEY) };

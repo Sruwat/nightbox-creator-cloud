@@ -362,8 +362,9 @@ async def remote_upload(_, message):
                     data = await response.json(content_type=None)
                     if response.status >= 300:
                         raise RuntimeError(data.get("error", f"HTTP {response.status}"))
-                link = data.get("link") or data.get("watchUrl")
-                results.append(link or 'Processing in dashboard')
+                # Upload responses intentionally do not expose a playable URL
+                # until HLS/CDN verification and admin approval are complete.
+                results.append(f"✅ Upload received ({data.get('videoId', 'queued')}). Processing and approval are pending.")
             except Exception as error:
                 log.exception("service upload failed")
                 results.append(f"❌ {index}. {str(error)[:180]}")

@@ -28,6 +28,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import org.json.JSONObject
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -55,7 +56,6 @@ import java.io.File
 import android.media.MediaMetadataRetriever
 import androidx.appcompat.app.AlertDialog
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -118,8 +118,7 @@ class VideoPlayerActivity : AppCompatActivity() {
     private var linkSlug: String? = null
     private var remoteHlsUrl: String? = null
     private var downloadUrl: String? = null
-    private var originHlsUrl: String? = null
-    private var originFallbackAttempted = false
+    private var playbackTokenRetryUsed = false
     private var durationUpdateRunnable: Runnable? = null
     private var shouldResumePlayback = true
     private var restoredPositionMs = 0L
@@ -341,10 +340,6 @@ class VideoPlayerActivity : AppCompatActivity() {
                     if (!response.isSuccessful) throw IllegalStateException("Video metadata request failed: ${response.code}")
                     val payload = org.json.JSONObject(response.body?.string().orEmpty())
                     val video = payload.optJSONObject("video") ?: throw IllegalStateException("Video metadata missing")
-                    val playbackUrl = listOf("hlsUrl", "cdnUrl", "streamUrl")
-                        .firstNotNullOfOrNull { key -> video.optString(key).takeIf { it.isNotBlank() } }
-                        ?: throw IllegalStateException("Playable video stream missing")
-                    val fallbackUrl = video.optString("originHlsUrl").takeIf { it.startsWith("https://") }
                     val fetchedDownloadUrl = video.optString("downloadUrl")
                         .takeIf { it.startsWith("https://") }
                     val title = video.optString("title").takeIf { it.isNotBlank() }
@@ -360,13 +355,10 @@ class VideoPlayerActivity : AppCompatActivity() {
 
                     withContext(Dispatchers.Main) {
                         processingRetryCount = 0
-                        remoteHlsUrl = playbackUrl
-                        originHlsUrl = fallbackUrl
                         downloadUrl = fetchedDownloadUrl
-                        originFallbackAttempted = false
+                        playbackTokenRetryUsed = false
                         title?.let { resolvedVideoTitle = formatCleanTitle(it) }
                         updateVideoMetaDetails()
-                        startViewTrackingIfNeeded()
                         initializePlayer()
                     }
                 }
@@ -412,9 +404,58 @@ class VideoPlayerActivity : AppCompatActivity() {
             // Local files always use ExoPlayer
             initExoPlayerLocal()
         } else {
-            // The API returns a range-capable MP4 stream for local VPS storage
-            // and the Bunny CDN URL when the Bunny driver is enabled.
-            initExoPlayerHls()
+            requestPlaybackTokenAndInitialize()
+        }
+    }
+
+    private fun requestPlaybackTokenAndInitialize() {
+        val vid = videoId ?: return
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val bodyJson = JSONObject().apply { linkSlug?.let { put("linkSlug", it) } }
+                val body = bodyJson.toString().toRequestBody("application/json".toMediaType())
+                val request = Request.Builder()
+                    .url("${BuildConfig.BACKEND_URL}/api/videos/${Uri.encode(vid)}/playback-token")
+                    .post(body)
+                    .build()
+                apiClient.newCall(request).execute().use { response ->
+                    val payload = JSONObject(response.body?.string().orEmpty())
+                    if (response.code == 202) {
+                        withContext(Dispatchers.Main) {
+                            tvLoadingText.text = "Video is processing. Waiting for playback…"
+                            if (++processingRetryCount <= 24) window.decorView.postDelayed({ if (!isFinishing && !isDestroyed) requestPlaybackTokenAndInitialize() }, 5_000L)
+                            else showError("Video is still processing. Tap Retry in a moment.")
+                        }
+                        return@use
+                    }
+                    if (response.code == 403) {
+                        val code = payload.optString("code")
+                        val message = when (code) {
+                            "VIDEO_AWAITING_APPROVAL" -> "Video is awaiting admin approval."
+                            "VIDEO_REJECTED" -> payload.optString("error", "Video was rejected.")
+                            else -> payload.optString("error", "Playback is not available.")
+                        }
+                        withContext(Dispatchers.Main) { showError(message) }
+                        return@use
+                    }
+                    if (!response.isSuccessful) throw IllegalStateException(payload.optString("error", "Playback authorization failed"))
+                    val manifest = payload.optString("manifestUrl").takeIf { it.startsWith("https://") }
+                        ?: throw IllegalStateException("Signed playback manifest missing")
+                    val session = payload.optString("sessionId").takeIf { it.isNotBlank() }
+                    val token = payload.optString("viewToken").takeIf { it.isNotBlank() }
+                    withContext(Dispatchers.Main) {
+                        processingRetryCount = 0
+                        remoteHlsUrl = manifest
+                        viewSessionId = session
+                        viewToken = token
+                        viewTrackingStarted = session != null
+                        initExoPlayerHls()
+                    }
+                }
+            } catch (error: Exception) {
+                Log.e(TAG, "Playback authorization failed", error)
+                withContext(Dispatchers.Main) { showError(error.message ?: "Video playback is unavailable right now.") }
+            }
         }
     }
 
@@ -477,17 +518,12 @@ class VideoPlayerActivity : AppCompatActivity() {
         // (when available) remains the only path that should save a full file.
         val playbackDataSourceFactory = httpDataSourceFactory
 
-        // HLS loads short segments; plain MP4 uses Media3's real container metadata
-        // and HTTP byte ranges. Never guess a seek map or video duration.
-        val isHlsStream = mediaUrl.contains(".m3u8", ignoreCase = true) || mediaUrl.contains("/hls/", ignoreCase = true)
-        val mediaSource = if (isHlsStream) {
-            HlsMediaSource.Factory(playbackDataSourceFactory)
-                .setAllowChunklessPreparation(true)
-                .createMediaSource(MediaItem.fromUri(mediaUrl))
-        } else {
-            ProgressiveMediaSource.Factory(playbackDataSourceFactory)
-                .createMediaSource(MediaItem.fromUri(mediaUrl))
-        }
+        // Remote playback is deliberately HLS-only. The URL is an API manifest
+        // gateway containing a short-lived token; it rewrites each segment to a
+        // signed Bunny CDN URL. Never fall back to unsigned MP4/origin playback.
+        val mediaSource = HlsMediaSource.Factory(playbackDataSourceFactory)
+            .setAllowChunklessPreparation(true)
+            .createMediaSource(MediaItem.fromUri(mediaUrl))
 
         // Fast-start Smart LoadControl: starts playback in 1.0s, caps buffer at 30s to prevent bandwidth waste
         val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
@@ -571,17 +607,9 @@ class VideoPlayerActivity : AppCompatActivity() {
 
             override fun onPlayerError(error: PlaybackException) {
                 Log.e(TAG, "Native playback failed (${error.errorCode})", error)
-                val fallback = originHlsUrl?.takeIf {
-                    isHlsStream && !originFallbackAttempted && it != remoteHlsUrl
-                }
-                if (fallback != null) {
-                    originFallbackAttempted = true
-                    window.decorView.post {
-                        if (!isFinishing && !isDestroyed) {
-                            remoteHlsUrl = fallback
-                            initializePlayer()
-                        }
-                    }
+                if (!playbackTokenRetryUsed && localVideoUri == null) {
+                    playbackTokenRetryUsed = true
+                    window.decorView.postDelayed({ if (!isFinishing && !isDestroyed) initializePlayer() }, 350L)
                 } else {
                     releasePlayer()
                     showError("Video stream could not be played. Tap Retry.")

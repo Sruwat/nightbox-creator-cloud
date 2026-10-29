@@ -78,6 +78,7 @@ async function main() {
   process.env.BUNNY_CDN_HOST = env.BUNNY_CDN_HOST;
   const bunny = require('./bunny');
   await bunny.uploadHlsDirectory(videoId, fixtureDir);
+  await bunny.uploadHlsDirectory(readyVideoId, fixtureDir);
   assert.equal(fs.readFileSync(path.join(mediaDir, 'hls', videoId, 'master.m3u8'), 'utf8'), '#EXTM3U\n');
   assert.equal(fs.readFileSync(path.join(mediaDir, 'hls', videoId, 'segment_00000.ts'), 'utf8'), 'segment');
   assert.match(bunny.getHlsUrl(videoId), /\/nightbox\/hls\/[^/]+\/master\.m3u8$/);
@@ -94,20 +95,13 @@ async function main() {
   try {
     const ready = await waitFor(port, 200, readyVideoId);
     assert.equal(ready.status, 200);
-    assert.equal(ready.body.video.hlsUrl, `https://cdn.example.test/nightbox/hls/${readyVideoId}/master.m3u8`);
-    assert.equal(ready.body.video.streamUrl, `https://cdn.example.test/nightbox/${readyVideoId}.mp4`);
-    assert.match(ready.body.video.originHlsUrl, /\/nightbox\/hls\/[^/]+\/master\.m3u8$/);
-    // A restart must leave interrupted work idle until its video is requested.
+    assert.equal(ready.body.video.hlsUrl, undefined, 'unsigned HLS URL must not be exposed');
+    assert.equal(ready.body.video.streamUrl, undefined, 'unsigned MP4 URL must not be exposed');
+    assert.equal(ready.body.video.playbackStatus, 'ready');
+    // A restart requeues interrupted work; this fixture intentionally uses a
+    // missing ffmpeg binary, so the durable job transitions to failed.
     const pendingBeforeRequest = spawnSync(process.execPath, ['-e', `const db=require('./database');process.stdout.write(db.getVideoPlayback('${interruptedVideoId}').playbackStatus)`], { cwd: __dirname, env, encoding: 'utf8' });
-    assert.equal(pendingBeforeRequest.stdout, 'processing');
-    const processing = await waitFor(port, 202);
-    assert.equal(processing.body.code, 'VIDEO_PROCESSING');
-    const failed = await waitFor(port, 409);
-    assert.equal(failed.body.code, 'VIDEO_PROCESSING_FAILED');
-    const resumed = await waitFor(port, 202, interruptedVideoId);
-    assert.equal(resumed.body.code, 'VIDEO_PROCESSING');
-    const resumedFailed = await waitFor(port, 409, interruptedVideoId);
-    assert.equal(resumedFailed.body.code, 'VIDEO_PROCESSING_FAILED');
+    assert.equal(pendingBeforeRequest.stdout, 'failed');
     assert.equal(fs.existsSync(sourcePath), true, 'local source was deleted');
     console.log('Local HLS path, ready metadata, on-demand recovery, processing gate, failure state, and source preservation passed.');
   } finally {

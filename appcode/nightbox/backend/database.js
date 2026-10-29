@@ -32,8 +32,42 @@ db.exec(`
     playback_status TEXT NOT NULL DEFAULT 'processing',
     hls_url TEXT,
     playback_error TEXT,
+    processing_status TEXT NOT NULL DEFAULT 'queued',
+    copyright_status TEXT NOT NULL DEFAULT 'pending',
+    approval_status TEXT NOT NULL DEFAULT 'pending',
+    visibility TEXT NOT NULL DEFAULT 'hidden',
+    processing_stage TEXT NOT NULL DEFAULT 'queued',
+    processing_error TEXT,
+    processing_attempts INTEGER NOT NULL DEFAULT 0,
+    processing_started_at TEXT,
+    hls_ready_at TEXT,
+    cdn_verified_at TEXT,
+    approved_at TEXT,
+    rejected_at TEXT,
+    rejection_reason TEXT,
+    thumbnail_url TEXT,
     created_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS video_jobs (
+    video_id TEXT PRIMARY KEY REFERENCES videos(id) ON DELETE CASCADE,
+    job_type TEXT NOT NULL DEFAULT 'hls',
+    status TEXT NOT NULL DEFAULT 'queued',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    next_attempt_at TEXT,
+    locked_at TEXT,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS video_notifications (
+    id TEXT PRIMARY KEY,
+    video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+    owner_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    notification_type TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    delivered_at TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_video_notifications_owner ON video_notifications(owner_id, delivered_at, created_at);
   CREATE TABLE IF NOT EXISTS creator_folders (
     id TEXT PRIMARY KEY,
     owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -327,6 +361,20 @@ for (const statement of [
   'ALTER TABLE videos ADD COLUMN playback_status TEXT NOT NULL DEFAULT \'processing\'',
   'ALTER TABLE videos ADD COLUMN hls_url TEXT',
   'ALTER TABLE videos ADD COLUMN playback_error TEXT',
+  'ALTER TABLE videos ADD COLUMN processing_status TEXT NOT NULL DEFAULT \'queued\'',
+  'ALTER TABLE videos ADD COLUMN copyright_status TEXT NOT NULL DEFAULT \'pending\'',
+  'ALTER TABLE videos ADD COLUMN approval_status TEXT NOT NULL DEFAULT \'pending\'',
+  'ALTER TABLE videos ADD COLUMN visibility TEXT NOT NULL DEFAULT \'hidden\'',
+  'ALTER TABLE videos ADD COLUMN processing_stage TEXT NOT NULL DEFAULT \'queued\'',
+  'ALTER TABLE videos ADD COLUMN processing_error TEXT',
+  'ALTER TABLE videos ADD COLUMN processing_attempts INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE videos ADD COLUMN processing_started_at TEXT',
+  'ALTER TABLE videos ADD COLUMN hls_ready_at TEXT',
+  'ALTER TABLE videos ADD COLUMN cdn_verified_at TEXT',
+  'ALTER TABLE videos ADD COLUMN approved_at TEXT',
+  'ALTER TABLE videos ADD COLUMN rejected_at TEXT',
+  'ALTER TABLE videos ADD COLUMN rejection_reason TEXT',
+  'ALTER TABLE videos ADD COLUMN thumbnail_url TEXT',
   'ALTER TABLE withdrawal_requests ADD COLUMN payout_account TEXT',
 ]) {
   try { db.exec(statement); } catch (error) {
@@ -462,9 +510,26 @@ module.exports = {
   },
   findUser(email) { return db.prepare('SELECT id,email,password_hash,role,status FROM users WHERE email = ?').get(email.trim().toLowerCase()); },
   findUserById(userId) { return db.prepare('SELECT id,email,role,status,telegram_user_id FROM users WHERE id = ?').get(userId); },
-  createVideo(video) { db.prepare('INSERT INTO videos (id,owner_id,title,watch_url,embed_url,content_hash,file_size,status,playback_status,hls_url,playback_error,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(video.id, video.ownerId || null, video.title, video.watchUrl, video.embedUrl, video.contentHash || null, video.fileSize || null, video.status || 'processing', video.playbackStatus || 'processing', video.hlsUrl || null, video.playbackError || null, now()); },
-  getVideoPlayback(videoId) { return db.prepare('SELECT playback_status AS playbackStatus,hls_url AS hlsUrl,playback_error AS playbackError FROM videos WHERE id=?').get(videoId) || null; },
-  updateVideoPlayback(videoId, playbackStatus, hlsUrl = null, playbackError = null) { db.prepare('UPDATE videos SET playback_status=?,hls_url=?,playback_error=? WHERE id=?').run(playbackStatus, hlsUrl, playbackError, videoId); },
+  createVideo(video) {
+    const timestamp = now();
+    db.prepare(`INSERT INTO videos (id,owner_id,title,watch_url,embed_url,content_hash,file_size,status,playback_status,hls_url,playback_error,processing_status,copyright_status,approval_status,visibility,processing_stage,created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      video.id, video.ownerId || null, video.title, video.watchUrl, video.embedUrl, video.contentHash || null, video.fileSize || null,
+      video.status || 'active', video.playbackStatus || 'processing', video.hlsUrl || null, video.playbackError || null,
+      video.processingStatus || 'queued', video.copyrightStatus || 'pending', video.approvalStatus || 'pending', video.visibility || 'hidden',
+      video.processingStage || 'queued', timestamp,
+    );
+    db.prepare(`INSERT OR REPLACE INTO video_jobs (video_id,job_type,status,attempts,last_error,next_attempt_at,locked_at,updated_at) VALUES (?,?,?,?,?,?,?,?)`)
+      .run(video.id, 'hls', video.processingStatus === 'completed' ? 'completed' : 'queued', 0, null, timestamp, null, timestamp);
+  },
+  getVideoPlayback(videoId) { return db.prepare('SELECT playback_status AS playbackStatus,hls_url AS hlsUrl,playback_error AS playbackError,processing_status AS processingStatus,copyright_status AS copyrightStatus,approval_status AS approvalStatus,visibility,processing_stage AS processingStage,cdn_verified_at AS cdnVerifiedAt FROM videos WHERE id=?').get(videoId) || null; },
+  updateVideoPlayback(videoId, playbackStatus, hlsUrl = null, playbackError = null) {
+    const ready = playbackStatus === 'ready';
+    const timestamp = now();
+    db.prepare(`UPDATE videos SET playback_status=?,hls_url=?,playback_error=?,processing_status=?,processing_stage=?,hls_ready_at=CASE WHEN ? THEN COALESCE(hls_ready_at,?) ELSE hls_ready_at END WHERE id=?`)
+      .run(playbackStatus, hlsUrl, playbackError, ready ? 'completed' : (playbackStatus === 'failed' ? 'failed' : 'transcoding'), ready ? 'completed' : (playbackStatus === 'failed' ? 'failed' : 'transcoding'), ready ? 1 : 0, timestamp, videoId);
+    db.prepare('UPDATE video_jobs SET status=?,last_error=?,locked_at=NULL,updated_at=? WHERE video_id=?').run(ready ? 'completed' : (playbackStatus === 'failed' ? 'failed' : 'processing'), playbackError, timestamp, videoId);
+  },
   findVideoByHash(contentHash, ownerId) { return db.prepare('SELECT id,title,watch_url AS watchUrl,embed_url AS embedUrl FROM videos WHERE content_hash = ? AND (owner_id = ? OR owner_id IS NULL) ORDER BY created_at ASC LIMIT 1').get(contentHash, ownerId || null); },
   createLink(videoId, creatorId) {
     const existing = db.prepare(`

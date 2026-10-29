@@ -49,11 +49,14 @@ async function processOne(job) {
     outputDir = await fs.promises.mkdtemp(path.join(TEMP_ROOT, 'nightbox-hls-'));
     if (!sourcePath && job.prepareSource) sourcePath = await job.prepareSource();
     if (!sourcePath) throw new Error('Transcode source is unavailable');
+    if (job.onStage) await job.onStage('transcoding');
     await runFfmpeg(sourcePath, outputDir);
+    if (job.onStage) await job.onStage('cdn_verifying');
     await job.uploadHlsDirectory(job.videoId, outputDir);
-    job.onReady(job.getHlsUrl(job.videoId));
+    if (job.verifyHls) await job.verifyHls(job.videoId);
+    await job.onReady(job.getHlsUrl(job.videoId));
   } catch (error) {
-    job.onError(error);
+    await job.onError(error);
   } finally {
     if (outputDir) await fs.promises.rm(outputDir, { recursive: true, force: true });
     if (sourcePath && !job.preserveSource) await fs.promises.rm(sourcePath, { force: true });

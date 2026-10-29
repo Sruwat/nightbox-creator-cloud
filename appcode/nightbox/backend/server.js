@@ -196,6 +196,62 @@ function fileSha256(filePath) {
   });
 }
 
+const PLAYBACK_TOKEN_SECRET = process.env.PLAYBACK_TOKEN_SECRET || process.env.AUTH_SECRET || '';
+const PLAYBACK_TOKEN_TTL_SECONDS = Math.max(30, Number(process.env.PLAYBACK_TOKEN_TTL_SECONDS || 60));
+
+function encodePlaybackToken(videoId, sessionId, expiresAt) {
+  if (!PLAYBACK_TOKEN_SECRET) throw new Error('PLAYBACK_TOKEN_SECRET is not configured');
+  const payload = Buffer.from(JSON.stringify({ videoId, sessionId, exp: expiresAt })).toString('base64url');
+  const signature = crypto.createHmac('sha256', PLAYBACK_TOKEN_SECRET).update(payload).digest('base64url');
+  return `${payload}.${signature}`;
+}
+
+function decodePlaybackToken(value) {
+  if (!PLAYBACK_TOKEN_SECRET || typeof value !== 'string' || !value.includes('.')) return null;
+  const [payload, signature] = value.split('.', 2);
+  const expected = crypto.createHmac('sha256', PLAYBACK_TOKEN_SECRET).update(payload).digest('base64url');
+  if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
+  try {
+    const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (!decoded.videoId || !decoded.exp || decoded.exp < Math.floor(Date.now() / 1000)) return null;
+    return decoded;
+  } catch (_) { return null; }
+}
+
+function playbackReady(video) {
+  return Boolean(video
+    && video.processing_status === 'completed'
+    && video.approval_status === 'approved'
+    && video.copyright_status === 'approved'
+    && video.visibility === 'visible'
+    && video.cdn_verified_at);
+}
+
+function videoLifecycle(videoId) {
+  return store.db.prepare(`SELECT id,title,status,playback_status AS playbackStatus,playback_error AS playbackError,
+    processing_status, copyright_status, approval_status, visibility, processing_stage, processing_attempts, processing_error,
+    hls_ready_at, cdn_verified_at, approved_at, rejected_at, rejection_reason, thumbnail_url AS thumbnailUrl,
+    owner_id AS ownerId, file_size AS fileSize, created_at AS createdAt
+    FROM videos WHERE id=?`).get(videoId) || null;
+}
+
+function notifyVideo(videoId, type, payload = {}) {
+  const video = videoLifecycle(videoId);
+  if (!video) return;
+  store.db.prepare('INSERT INTO video_notifications (id,video_id,owner_id,notification_type,payload_json,created_at) VALUES (?,?,?,?,?,?)')
+    .run(store.id(), videoId, video.ownerId || null, type, JSON.stringify(payload), store.now());
+}
+
+function finalizeVideoVisibility(videoId) {
+  const video = videoLifecycle(videoId);
+  if (!video || video.processing_status !== 'completed' || !video.cdn_verified_at) return video;
+  if (video.approval_status === 'approved' && video.copyright_status === 'approved' && video.visibility !== 'visible') {
+    store.db.prepare("UPDATE videos SET visibility='visible',approved_at=COALESCE(approved_at,?),processing_stage='completed' WHERE id=?").run(store.now(), videoId);
+    notifyVideo(videoId, 'video_ready', { watchUrl: bunny.getWatchUrl(videoId) });
+  }
+  return videoLifecycle(videoId);
+}
+
 // Track active uploads for health monitoring
 let activeUploads = 0;
 const startTime = Date.now();
@@ -842,6 +898,9 @@ app.post('/api/subscriptions/:id/cancel', requireUser, async (req, res) => {
 app.get('/api/creator/videos', requireUser, (req, res) => {
   const videos = store.db.prepare(`
     SELECT v.id, v.title, v.status, v.playback_status AS playbackStatus, v.playback_error AS playbackError, v.file_size AS fileSize, v.watch_url AS watchUrl, v.embed_url AS embedUrl, v.created_at AS createdAt,
+      v.processing_status AS processingStatus, v.copyright_status AS copyrightStatus, v.approval_status AS approvalStatus,
+      v.visibility, v.processing_stage AS processingStage, v.processing_attempts AS processingAttempts,
+      v.cdn_verified_at AS cdnVerifiedAt, v.approved_at AS approvedAt, v.rejected_at AS rejectedAt, v.rejection_reason AS rejectionReason,
       (SELECT MIN(l.slug) FROM creator_links l WHERE l.video_id = v.id AND l.creator_id = v.owner_id) AS linkSlug,
       COALESCE((SELECT COUNT(*) FROM view_sessions s JOIN creator_links l ON l.id = s.link_id WHERE l.video_id = v.id AND l.creator_id = v.owner_id AND s.counted = 1), 0) AS eligibleViews
       ,COALESCE((SELECT SUM(e.amount_micros) FROM earnings e JOIN creator_links l2 ON l2.id = e.link_id WHERE l2.video_id = v.id AND l2.creator_id = v.owner_id), 0) AS earningsMicros
@@ -906,13 +965,18 @@ app.post('/api/creator/import-link', (req, res) => {
   // creator's dashboard and ledger.
   const link = store.createLink(source.id, owner.id);
   if (!link) return res.status(409).json({ error: 'This video does not have a reusable NightBox link yet' });
+  const sourceState = videoLifecycle(source.id);
+  const playable = playbackReady(sourceState);
   res.status(201).json({
-    link: `${DOMAIN_URL}/l/${link.slug}`,
+    link: playable ? `${DOMAIN_URL}/l/${link.slug}` : null,
     slug: link.slug,
     videoId: source.id,
     title: source.title,
     watchUrl: source.watchUrl,
     embedUrl: source.embedUrl,
+    playable,
+    processingStatus: sourceState?.processing_status || 'processing',
+    approvalStatus: sourceState?.approval_status || 'pending',
     shared: true,
     message: 'NightBox link imported successfully. Media reused; creator view tracking is linked to this account.',
   });
@@ -922,6 +986,102 @@ app.get('/api/links/:slug', (req, res) => {
   const link = store.db.prepare(`SELECT l.id, l.slug, v.id AS videoId, v.title, v.embed_url AS embedUrl, v.watch_url AS watchUrl FROM creator_links l JOIN videos v ON v.id = l.video_id WHERE l.slug = ?`).get(req.params.slug);
   if (!link) return res.status(404).json({ error: 'Link not found' });
   res.json({ link });
+});
+
+function canManageVideo(req, video) {
+  const user = bearerUser(req) || apiKeyUser(req) || telegramBotUser(req);
+  return Boolean(user && (user.role === 'admin' || user.id === video.ownerId));
+}
+
+function publicVideoState(video) {
+  if (!video) return 'missing';
+  if (video.processing_status === 'failed') return 'failed';
+  if (video.approval_status === 'rejected' || video.copyright_status === 'rejected') return 'rejected';
+  if (video.processing_status !== 'completed') return 'processing';
+  if (video.approval_status !== 'approved' || video.visibility !== 'visible') return 'awaiting_approval';
+  return 'ready';
+}
+
+app.get('/api/videos/:id/status', (req, res) => {
+  const video = videoLifecycle(req.params.id);
+  if (!video) return res.status(404).json({ error: 'Video not found' });
+  if (!canManageVideo(req, video)) return res.status(401).json({ error: 'Authentication required' });
+  const playable = playbackReady(video);
+  res.json({ videoId: video.id, state: publicVideoState(video), playable, watchUrl: playable ? bunny.getWatchUrl(video.id) : null, video });
+});
+
+app.get('/api/creator/video-notifications', (req, res) => {
+  const owner = uploadOwner(req);
+  if (!owner) return res.status(401).json({ error: 'Valid creator bot key is required' });
+  const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 20, 1), 100);
+  const notifications = store.db.prepare(`SELECT id,video_id AS videoId,notification_type AS type,payload_json AS payload,created_at AS createdAt
+    FROM video_notifications WHERE owner_id=? AND delivered_at IS NULL ORDER BY created_at ASC LIMIT ?`).all(owner.id, limit).map((row) => ({ ...row, payload: JSON.parse(row.payload || '{}') }));
+  res.json({ notifications });
+});
+
+app.post('/api/creator/video-notifications/:id/ack', (req, res) => {
+  const owner = uploadOwner(req);
+  if (!owner) return res.status(401).json({ error: 'Valid creator bot key is required' });
+  const result = store.db.prepare('UPDATE video_notifications SET delivered_at=? WHERE id=? AND owner_id=? AND delivered_at IS NULL').run(store.now(), req.params.id, owner.id);
+  if (!result.changes) return res.status(404).json({ error: 'Notification not found' });
+  res.json({ delivered: true });
+});
+
+app.post('/api/videos/:id/playback-token', async (req, res) => {
+  const video = videoLifecycle(req.params.id);
+  if (!video || video.status === 'deleted') return res.status(404).json({ error: 'Video not found' });
+  if (video.processing_status !== 'completed') {
+    if (video.processing_status === 'failed') return res.status(409).json({ error: video.processingError || video.playbackError || 'Video processing failed', code: 'VIDEO_PROCESSING_FAILED', state: 'failed' });
+    res.setHeader('Retry-After', '5');
+    return res.status(202).json({ error: 'Video is still processing', code: 'VIDEO_PROCESSING', state: 'processing', processingStage: video.processing_stage });
+  }
+  if (video.approval_status === 'rejected' || video.copyright_status === 'rejected') return res.status(403).json({ error: video.rejection_reason || 'Video was rejected', code: 'VIDEO_REJECTED', state: 'rejected' });
+  if (!playbackReady(video)) return res.status(403).json({ error: 'Video is awaiting admin approval', code: 'VIDEO_AWAITING_APPROVAL', state: 'awaiting_approval' });
+  if (await viewerIsBlocked(req)) return res.status(403).json({ error: 'Viewer did not pass traffic quality checks', code: 'VIEWER_BLOCKED' });
+  if (!bunny.hasTokenAuth()) return res.status(503).json({ error: 'Secure CDN playback is not configured on the server', code: 'CDN_TOKEN_AUTH_NOT_CONFIGURED' });
+
+  const requestedSlug = String(req.body?.linkSlug || '').trim();
+  const link = requestedSlug
+    ? store.db.prepare('SELECT id,slug FROM creator_links WHERE slug=? AND video_id=?').get(requestedSlug, video.id)
+    : store.db.prepare('SELECT id,slug FROM creator_links WHERE video_id=? ORDER BY canonical DESC,created_at ASC LIMIT 1').get(video.id);
+  let sessionId = null;
+  let viewToken = null;
+  if (link) {
+    const ip = requestIp(req);
+    const userAgent = req.headers['user-agent'] || '';
+    const viewerHash = store.hash(`${ip}|${userAgent}|${process.env.VIEW_HASH_SECRET || process.env.AUTH_SECRET || 'change-me'}`);
+    const ipHash = store.hash(`${ip}|${process.env.IP_HASH_SECRET || process.env.AUTH_SECRET || 'change-me'}`);
+    const viewer = bearerUser(req);
+    viewToken = crypto.randomBytes(32).toString('base64url');
+    sessionId = store.id();
+    store.db.prepare('INSERT INTO view_sessions (id,link_id,viewer_user_id,viewer_hash,ip_hash,view_token_hash,country,started_at) VALUES (?,?,?,?,?,?,?,?)')
+      .run(sessionId, link.id, viewer?.id || null, viewerHash, ipHash, store.hash(`${viewToken}|${process.env.VIEW_HASH_SECRET || process.env.AUTH_SECRET || 'change-me'}`), viewerCountry(req), store.now());
+  }
+  const expiresAt = Math.floor(Date.now() / 1000) + PLAYBACK_TOKEN_TTL_SECONDS;
+  const token = encodePlaybackToken(video.id, sessionId, expiresAt);
+  res.json({ manifestUrl: `${PUBLIC_API_URL}/api/playback-manifest/${encodeURIComponent(video.id)}?token=${encodeURIComponent(token)}`, expiresAt: new Date(expiresAt * 1000).toISOString(), sessionId, viewToken, minWatchSeconds: store.db.prepare('SELECT minimum_watch_seconds AS seconds FROM view_rules WHERE id=1').get().seconds });
+});
+
+app.get('/api/playback-manifest/:id', async (req, res) => {
+  const decoded = decodePlaybackToken(String(req.query.token || ''));
+  if (!decoded || decoded.videoId !== req.params.id) return res.status(401).send('Invalid or expired playback token');
+  const video = videoLifecycle(req.params.id);
+  if (!playbackReady(video) || !bunny.hasTokenAuth()) return res.status(403).send('Playback is not available');
+  try {
+    const sourceUrl = bunny.getHlsUrl(req.params.id);
+    const response = await axios.get(sourceUrl, { timeout: 15000, responseType: 'text' });
+    const expiresAt = decoded.exp;
+    const playlist = String(response.data || '').split(/\r?\n/).map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) return line;
+      const absolute = new URL(trimmed, sourceUrl).toString();
+      return bunny.getSignedCdnUrl(absolute, expiresAt);
+    }).join('\n');
+    res.status(200).type('application/vnd.apple.mpegurl').set('Cache-Control', 'private, no-store').send(playlist);
+  } catch (error) {
+    console.error('[Playback manifest] Failed:', error.message);
+    res.status(502).send('Playback manifest unavailable');
+  }
 });
 
 // Existing local-storage uploads may be marked ready even though only the
@@ -938,11 +1098,11 @@ function enqueueTrackedTranscode(job) {
   try {
     transcoder.enqueue({
       ...job,
-      onReady: (url) => {
-        try { job.onReady(url); } finally { queuedTranscodeIds.delete(job.videoId); }
+      onReady: async (url) => {
+        try { await job.onReady(url); } finally { queuedTranscodeIds.delete(job.videoId); }
       },
-      onError: (error) => {
-        try { job.onError(error); } finally { queuedTranscodeIds.delete(job.videoId); }
+      onError: async (error) => {
+        try { await job.onError(error); } finally { queuedTranscodeIds.delete(job.videoId); }
       },
     });
     return true;
@@ -950,6 +1110,45 @@ function enqueueTrackedTranscode(job) {
     queuedTranscodeIds.delete(job.videoId);
     throw error;
   }
+}
+
+function queueVideoProcessing(videoId, priority = 'background') {
+  if (!HLS_TRANSCODE_ENABLED || !videoId || queuedTranscodeIds.has(videoId)) return false;
+  const sourcePath = BUNNY_LOCAL_STORAGE
+    ? bunny.getLocalPath(videoId)
+    : path.join(TEMP_DIR, `transcode-${videoId}.mp4`);
+  const job = {
+    videoId,
+    priority,
+    sourcePath: BUNNY_LOCAL_STORAGE ? sourcePath : null,
+    preserveSource: BUNNY_LOCAL_STORAGE,
+    prepareSource: BUNNY_LOCAL_STORAGE
+      ? () => Promise.resolve(sourcePath)
+      : () => bunny.downloadVideoToFile(videoId, sourcePath).then(() => sourcePath),
+    uploadHlsDirectory: bunny.uploadHlsDirectory,
+    getHlsUrl: bunny.getHlsUrl,
+    verifyHls: bunny.verifyHls,
+    onStage: async (stage) => {
+      store.db.prepare("UPDATE videos SET processing_status=?,processing_stage=?,processing_started_at=COALESCE(processing_started_at,?),processing_attempts=processing_attempts+CASE WHEN ?='transcoding' THEN 1 ELSE 0 END WHERE id=?")
+        .run(stage === 'cdn_verifying' ? 'cdn_verifying' : 'transcoding', stage, store.now(), stage, videoId);
+      store.db.prepare('UPDATE video_jobs SET status=?,locked_at=?,updated_at=? WHERE video_id=?').run(stage, store.now(), store.now(), videoId);
+    },
+    onReady: async (hlsUrl) => {
+      store.updateVideoPlayback(videoId, 'ready', hlsUrl, null);
+      store.db.prepare("UPDATE videos SET processing_status='completed',processing_stage='completed',cdn_verified_at=?,hls_ready_at=? WHERE id=?").run(store.now(), store.now(), videoId);
+      store.db.prepare("UPDATE video_jobs SET status='completed',last_error=NULL,locked_at=NULL,updated_at=? WHERE video_id=?").run(store.now(), videoId);
+      notifyVideo(videoId, 'hls_ready', { videoId });
+      finalizeVideoVisibility(videoId);
+    },
+    onError: async (error) => {
+      const message = String(error.message || error).slice(0, 2000);
+      store.updateVideoPlayback(videoId, 'failed', null, message);
+      store.db.prepare("UPDATE videos SET processing_status='failed',processing_stage='failed',processing_error=? WHERE id=?").run(message, videoId);
+      store.db.prepare("UPDATE video_jobs SET status='failed',last_error=?,locked_at=NULL,updated_at=? WHERE video_id=?").run(message, store.now(), videoId);
+      notifyVideo(videoId, 'processing_failed', { videoId, error: message });
+    },
+  };
+  return enqueueTrackedTranscode(job);
 }
 
 function ensureHlsForLegacyVideo(videoId, playback) {
@@ -1013,8 +1212,18 @@ function ensureHlsForLegacyVideo(videoId, playback) {
         : () => bunny.downloadVideoToFile(videoId, sourcePath).then(() => sourcePath),
       uploadHlsDirectory: bunny.uploadHlsDirectory,
       getHlsUrl: bunny.getHlsUrl,
-      onReady: (hlsUrl) => store.updateVideoPlayback(videoId, 'ready', hlsUrl, null),
-      onError: (error) => store.updateVideoPlayback(videoId, 'failed', null, String(error.message || error).slice(0, 2000)),
+      verifyHls: bunny.verifyHls,
+      onStage: (stage) => store.db.prepare('UPDATE videos SET processing_status=?,processing_stage=? WHERE id=?').run(stage === 'cdn_verifying' ? 'cdn_verifying' : 'transcoding', stage, videoId),
+      onReady: async (hlsUrl) => {
+        store.updateVideoPlayback(videoId, 'ready', hlsUrl, null);
+        store.db.prepare("UPDATE videos SET processing_status='completed',processing_stage='completed',cdn_verified_at=?,hls_ready_at=? WHERE id=?").run(store.now(), store.now(), videoId);
+        finalizeVideoVisibility(videoId);
+      },
+      onError: async (error) => {
+        const message = String(error.message || error).slice(0, 2000);
+        store.updateVideoPlayback(videoId, 'failed', null, message);
+        store.db.prepare("UPDATE videos SET processing_status='failed',processing_stage='failed' WHERE id=?").run(videoId);
+      },
     });
   }
   return store.getVideoPlayback(videoId);
@@ -1071,6 +1280,8 @@ app.post('/api/links/:slug/view/start', async (req, res) => {
   const videoId = store.db.prepare('SELECT video_id AS videoId FROM creator_links WHERE id=?').get(link.id)?.videoId;
   const playback = ensureHlsForLegacyVideo(videoId, store.getVideoPlayback(videoId));
   if (!playback) return res.status(404).json({ error: 'Video not found' });
+  const lifecycle = videoLifecycle(videoId);
+  if (!playbackReady(lifecycle)) return res.status(403).json({ error: 'Direct MP4 playback is disabled; request an authorized HLS playback token', code: 'PLAYBACK_TOKEN_REQUIRED', state: publicVideoState(lifecycle) });
   if (playback.playbackStatus === 'failed') {
     return res.status(409).json({ error: 'Video processing failed', code: 'VIDEO_PROCESSING_FAILED', playbackStatus: 'failed' });
   }
@@ -1405,6 +1616,9 @@ app.put('/api/admin/users/:id/storage-limit', requireAdmin, (req, res) => {
 });
 app.get('/api/admin/videos', requireAdmin, (req, res) => res.json({ videos: store.db.prepare(`
   SELECT v.id,v.title,v.status,v.playback_status AS playbackStatus,v.playback_error AS playbackError,v.owner_id AS ownerId,v.file_size AS fileSize,v.created_at AS createdAt,
+    v.processing_status AS processingStatus,v.copyright_status AS copyrightStatus,v.approval_status AS approvalStatus,v.visibility,
+    v.processing_stage AS processingStage,v.processing_attempts AS processingAttempts,v.cdn_verified_at AS cdnVerifiedAt,
+    v.approved_at AS approvedAt,v.rejected_at AS rejectedAt,v.rejection_reason AS rejectionReason,v.thumbnail_url AS thumbnailUrl,
     u.email AS ownerEmail,
     u.telegram_user_id AS ownerTelegramUserId,
     COALESCE((SELECT be.bot_name FROM bot_events be WHERE be.video_id=v.id ORDER BY be.created_at DESC LIMIT 1),
@@ -1418,6 +1632,27 @@ app.get('/api/admin/videos', requireAdmin, (req, res) => res.json({ videos: stor
   GROUP BY v.id
   ORDER BY v.created_at DESC
 `).all() }));
+
+app.post('/api/admin/videos/:id/approve', requireAdmin, (req, res) => {
+  const video = videoLifecycle(req.params.id);
+  if (!video) return res.status(404).json({ error: 'Video not found' });
+  if (video.approval_status === 'rejected') return res.status(409).json({ error: 'Rejected videos must be reviewed before approval' });
+  const now = store.now();
+  store.db.prepare("UPDATE videos SET approval_status='approved',copyright_status=CASE WHEN copyright_status='rejected' THEN 'pending' ELSE 'approved' END,approved_at=?,rejected_at=NULL,rejection_reason=NULL,visibility=CASE WHEN processing_status='completed' AND cdn_verified_at IS NOT NULL THEN 'visible' ELSE 'hidden' END WHERE id=?").run(now, video.id);
+  const updated = finalizeVideoVisibility(video.id);
+  res.json({ video: updated, playable: playbackReady(updated), state: publicVideoState(updated) });
+});
+
+app.post('/api/admin/videos/:id/reject', requireAdmin, (req, res) => {
+  const video = videoLifecycle(req.params.id);
+  if (!video) return res.status(404).json({ error: 'Video not found' });
+  const reason = sanitizeInput(req.body?.reason || req.body?.rejectionReason || 'Video rejected by administrator').slice(0, 2000);
+  const now = store.now();
+  store.db.prepare("UPDATE videos SET approval_status='rejected',visibility='hidden',rejected_at=?,rejection_reason=? WHERE id=?").run(now, reason, video.id);
+  notifyVideo(video.id, 'video_rejected', { reason });
+  const updated = videoLifecycle(video.id);
+  res.json({ video: updated, playable: false, state: publicVideoState(updated) });
+});
 app.get('/api/admin/bot-events', requireAdmin, (req, res) => {
   const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 100, 1), 500);
   res.json({ events: store.db.prepare(`SELECT e.id,e.user_id AS userId,u.email,e.bot_name AS botName,e.event_type AS eventType,e.external_id AS externalId,e.video_id AS videoId,e.status,e.error,e.created_at AS createdAt FROM bot_events e LEFT JOIN users u ON u.id=e.user_id ORDER BY e.created_at DESC LIMIT ?`).all(limit) });
@@ -1956,7 +2191,9 @@ app.post('/upload-file', (req, res, next) => {
     if (reusableDuplicate) {
       const creatorLink = owner ? store.createLink(existing.id, owner.id) : null;
       if (owner && isBotRequest(req)) store.db.prepare('INSERT INTO bot_events (id,user_id,bot_name,event_type,external_id,video_id,status,created_at) VALUES (?,?,?,?,?,?,?,?)').run(store.id(), owner.id, botName, 'upload', botExternalId, existing.id, 'duplicate', store.now());
-      return res.json({ success: true, duplicate: true, videoId: existing.id, watchUrl: existing.watchUrl, embedUrl: existing.embedUrl, link: creatorLink ? `${DOMAIN_URL}/l/${creatorLink.slug}` : null, message: 'Exact duplicate detected; existing video reused.' });
+      const duplicateState = videoLifecycle(existing.id);
+      const duplicatePlayable = playbackReady(duplicateState);
+      return res.json({ success: true, duplicate: true, videoId: existing.id, status: duplicateState?.processing_status || 'processing', approvalStatus: duplicateState?.approval_status || 'pending', playable: duplicatePlayable, watchUrl: duplicatePlayable ? existing.watchUrl : null, embedUrl: duplicatePlayable ? existing.embedUrl : null, link: duplicatePlayable && creatorLink ? `${DOMAIN_URL}/l/${creatorLink.slug}` : null, message: duplicatePlayable ? 'Exact duplicate detected; existing approved video reused.' : 'Exact duplicate detected; video is processing or awaiting approval.' });
     }
     if (owner) {
       const reservation = reserveCreatorStorage(owner.id, fileSize);
@@ -1980,8 +2217,20 @@ app.post('/upload-file', (req, res, next) => {
         sourcePath: filePath,
         uploadHlsDirectory: bunny.uploadHlsDirectory,
         getHlsUrl: bunny.getHlsUrl,
-        onReady: (hlsUrl) => store.updateVideoPlayback(videoId, 'ready', hlsUrl, null),
-        onError: (error) => store.updateVideoPlayback(videoId, 'failed', null, String(error.message || error).slice(0, 2000)),
+        verifyHls: bunny.verifyHls,
+        onStage: (stage) => store.db.prepare('UPDATE videos SET processing_status=?,processing_stage=?,processing_started_at=COALESCE(processing_started_at,?),processing_attempts=processing_attempts+CASE WHEN ?=\'transcoding\' THEN 1 ELSE 0 END WHERE id=?').run(stage === 'cdn_verifying' ? 'cdn_verifying' : 'transcoding', stage, store.now(), stage, videoId),
+        onReady: async (hlsUrl) => {
+          store.updateVideoPlayback(videoId, 'ready', hlsUrl, null);
+          store.db.prepare("UPDATE videos SET processing_status='completed',processing_stage='completed',cdn_verified_at=?,hls_ready_at=? WHERE id=?").run(store.now(), store.now(), videoId);
+          notifyVideo(videoId, 'hls_ready', { videoId });
+          finalizeVideoVisibility(videoId);
+        },
+        onError: async (error) => {
+          const message = String(error.message || error).slice(0, 2000);
+          store.updateVideoPlayback(videoId, 'failed', null, message);
+          store.db.prepare("UPDATE videos SET processing_status='failed',processing_stage='failed' WHERE id=?").run(videoId);
+          notifyVideo(videoId, 'processing_failed', { videoId, error: message });
+        },
       });
     }
     const creatorLink = owner ? store.createLink(videoId, owner.id) : null;
@@ -1999,12 +2248,14 @@ app.post('/upload-file', (req, res, next) => {
     res.json({
       success: true,
       videoId,
-      watchUrl: bunny.getWatchUrl(videoId),
-      embedUrl: bunny.getEmbedUrl(videoId),
-      link: creatorLink ? `${DOMAIN_URL}/l/${creatorLink.slug}` : null,
+      watchUrl: null,
+      embedUrl: null,
+      link: null,
+      approvalStatus: 'pending',
+      playable: false,
       status: HLS_TRANSCODE_ENABLED ? 'processing' : 'active',
       playbackStatus: HLS_TRANSCODE_ENABLED ? 'processing' : 'ready',
-      message: HLS_TRANSCODE_ENABLED ? 'Video uploaded. Playback will be available after processing.' : 'Video uploaded and ready.',
+      message: 'Upload received. Video is processing and awaiting approval. You will receive the playable link after approval.',
     });
   } catch (error) {
     console.error('Upload error:', error.message);
@@ -2043,8 +2294,20 @@ app.post('/upload-from-url', async (req, res) => {
         prepareSource: () => bunny.downloadVideoToFile(videoId, sourcePath).then(() => sourcePath),
         uploadHlsDirectory: bunny.uploadHlsDirectory,
         getHlsUrl: bunny.getHlsUrl,
-        onReady: (hlsUrl) => store.updateVideoPlayback(videoId, 'ready', hlsUrl, null),
-        onError: (error) => store.updateVideoPlayback(videoId, 'failed', null, String(error.message || error).slice(0, 2000)),
+        verifyHls: bunny.verifyHls,
+        onStage: (stage) => store.db.prepare('UPDATE videos SET processing_status=?,processing_stage=?,processing_started_at=COALESCE(processing_started_at,?),processing_attempts=processing_attempts+CASE WHEN ?=\'transcoding\' THEN 1 ELSE 0 END WHERE id=?').run(stage === 'cdn_verifying' ? 'cdn_verifying' : 'transcoding', stage, store.now(), stage, videoId),
+        onReady: async (hlsUrl) => {
+          store.updateVideoPlayback(videoId, 'ready', hlsUrl, null);
+          store.db.prepare("UPDATE videos SET processing_status='completed',processing_stage='completed',cdn_verified_at=?,hls_ready_at=? WHERE id=?").run(store.now(), store.now(), videoId);
+          notifyVideo(videoId, 'hls_ready', { videoId });
+          finalizeVideoVisibility(videoId);
+        },
+        onError: async (error) => {
+          const message = String(error.message || error).slice(0, 2000);
+          store.updateVideoPlayback(videoId, 'failed', null, message);
+          store.db.prepare("UPDATE videos SET processing_status='failed',processing_stage='failed' WHERE id=?").run(videoId);
+          notifyVideo(videoId, 'processing_failed', { videoId, error: message });
+        },
       });
     }
     const creatorLink = owner ? store.createLink(videoId, owner.id) : null;
@@ -2052,12 +2315,14 @@ app.post('/upload-from-url', async (req, res) => {
     res.json({
       success: true,
       videoId,
-      watchUrl: bunny.getWatchUrl(videoId),
-      embedUrl: bunny.getEmbedUrl(videoId),
-      link: creatorLink ? `${DOMAIN_URL}/l/${creatorLink.slug}` : null,
+      watchUrl: null,
+      embedUrl: null,
+      link: null,
+      approvalStatus: 'pending',
+      playable: false,
       status: HLS_TRANSCODE_ENABLED ? 'processing' : 'active',
       playbackStatus: HLS_TRANSCODE_ENABLED ? 'processing' : 'ready',
-      message: HLS_TRANSCODE_ENABLED ? 'Video uploaded from URL. Playback will be available after processing.' : 'Video uploaded from URL and ready.',
+      message: 'Upload received. Video is processing and awaiting approval. You will receive the playable link after approval.',
     });
   } catch (error) {
     console.error('URL upload error:', error.message);
@@ -2102,47 +2367,25 @@ app.get('/video/:id', async (req, res) => {
       storageSize: Number(storedVideo.fileSize || 0),
       dateUploaded: storedVideo.createdAt || null,
     };
-    const cdnHost = String(process.env.BUNNY_CDN_HOST || '').trim();
-    const storagePrefix = String(process.env.BUNNY_STORAGE_PREFIX || 'nightbox').replace(/^\/+|\/+$/g, '');
-    const cdnUrl = cdnHost
-      ? `https://${cdnHost}/${storagePrefix}/${videoId}.mp4`
-      : (storedVideo.embedUrl || null);
-    const hlsUrl = cdnHost
-      ? `https://${cdnHost}/${storagePrefix}/hls/${videoId}/master.m3u8`
-      : (playback.hlsUrl || cdnUrl);
     const originStreamUrl = `${PUBLIC_API_URL}/video/${videoId}/stream`;
-    const originHlsUrl = playback.hlsUrl && BUNNY_LOCAL_STORAGE
-      ? `${PUBLIC_API_URL}/nightbox/hls/${videoId}/master.m3u8`
-      : null;
+    const lifecycle = videoLifecycle(videoId);
     res.json({
       success: true,
       video: {
         id: v.guid, title: v.title, status: v.status,
         duration: v.length, size: v.storageSize, views: v.views,
         dateUploaded: v.dateUploaded,
-          thumbnailUrl: v.thumbnailFileName ? `https://${process.env.BUNNY_CDN_HOST}/${String(process.env.BUNNY_STORAGE_PREFIX || 'nightbox').replace(/^\/+|\/+$/g, '')}/${v.guid}/${v.thumbnailFileName}` : null,
-        // Prefer Bunny CDN when the object is available, while retaining the
-        // VPS range-stream fallback for local-only objects.
-        // Expose the CDN URL separately so native clients can connect directly
-        // instead of making every playback request through the API container.
-        // The API stream remains the compatibility fallback for local storage
-        // or a temporarily unavailable CDN object.
-        cdnUrl,
-        // Keep the Bunny iframe contract for existing feed embeds; native
-        // playback clients use cdnUrl/hlsUrl below.
-        // Always prefer the currently configured Pull Zone for playback.
-        // Stored embed URLs may point to an old/retired Bunny hostname.
-        embedUrl: cdnUrl || storedVideo.embedUrl || originStreamUrl,
-        hlsUrl: hlsUrl || originStreamUrl,
-        originHlsUrl,
-        playbackStatus: hlsUrl ? 'ready' : (playback?.playbackStatus || 'ready'),
+        thumbnailUrl: lifecycle?.thumbnailUrl || null,
+        embedUrl: storedVideo.embedUrl || null,
+        playbackStatus: playback?.playbackStatus || 'ready',
         playbackError: playback?.playbackError || null,
-        // Existing clients read streamUrl for non-HLS playback. Prefer the
-        // Bunny CDN object so ExoPlayer/browser clients can request byte ranges
-        // directly from the edge; retain the API proxy as a local-storage or
-        // temporarily unavailable-CDN fallback.
-        streamUrl: cdnUrl || originStreamUrl,
-        originStreamUrl,
+        processingStatus: lifecycle?.processing_status || 'processing',
+        copyrightStatus: lifecycle?.copyright_status || 'pending',
+        approvalStatus: lifecycle?.approval_status || 'pending',
+        visibility: lifecycle?.visibility || 'hidden',
+        processingStage: lifecycle?.processing_stage || 'queued',
+        rejectionReason: lifecycle?.rejection_reason || null,
+        playable: playbackReady(lifecycle),
         watchUrl: bunny.getWatchUrl(videoId),
         downloadUrl: `${DOMAIN_URL}/download/${videoId}`,
       },
@@ -2232,6 +2475,8 @@ app.get('/download/:id', async (req, res) => {
 
   const cdnHost = process.env.BUNNY_CDN_HOST;
   if (!cdnHost || (!BUNNY_LOCAL_STORAGE && (!BUNNY_STORAGE_PASSWORD || !BUNNY_STORAGE_ZONE))) return res.status(503).json({ error: 'Video downloads are not configured on the server' });
+  const lifecycle = videoLifecycle(videoId);
+  if (!playbackReady(lifecycle)) return res.status(403).json({ error: 'Download is available only after processing and approval', code: 'DOWNLOAD_NOT_READY', state: publicVideoState(lifecycle) });
 
   if (BUNNY_LOCAL_STORAGE) {
     const localPath = bunny.getLocalPath(videoId);
@@ -2417,10 +2662,35 @@ app.use((req, res) => {
 // Server Start + Graceful Shutdown
 // ─────────────────────────────────────────────
 
+async function migrateLegacyVideos() {
+  const legacy = store.db.prepare("SELECT id FROM videos WHERE status <> 'deleted' AND playback_status='ready' AND (processing_status='queued' OR approval_status='pending' OR visibility='hidden') LIMIT 500").all();
+  let verified = 0;
+  for (const row of legacy) {
+    try {
+      await bunny.verifyHls(row.id);
+      const now = store.now();
+      store.db.prepare("UPDATE videos SET processing_status='completed',processing_stage='completed',copyright_status='approved',approval_status='approved',visibility='visible',cdn_verified_at=COALESCE(cdn_verified_at,?),hls_ready_at=COALESCE(hls_ready_at,?),approved_at=COALESCE(approved_at,?) WHERE id=?").run(now, now, now, row.id);
+      store.db.prepare("INSERT OR REPLACE INTO video_jobs (video_id,job_type,status,attempts,last_error,next_attempt_at,locked_at,updated_at) VALUES (?, 'hls', 'completed', 0, NULL, ?, NULL, ?)").run(row.id, now, now);
+      verified += 1;
+    } catch (error) {
+      console.warn(`[HLS] Legacy video ${row.id} was not verified: ${error.message}`);
+    }
+  }
+  if (legacy.length) console.log(`[HLS] Legacy migration verified ${verified}/${legacy.length} video(s).`);
+}
+
 function resumeInterruptedTranscodes() {
   if (!HLS_TRANSCODE_ENABLED || !bunny.getHlsUrl('probe')) return;
-  const pending = store.db.prepare("SELECT COUNT(*) AS count FROM videos WHERE status <> 'deleted' AND playback_status = 'processing' AND hls_url IS NULL").get().count;
-  if (pending) console.log(`[HLS] ${pending} interrupted video transcode(s) will resume when requested.`);
+  const pending = store.db.prepare("SELECT id FROM videos WHERE status <> 'deleted' AND processing_status IN ('queued','uploading','transcoding','cdn_verifying') ORDER BY created_at ASC LIMIT 100").all();
+  for (const row of pending) {
+    const localSource = BUNNY_LOCAL_STORAGE ? bunny.getLocalPath(row.id) : null;
+    if (BUNNY_LOCAL_STORAGE && (!localSource || !fs.existsSync(localSource))) {
+      store.db.prepare("UPDATE videos SET processing_status='failed',processing_stage='failed',processing_error=? WHERE id=?").run('Media file is missing from local storage.', row.id);
+      continue;
+    }
+    queueVideoProcessing(row.id, 'background');
+  }
+  if (pending.length) console.log(`[HLS] Requeued ${pending.length} unfinished video processing job(s).`);
 }
 
 const server = app.listen(PORT, '0.0.0.0', () => {
@@ -2429,7 +2699,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🎬 Bunny Storage Zone: ${process.env.BUNNY_STORAGE_ZONE}`);
   console.log(`🔑 Admin API Key: ${ADMIN_API_KEY.substring(0, 8)}...`);
   console.log(`🛡️  Security: helmet + compression + rate limiting\n`);
-  resumeInterruptedTranscodes();
+  void migrateLegacyVideos().finally(() => resumeInterruptedTranscodes());
 });
 
 // Graceful shutdown for PM2

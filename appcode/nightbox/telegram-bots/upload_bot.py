@@ -243,6 +243,31 @@ async def upload_to_backend(file_path, file_name, title, chat_id):
             await asyncio.sleep(UPLOAD_RETRY_DELAY * attempt)
 
 
+async def deliver_approved_link(client, source_message, video_id, chat_id, caption, status_message):
+    """Wait for HLS/CDN verification + admin approval before publishing a link."""
+    try:
+        headers = bot_headers(chat_id)
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+            for _ in range(720):  # up to one hour, survives slow transcoding
+                async with session.get(f"{BACKEND_URL}/api/videos/{video_id}/status", headers=headers) as response:
+                    payload = await response.json(content_type=None)
+                state = payload.get("state")
+                if state == "ready" and payload.get("playable") and payload.get("watchUrl"):
+                    final_caption = build_upload_caption(source_message, payload["watchUrl"])
+                    try:
+                        await status_message.delete()
+                    except Exception:
+                        pass
+                    await source_message.copy(chat_id=chat_id, caption=final_caption or payload["watchUrl"])
+                    return
+                if state in {"failed", "rejected"}:
+                    reason = payload.get("video", {}).get("processingError") or payload.get("video", {}).get("rejectionReason") or state
+                    await status_message.edit_text(f"❌ Video could not be published: {reason}")
+                    return
+                await asyncio.sleep(5)
+        await status_message.edit_text("⏳ Video is still processing. The playable link will appear after approval.")
+    except Exception as error:
+        logger.exception("Approval delivery failed: %s", error)
 @app.on_message(filters.command("start"))
 async def start_command(client: Client, message: Message):
     """Handle /start command"""
@@ -593,26 +618,14 @@ async def handle_video(client: Client, message: Message):
             data = await upload_to_backend(processed_path, upload_name, title, message.chat.id)
 
             video_id = data.get("videoId", "")
-            watch_url = data.get("link") or data.get("watchUrl", "")
-            caption = build_upload_caption(message, watch_url)
-            thumbnail_path = create_temporary_thumbnail(processed_path, os.path.dirname(tmp_path))
-            if thumbnail_path:
-                try:
-                    await status_msg.delete()
-                except Exception:
-                    pass
-                try:
-                    await message.reply_photo(
-                        photo=thumbnail_path,
-                        caption=caption or watch_url,
-                    )
-                except Exception:
-                    # A preview failure must never hide a successful upload.
-                    await message.reply_text(caption or watch_url)
-            else:
-                # Keep upload completion reliable even if FFmpeg cannot extract
-                # a preview frame on an unusual source format.
-                await status_msg.edit_text(caption or watch_url)
+            if not video_id:
+                raise Exception("Backend did not return a video ID")
+            await status_msg.edit_text(
+                "✅ Upload received.\n\n"
+                "⏳ HLS conversion, CDN verification and admin approval are in progress.\n"
+                "The playable NightBox link will be sent after approval."
+            )
+            asyncio.create_task(deliver_approved_link(client, message, video_id, message.chat.id, "", status_msg))
             logger.info(f"Video uploaded: {video_id} ({size_mb} MB)")
 
     except Exception as e:
