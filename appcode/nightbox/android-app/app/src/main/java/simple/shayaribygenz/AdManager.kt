@@ -41,13 +41,13 @@ object AdManager {
     const val MREC_AD_UNIT             = MREC_VIDEO_PLAYER
 
     // ──────────────────────────────────────────────
-    // 1. SMART 45-SECOND COLLAPSIBLE BANNER ENGINE (PER-SCREEN ISOLATION)
+    // 1. SMART 15-SECOND COLLAPSIBLE BANNER ENGINE (PER-SCREEN ISOLATION)
     // ──────────────────────────────────────────────
-    private const val COLLAPSIBLE_COOLDOWN_MS = 45_000L // 45 seconds
+    private const val COLLAPSIBLE_COOLDOWN_MS = 15_000L // 15 seconds
     private val screenCollapsibleTimestamps = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     /**
-     * Checks if 45 seconds have passed since the last collapsible banner was loaded for this specific screen / ad unit.
+     * Checks if 15 seconds have passed since the last collapsible banner was loaded for this specific screen / ad unit.
      */
     fun canRequestCollapsible(screenKey: String = "default"): Boolean {
         val now = System.currentTimeMillis()
@@ -56,7 +56,7 @@ object AdManager {
     }
 
     /**
-     * Builds an AdRequest. If 45s passed for this screen, attaches a new UUID and collapsible parameter
+     * Builds an AdRequest. If 15s passed for this screen, attaches the official collapsible parameter
      * (top or bottom) to trigger a high-paying collapsible expansion.
      * Otherwise returns a standard fast request.
      */
@@ -65,19 +65,13 @@ object AdManager {
         screenKey: String = "default",
         forceCollapsible: Boolean = false
     ): AdRequest {
-        return if (forceCollapsible || canRequestCollapsible(screenKey)) {
-            val bundle = Bundle().apply {
-                putString("collapsible", if (isTop) "top" else "bottom")
-                putString("collapsible_request_id", UUID.randomUUID().toString())
-            }
-            Log.d(TAG, "Requesting high-eCPM Collapsible Banner for [$screenKey] (top=$isTop)")
-            AdRequest.Builder()
-                .addNetworkExtrasBundle(AdMobAdapter::class.java, bundle)
-                .build()
-        } else {
-            Log.d(TAG, "Collapsible for [$screenKey] in 45s cooldown, requesting standard banner")
-            AdRequest.Builder().build()
+        val bundle = Bundle().apply {
+            putString("collapsible", if (isTop) "top" else "bottom")
         }
+        Log.d(TAG, "Requesting 100% high-eCPM Collapsible Banner for [$screenKey] (top=$isTop)")
+        return AdRequest.Builder()
+            .addNetworkExtrasBundle(AdMobAdapter::class.java, bundle)
+            .build()
     }
 
     /**
@@ -85,6 +79,22 @@ object AdManager {
      */
     fun markCollapsibleLoaded(screenKey: String = "default") {
         screenCollapsibleTimestamps[screenKey] = System.currentTimeMillis()
+    }
+
+    /**
+     * Controls global audio state for AdMob ads across the app.
+     * When muted is true (e.g. while watching video), all banner/MREC/video ads
+     * are strictly started 100% MUTED so they never interrupt video playback.
+     * When user taps an ad's unmute control, AdMob handles audio locally without conflict.
+     */
+    fun setAdsMuted(muted: Boolean) {
+        try {
+            MobileAds.setAppMuted(muted)
+            MobileAds.setAppVolume(if (muted) 0f else 1f)
+            Log.d(TAG, "AdMob audio state updated: muted=$muted")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to set MobileAds mute state", e)
+        }
     }
 
     // ──────────────────────────────────────────────
@@ -179,7 +189,7 @@ object AdManager {
                 override fun onAdFailedToLoad(error: LoadAdError) {
                     cachedRewardedAd = null
                     isRewardedLoading = false
-                    Log.w(TAG, "Rewarded Ad load failed: ${error.message}")
+                    Log.w(TAG, "Rewarded Ad load failed: ${error.message} (code: ${error.code})")
 
                     val waiters = synchronized(rewardedWaiters) {
                         val list = ArrayList(rewardedWaiters)
@@ -206,7 +216,8 @@ object AdManager {
     fun showRewardedAd(
         activity: Activity,
         onRewardGranted: () -> Unit,
-        onDismissedEarly: () -> Unit = {}
+        onDismissedEarly: () -> Unit = {},
+        onAdFailed: (() -> Unit)? = null
     ) {
         val ad = cachedRewardedAd
         if (ad != null && isRewardedAdReady()) {
@@ -228,7 +239,11 @@ object AdManager {
                 override fun onAdFailedToShowFullScreenContent(error: AdError) {
                     Log.e(TAG, "Rewarded ad failed to show: ${error.message}")
                     preloadRewarded(activity.applicationContext)
-                    onRewardGranted()
+                    if (onAdFailed != null) {
+                        onAdFailed()
+                    } else {
+                        onDismissedEarly()
+                    }
                 }
 
                 override fun onAdShowedFullScreenContent() {
@@ -242,76 +257,91 @@ object AdManager {
                 isRewardEarned.set(true)
             }
         } else {
-            Log.d(TAG, "Rewarded ad not cached in RAM. Preloading for next time and passing through.")
+            Log.d(TAG, "Rewarded ad not cached in RAM when show called.")
             preloadRewarded(activity.applicationContext)
-            onRewardGranted()
+            if (onAdFailed != null) {
+                onAdFailed()
+            } else {
+                onDismissedEarly()
+            }
         }
     }
 
     /**
-     * Shows the buffered rewarded ad. If currently loading in background, waits up to [maxWaitMs] (default 2000ms).
+     * Shows the buffered rewarded ad. If not yet loaded or currently loading in background,
+     * waits up to [maxWaitMs] (default 5000ms) with a loading spinner.
      * If loaded in time, shows ad immediately.
-     * If timeout or load fails, smoothly falls back to [onRewardGranted] so the user is never blocked.
+     * If timeout or load fails, invokes [onAdFailed] so users cannot skip ads for free.
      */
     fun showOrWaitForRewardedAd(
         activity: Activity,
-        maxWaitMs: Long = 2000L,
+        maxWaitMs: Long = 5000L,
         onLoadingStateChanged: ((Boolean) -> Unit)? = null,
         onRewardGranted: () -> Unit,
-        onDismissedEarly: () -> Unit = {}
+        onDismissedEarly: () -> Unit = {},
+        onAdFailed: (() -> Unit)? = null
     ) {
         if (isRewardedAdReady()) {
             onLoadingStateChanged?.invoke(false)
-            showRewardedAd(activity, onRewardGranted, onDismissedEarly)
+            showRewardedAd(activity, onRewardGranted, onDismissedEarly, onAdFailed)
             return
         }
 
-        if (isRewardedLoading) {
-            onLoadingStateChanged?.invoke(true)
-            val handler = Handler(Looper.getMainLooper())
-            var completed = false
+        // Loophole 2 Fix: If ad is not yet loading, start loading now instead of unlocking video free (0ms)
+        if (!isRewardedLoading) {
+            preloadRewarded(activity.applicationContext)
+        }
 
-            val timeoutRunnable = Runnable {
-                if (!completed) {
-                    completed = true
-                    onLoadingStateChanged?.invoke(false)
-                    Log.d(TAG, "Rewarded wait timed out (${maxWaitMs}ms). Proceeding to content.")
-                    onRewardGranted()
+        // Loophole 1 Fix: Show spinner and wait up to maxWaitMs (5000ms)
+        onLoadingStateChanged?.invoke(true)
+        val handler = Handler(Looper.getMainLooper())
+        var completed = false
+
+        val timeoutRunnable = Runnable {
+            if (!completed) {
+                completed = true
+                onLoadingStateChanged?.invoke(false)
+                Log.d(TAG, "Rewarded wait timed out (${maxWaitMs}ms). Ad required.")
+                if (onAdFailed != null) {
+                    onAdFailed()
+                } else {
+                    onDismissedEarly()
                 }
             }
-            handler.postDelayed(timeoutRunnable, maxWaitMs)
+        }
+        handler.postDelayed(timeoutRunnable, maxWaitMs)
 
-            val waiter = object : RewardedLoadListener {
-                override fun onLoaded() {
-                    handler.post {
-                        if (!completed) {
-                            completed = true
-                            handler.removeCallbacks(timeoutRunnable)
-                            onLoadingStateChanged?.invoke(false)
-                            showRewardedAd(activity, onRewardGranted, onDismissedEarly)
-                        }
-                    }
-                }
-
-                override fun onFailed() {
-                    handler.post {
-                        if (!completed) {
-                            completed = true
-                            handler.removeCallbacks(timeoutRunnable)
-                            onLoadingStateChanged?.invoke(false)
-                            onRewardGranted()
-                        }
+        val waiter = object : RewardedLoadListener {
+            override fun onLoaded() {
+                handler.post {
+                    if (!completed) {
+                        completed = true
+                        handler.removeCallbacks(timeoutRunnable)
+                        onLoadingStateChanged?.invoke(false)
+                        showRewardedAd(activity, onRewardGranted, onDismissedEarly, onAdFailed)
                     }
                 }
             }
 
-            synchronized(rewardedWaiters) {
-                rewardedWaiters.add(waiter)
+            override fun onFailed() {
+                handler.post {
+                    if (!completed) {
+                        completed = true
+                        handler.removeCallbacks(timeoutRunnable)
+                        onLoadingStateChanged?.invoke(false)
+                        Log.d(TAG, "Rewarded ad load failed. Ad required.")
+                        if (onAdFailed != null) {
+                            onAdFailed()
+                        } else {
+                            onDismissedEarly()
+                        }
+                    }
+                }
             }
-            return
         }
 
-        preloadRewarded(activity.applicationContext)
-        onRewardGranted()
+        synchronized(rewardedWaiters) {
+            rewardedWaiters.add(waiter)
+        }
     }
 }

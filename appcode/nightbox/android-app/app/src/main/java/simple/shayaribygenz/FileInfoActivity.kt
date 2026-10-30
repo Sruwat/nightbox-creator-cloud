@@ -60,8 +60,10 @@ class FileInfoActivity : AppCompatActivity() {
     private var viewCountDownTimer: CountDownTimer? = null
     private var maxSafetyTimeoutHandler: Handler? = null
     private var maxSafetyTimeoutRunnable: Runnable? = null
+    private var layoutSlowNetwork: View? = null
+    private var slowNetworkHandler: Handler? = null
+    private var slowNetworkRunnable: Runnable? = null
 
-    private var streamUrl: String? = null
     private var videoDurationSec: Int = 0
     private var videoSizeBytes: Long = 0L
 
@@ -91,27 +93,10 @@ class FileInfoActivity : AppCompatActivity() {
         pbLoadingVideo = findViewById<ProgressBar>(R.id.pbLoadingVideo)
         icOpenVideo = findViewById<ImageView>(R.id.icOpenVideo)
         tvOpenVideoText = findViewById<TextView>(R.id.tvOpenVideoText)
+        layoutSlowNetwork = findViewById(R.id.layoutSlowNetwork)
 
-        // Stage 1: Button starts in preparing state while ads load
-        pbLoadingVideo?.visibility = View.VISIBLE
-        icOpenVideo?.visibility = View.GONE
-        tvOpenVideoText?.text = "Connecting to stream..."
-
-        // Safety fallback: auto-unlock if ads take too long (max 10s)
-        maxSafetyTimeoutHandler = Handler(Looper.getMainLooper())
-        maxSafetyTimeoutRunnable = Runnable {
-            if (!isButtonUnlocked) {
-                Log.d("FileInfoActivity", "Safety timeout reached (10s). Unlocking stream button.")
-                unlockButtonForPlayback()
-            }
-        }
-        maxSafetyTimeoutHandler?.postDelayed(maxSafetyTimeoutRunnable!!, 10_000L)
-
-        val passedTitle = intent?.getStringExtra("video_title")
-        if (!passedTitle.isNullOrBlank()) {
-            videoTitle = formatCleanTitle(passedTitle)
-            tvVideoTitle.text = videoTitle
-        }
+        // Instant realistic random video details (Zero network calls, saving 100% bandwidth for ads)
+        setupRandomVideoDetails()
 
         btnBack.applyPressScale { finish() }
 
@@ -134,18 +119,26 @@ class FileInfoActivity : AppCompatActivity() {
             arrow.startAnimation(bounce)
         }
 
-        // Fetch video title and details from server
-        fetchVideoInfo()
-
-        // Preload rewarded ad immediately so it is ready on click
-        AdManager.preloadRewarded(this)
-
-        // Open video action: check if unlocked, then show rewarded ad + play
+        // Open video action: check active connection, handle ad retry, or show rewarded ad + play
         btnOpenVideo.applyPressScale {
-            if (!isButtonUnlocked) {
-                Toast.makeText(this, "Preparing secure stream, please wait a moment...", Toast.LENGTH_SHORT).show()
+            // Loophole 4 Fix: Active internet connection strictly required
+            if (!SecurityUtil.isOnline(this)) {
+                Toast.makeText(this, "Active internet connection required to play video", Toast.LENGTH_SHORT).show()
+                showAdFailedOrOfflineState(isOffline = true)
                 return@applyPressScale
             }
+
+            // Loophole 3 Fix: If button is not unlocked (e.g. ad blocked or retry needed)
+            if (!isButtonUnlocked) {
+                if (tvOpenVideoText?.text?.toString()?.contains("Retry") == true) {
+                    retryLoadingAdsAndStream()
+                } else {
+                    Toast.makeText(this, "Preparing secure stream, please wait a moment...", Toast.LENGTH_SHORT).show()
+                }
+                return@applyPressScale
+            }
+
+            // Button is unlocked: show rewarded ad, then play!
             showRewardedThenPlay()
         }
 
@@ -153,21 +146,116 @@ class FileInfoActivity : AppCompatActivity() {
         findViewById<LinearLayout>(R.id.btnJoinTelegram)?.applyPressScale { openTelegram() }
         findViewById<LinearLayout>(R.id.btnJoinWhatsApp)?.applyPressScale { openWhatsApp() }
 
+        // Check connection and initialize ad flow (Loophole 4 Fix)
+        if (!SecurityUtil.isOnline(this)) {
+            showAdFailedOrOfflineState(isOffline = true)
+        } else {
+            startAdPreparationFlow()
+        }
+    }
+
+    private fun startAdPreparationFlow(forceReload: Boolean = false) {
+        isViewTimerStarted = false
+        isButtonUnlocked = false
+
+        // Stage 1: Button starts in preparing state while ads load
+        pbLoadingVideo?.visibility = View.VISIBLE
+        icOpenVideo?.visibility = View.GONE
+        tvOpenVideoText?.text = "Connecting to server..."
+        layoutSlowNetwork?.visibility = View.GONE
+
+        // Show slow network notice with red line indicator after 8s if ads take longer to load
+        startSlowNetworkNoticeTimer()
+
+        // Safety timeout: do not wait more than 15s if ads fail to load
+        startSafetyTimeout()
+
+        // Preload rewarded ad immediately so it is ready on click
+        AdManager.preloadRewarded(this)
+
         // Load ads once on creation (instantly on entering screen)
-        loadScreenAds()
+        loadScreenAds(forceReload)
+    }
+
+    private fun startSlowNetworkNoticeTimer() {
+        slowNetworkRunnable?.let { slowNetworkHandler?.removeCallbacks(it) }
+        slowNetworkHandler = Handler(Looper.getMainLooper())
+        slowNetworkRunnable = Runnable {
+            if (!isButtonUnlocked && !isViewTimerStarted && !isFinishing && !isDestroyed) {
+                layoutSlowNetwork?.visibility = View.VISIBLE
+                findViewById<TextView>(R.id.tvSlowNetworkMsg)?.text = "Slow internet connection. Please wait..."
+            }
+        }
+        slowNetworkHandler?.postDelayed(slowNetworkRunnable!!, 8_000L)
+    }
+
+    private fun startSafetyTimeout() {
+        maxSafetyTimeoutRunnable?.let { maxSafetyTimeoutHandler?.removeCallbacks(it) }
+        maxSafetyTimeoutHandler = Handler(Looper.getMainLooper())
+        maxSafetyTimeoutRunnable = Runnable {
+            if (!isButtonUnlocked && !isFinishing && !isDestroyed) {
+                Log.d("FileInfoActivity", "Safety timeout reached (15s). Unlocking Open File button.")
+                unlockButtonForPlayback()
+            }
+        }
+        maxSafetyTimeoutHandler?.postDelayed(maxSafetyTimeoutRunnable!!, 15_000L)
+    }
+
+    private fun showAdFailedOrOfflineState(isOffline: Boolean) {
+        if (isFinishing || isDestroyed) return
+        isButtonUnlocked = false
+        viewCountDownTimer?.cancel()
+        maxSafetyTimeoutRunnable?.let { maxSafetyTimeoutHandler?.removeCallbacks(it) }
+        slowNetworkRunnable?.let { slowNetworkHandler?.removeCallbacks(it) }
+
+        pbLoadingVideo?.visibility = View.GONE
+        icOpenVideo?.visibility = View.VISIBLE
+        btnOpenVideo.clearAnimation()
+
+        if (isOffline) {
+            tvOpenVideoText?.text = "Offline - Tap to Retry"
+            layoutSlowNetwork?.visibility = View.VISIBLE
+            findViewById<TextView>(R.id.tvSlowNetworkMsg)?.text = "No internet connection. Please connect to continue."
+        } else {
+            tvOpenVideoText?.text = "Ad Failed - Tap to Retry"
+            layoutSlowNetwork?.visibility = View.VISIBLE
+            findViewById<TextView>(R.id.tvSlowNetworkMsg)?.text = "Ads could not load. Turn off AdBlocker/DNS & retry."
+        }
+    }
+
+    private fun retryLoadingAdsAndStream() {
+        if (!SecurityUtil.isOnline(this)) {
+            Toast.makeText(this, "Active internet connection required to play video", Toast.LENGTH_SHORT).show()
+            showAdFailedOrOfflineState(isOffline = true)
+            return
+        }
+
+        Toast.makeText(this, "Retrying ad connection...", Toast.LENGTH_SHORT).show()
+        startAdPreparationFlow(forceReload = true)
     }
 
     override fun onResume() {
         super.onResume()
         SecurityUtil.checkVpn(this)
+        AdComponents.resumeAdViews(adBannerContainerTop)
+        AdComponents.resumeAdViews(mrecTopContainer)
+        AdComponents.resumeAdViews(mrecBottomContainer)
         if (adBannerContainerTop.childCount == 0 || (bannerAdView != null && AdManager.canRequestCollapsible("file_info"))) {
             loadBannerAd()
         }
     }
 
+    override fun onPause() {
+        AdComponents.pauseAdViews(adBannerContainerTop)
+        AdComponents.pauseAdViews(mrecTopContainer)
+        AdComponents.pauseAdViews(mrecBottomContainer)
+        super.onPause()
+    }
+
     override fun onDestroy() {
         viewCountDownTimer?.cancel()
         maxSafetyTimeoutRunnable?.let { maxSafetyTimeoutHandler?.removeCallbacks(it) }
+        slowNetworkRunnable?.let { slowNetworkHandler?.removeCallbacks(it) }
         AdComponents.destroyAdViews(adBannerContainerTop)
         AdComponents.destroyAdViews(mrecTopContainer)
         AdComponents.destroyAdViews(mrecBottomContainer)
@@ -182,12 +270,16 @@ class FileInfoActivity : AppCompatActivity() {
     private fun onAdDisplayedStartViewTimer() {
         if (isViewTimerStarted || isButtonUnlocked || isFinishing || isDestroyed) return
         isViewTimerStarted = true
-        Log.d("FileInfoActivity", "Ad is now visible on screen. Starting 4s Ads View Timer.")
+        Log.d("FileInfoActivity", "Ad is now visible on screen. Starting 5s compulsory ad countdown.")
+
+        // Ad is displayed, hide slow network indicator
+        slowNetworkRunnable?.let { slowNetworkHandler?.removeCallbacks(it) }
+        layoutSlowNetwork?.visibility = View.GONE
 
         pbLoadingVideo?.visibility = View.GONE
         icOpenVideo?.visibility = View.VISIBLE
 
-        viewCountDownTimer = object : CountDownTimer(4_000L, 1_000L) {
+        viewCountDownTimer = object : CountDownTimer(5_000L, 1_000L) {
             override fun onTick(millisUntilFinished: Long) {
                 val secondsLeft = ((millisUntilFinished + 999) / 1000).coerceAtLeast(1)
                 tvOpenVideoText?.text = "Stream ready in ${secondsLeft}s..."
@@ -207,6 +299,8 @@ class FileInfoActivity : AppCompatActivity() {
         isButtonUnlocked = true
         viewCountDownTimer?.cancel()
         maxSafetyTimeoutRunnable?.let { maxSafetyTimeoutHandler?.removeCallbacks(it) }
+        slowNetworkRunnable?.let { slowNetworkHandler?.removeCallbacks(it) }
+        layoutSlowNetwork?.visibility = View.GONE
 
         pbLoadingVideo?.visibility = View.GONE
         icOpenVideo?.visibility = View.VISIBLE
@@ -215,21 +309,13 @@ class FileInfoActivity : AppCompatActivity() {
         btnOpenVideo.startBreathingPulse()
     }
 
-    private fun loadScreenAds() {
-        if (adsLoaded) return
+    private fun loadScreenAds(force: Boolean = false) {
+        if (adsLoaded && !force) return
         adsLoaded = true
 
         loadBannerAd()
         loadMrecTopAd()
-
-        // Lazy load bottom MREC only when user scrolls down to view it
-        val scrollView = findViewById<android.widget.ScrollView>(R.id.scrollView)
-        scrollView?.setOnScrollChangeListener { _, _, scrollY, _, _ ->
-            if (!bottomMrecLoaded && scrollY > 200) {
-                bottomMrecLoaded = true
-                loadMrecBottomAd()
-            }
-        }
+        loadMrecBottomAd() // Preloaded immediately so it is ready before user scrolls
     }
 
     private fun loadBannerAd() {
@@ -269,31 +355,52 @@ class FileInfoActivity : AppCompatActivity() {
     }
 
     private fun showRewardedThenPlay() {
+        // Loophole 4 Fix: Check connection before showing ad
+        if (!SecurityUtil.isOnline(this)) {
+            Toast.makeText(this, "Active internet connection required to play video", Toast.LENGTH_SHORT).show()
+            showAdFailedOrOfflineState(isOffline = true)
+            return
+        }
+
+        AdManager.setAdsMuted(false)
+
         AdManager.showOrWaitForRewardedAd(
             activity = this,
-            maxWaitMs = 2000L,
+            maxWaitMs = 2500L,
             onLoadingStateChanged = { isLoading ->
                 pbLoadingVideo?.visibility = if (isLoading) View.VISIBLE else View.GONE
                 icOpenVideo?.visibility = if (isLoading) View.GONE else View.VISIBLE
-                tvOpenVideoText?.text = if (isLoading) "Unlocking..." else "Open File"
+                tvOpenVideoText?.text = if (isLoading) "Preparing your video ad..." else "Open File"
             },
             onRewardGranted = {
                 openVideoPlayer()
             },
             onDismissedEarly = {
-                // If user closes/dismisses ad, navigate directly to player per requirements
+                pbLoadingVideo?.visibility = View.GONE
+                icOpenVideo?.visibility = View.VISIBLE
+                tvOpenVideoText?.text = "Open File"
+                Toast.makeText(this, "Please watch the short ad to unlock the video", Toast.LENGTH_SHORT).show()
+            },
+            onAdFailed = {
+                Log.w("FileInfoActivity", "Rewarded ad unavailable from Google AdMob (No Fill). Proceeding to playback.")
                 openVideoPlayer()
             }
         )
     }
 
     private fun openVideoPlayer() {
+        // Loophole 4 Fix: Ensure user has connection before opening player
+        if (!SecurityUtil.isOnline(this)) {
+            Toast.makeText(this, "Active internet connection required to play video", Toast.LENGTH_SHORT).show()
+            showAdFailedOrOfflineState(isOffline = true)
+            return
+        }
+
         val vid = videoId ?: return
         val intent = Intent(this, VideoPlayerActivity::class.java).apply {
             putExtra("video_id", vid)
             linkSlug?.let { putExtra("link_slug", it) }
             putExtra("video_title", videoTitle)
-            streamUrl?.let { putExtra("stream_url", it) }
             if (videoDurationSec > 0) putExtra("video_duration_sec", videoDurationSec)
             if (videoSizeBytes > 0L) putExtra("video_size_bytes", videoSizeBytes)
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -302,74 +409,33 @@ class FileInfoActivity : AppCompatActivity() {
         finish() // Clean transition, no duplicate back-stack trap
     }
 
-    private fun fetchVideoInfo() {
-        val vid = videoId ?: return
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val client = apiClient
-
-                // If title was not passed, resolve from link slug
-                val currentSlug = linkSlug
-                if (!currentSlug.isNullOrBlank() && (videoTitle == "NightBox Video" || videoTitle == "Exclusive Premium Video")) {
-                    try {
-                        val linkReq = Request.Builder()
-                            .url("${BuildConfig.BACKEND_URL}/api/links/${Uri.encode(currentSlug)}")
-                            .build()
-                        client.newCall(linkReq).execute().use { linkResp ->
-                            if (linkResp.isSuccessful) {
-                                val linkJson = JSONObject(linkResp.body?.string().orEmpty())
-                                val rawTitle = linkJson.optJSONObject("link")?.optString("title")
-                                if (!rawTitle.isNullOrBlank()) {
-                                    videoTitle = formatCleanTitle(rawTitle)
-                                    withContext(Dispatchers.Main) {
-                                        tvVideoTitle.text = videoTitle
-                                    }
-                                }
-                            }
-                        }
-                    } catch (_: Exception) {}
-                }
-
-                val request = Request.Builder()
-                    .url("${BuildConfig.BACKEND_URL}/video/$vid")
-                    .build()
-                client.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) {
-                        val jsonData = response.body?.string()
-                        val json = JSONObject(jsonData ?: "{}")
-                        if (json.optBoolean("success", false)) {
-                            val video = json.optJSONObject("video")
-                            val fetchedTitle = video?.optString("title")
-                            val durationSec = video?.optInt("duration", 0) ?: 0
-                            val sizeBytes = video?.optLong("size", 0L) ?: 0L
-                            // Playback is authorized only after the user presses
-                            // Play. Do not cache or pass unsigned HLS/MP4 URLs.
-                            streamUrl = null
-                            videoDurationSec = durationSec
-                            videoSizeBytes = sizeBytes
-
-                            withContext(Dispatchers.Main) {
-                                if (!fetchedTitle.isNullOrBlank()) {
-                                    videoTitle = formatCleanTitle(fetchedTitle)
-                                    tvVideoTitle.text = videoTitle
-                                }
-                                if (durationSec > 0) {
-                                    findViewById<TextView>(R.id.tvSpecDuration)?.text =
-                                        String.format("%02d:%02d", durationSec / 60, durationSec % 60)
-                                }
-                                if (sizeBytes > 0) {
-                                    val sizeMb = (sizeBytes / (1024 * 1024)).coerceAtLeast(1)
-                                    findViewById<TextView>(R.id.tvSpecSize)?.text = "~$sizeMb MB"
-                                } else if (durationSec > 0) {
-                                    val sizeMb = ((durationSec * 220) / 1024).coerceAtLeast(42)
-                                    findViewById<TextView>(R.id.tvSpecSize)?.text = "~$sizeMb MB"
-                                }
-                            }
-                        }
-                    }
-                }
-            } catch (_: Exception) {}
+    private fun setupRandomVideoDetails() {
+        val passedTitle = intent?.getStringExtra("video_title")
+        if (!passedTitle.isNullOrBlank()) {
+            videoTitle = formatCleanTitle(passedTitle)
+        } else {
+            val randomTitles = listOf(
+                "Exclusive Premium Video",
+                "Ultra HD High-Speed Stream",
+                "Full HD Special Media",
+                "NightBox 4K Stream",
+                "Exclusive High-Bitrate Clip"
+            )
+            videoTitle = randomTitles.random()
         }
+        tvVideoTitle.text = videoTitle
+
+        // Realistic random duration between 3m 40s (220s) and 9m 30s (570s)
+        val randomDurationSec = (220..570).random()
+        videoDurationSec = randomDurationSec
+        val minutes = randomDurationSec / 60
+        val seconds = randomDurationSec % 60
+        findViewById<TextView>(R.id.tvSpecDuration)?.text = String.format("%02d:%02d", minutes, seconds)
+
+        // Realistic random size between 95 MB and 245 MB
+        val randomSizeMb = (95..245).random()
+        videoSizeBytes = randomSizeMb * 1024L * 1024L
+        findViewById<TextView>(R.id.tvSpecSize)?.text = "~$randomSizeMb MB"
     }
 
     private fun formatCleanTitle(raw: String): String {

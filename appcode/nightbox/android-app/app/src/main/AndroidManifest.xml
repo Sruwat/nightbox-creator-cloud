@@ -63,8 +63,8 @@
                 <data android:pathPrefix="/watch/" />
                 <data android:pathPrefix="/l/" />
             </intent-filter>
-            <!-- Explicit fallback for Telegram/in-app browsers that block
-                 intent:// navigation before verified App Links are resolved. -->
+
+            <!-- Custom scheme deep links: nightbox://watch/{videoId} and nightbox://l/{slug} -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

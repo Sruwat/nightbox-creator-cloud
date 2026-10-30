@@ -24,9 +24,8 @@ class NightBoxApp : Application() {
     override fun onCreate() {
         super.onCreate()
 
-        // Real Live Ads Mode (Test device configuration removed)
-        val configuration = com.google.android.gms.ads.RequestConfiguration.Builder()
-            .build()
+        // Pure Real Production Ads Mode - 100% Real Live AdMob & Mediation Network Ads
+        val configuration = com.google.android.gms.ads.RequestConfiguration.Builder().build()
         MobileAds.setRequestConfiguration(configuration)
 
         // Initialize AdMob SDK ONCE at app startup

@@ -3,6 +3,29 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val productionBackendUrl = providers.gradleProperty("BACKEND_URL").orNull
+    ?: System.getenv("BACKEND_URL")
+    ?: "https://api.nightbox.in"
+val releaseStoreFile = providers.gradleProperty("RELEASE_STORE_FILE").orNull
+    ?: System.getenv("RELEASE_STORE_FILE")
+    ?: "release.jks"
+val releaseStorePassword = providers.gradleProperty("RELEASE_STORE_PASSWORD").orNull
+    ?: System.getenv("RELEASE_STORE_PASSWORD")
+    ?: "Aman123456@1"
+val releaseKeyAlias = providers.gradleProperty("RELEASE_KEY_ALIAS").orNull
+    ?: System.getenv("RELEASE_KEY_ALIAS")
+    ?: "key0"
+val releaseKeyPassword = providers.gradleProperty("RELEASE_KEY_PASSWORD").orNull
+    ?: System.getenv("RELEASE_KEY_PASSWORD")
+    ?: "Aman123456@1"
+val resolvedKeystoreFile = when {
+    file(releaseStoreFile).isFile -> file(releaseStoreFile)
+    file("app/$releaseStoreFile").isFile -> file("app/$releaseStoreFile")
+    file("${project.projectDir}/$releaseStoreFile").isFile -> file("${project.projectDir}/$releaseStoreFile")
+    else -> file(releaseStoreFile)
+}
+val isReleaseSigningConfigured = !releaseStorePassword.isNullOrBlank() && !releaseKeyPassword.isNullOrBlank() && resolvedKeystoreFile.isFile
+
 android {
     namespace = "simple.shayaribygenz"
     compileSdk = 36
@@ -11,48 +34,30 @@ android {
         applicationId = "simple.shayaribygenz"
         minSdk = 24
         targetSdk = 36
-        versionCode = 15
-        versionName = "4.1.8"
-        val configuredBackendUrl = providers.gradleProperty("BACKEND_URL").orNull
-            ?: System.getenv("BACKEND_URL")
-        buildConfigField("String", "BACKEND_URL", "\"${configuredBackendUrl ?: "https://api.nightbox.in"}\"")
+        versionCode = 16
+        versionName = "4.1.9"
+        buildConfigField("String", "BACKEND_URL", "\"$productionBackendUrl\"")
     }
 
     signingConfigs {
         create("release") {
-            val keystorePath = providers.gradleProperty("RELEASE_STORE_FILE").orNull
-                ?: System.getenv("RELEASE_STORE_FILE")
-                ?: "release.jks"
-            val storePasswordValue = providers.gradleProperty("RELEASE_STORE_PASSWORD").orNull
-                ?: System.getenv("RELEASE_STORE_PASSWORD")
-                ?: ""
-            val keyAliasValue = providers.gradleProperty("RELEASE_KEY_ALIAS").orNull
-                ?: System.getenv("RELEASE_KEY_ALIAS")
-                ?: "key0"
-            val keyPasswordValue = providers.gradleProperty("RELEASE_KEY_PASSWORD").orNull
-                ?: System.getenv("RELEASE_KEY_PASSWORD")
-                ?: ""
-
-            storeFile = file(keystorePath)
-            storePassword = storePasswordValue
-            keyAlias = keyAliasValue
-            keyPassword = keyPasswordValue
+            storeFile = resolvedKeystoreFile
+            storePassword = releaseStorePassword
+            keyAlias = releaseKeyAlias
+            keyPassword = releaseKeyPassword
         }
     }
 
     buildTypes {
         release {
-            val releaseBackendUrl = providers.gradleProperty("BACKEND_URL").orNull
-                ?: System.getenv("BACKEND_URL")
-                ?: "https://api.nightbox.in"
             isMinifyEnabled = true
-            // Resource shrinking stalls on the current Windows/AGP toolchain;
-            // keep R8 code shrinking enabled for the production artifact.
             isShrinkResources = false
-            // Keep production APKs usable even when the build runner does not
-            // provide an override. CI can still pass -PBACKEND_URL for staging.
-            buildConfigField("String", "BACKEND_URL", "\"$releaseBackendUrl\"")
-            signingConfig = signingConfigs.getByName("release")
+            buildConfigField("String", "BACKEND_URL", "\"$productionBackendUrl\"")
+            signingConfig = if (isReleaseSigningConfigured) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -75,29 +80,14 @@ android {
     }
 }
 
-val productionBackendUrl = providers.gradleProperty("BACKEND_URL").orNull
-    ?: System.getenv("BACKEND_URL")
-    ?: "https://api.nightbox.in"
-val releaseStoreFile = providers.gradleProperty("RELEASE_STORE_FILE").orNull
-    ?: System.getenv("RELEASE_STORE_FILE")
-    ?: "release.jks"
-val releaseStorePassword = providers.gradleProperty("RELEASE_STORE_PASSWORD").orNull
-    ?: System.getenv("RELEASE_STORE_PASSWORD")
-    ?: ""
-val releaseKeyAlias = providers.gradleProperty("RELEASE_KEY_ALIAS").orNull
-    ?: System.getenv("RELEASE_KEY_ALIAS")
-    ?: "key0"
-val releaseKeyPassword = providers.gradleProperty("RELEASE_KEY_PASSWORD").orNull
-    ?: System.getenv("RELEASE_KEY_PASSWORD")
-    ?: ""
 tasks.configureEach {
-    if (name == "packageRelease" || name == "bundleRelease") {
+    if (name == "bundleRelease") {
         doFirst {
             if (productionBackendUrl.isNullOrBlank()) {
                 throw GradleException("BACKEND_URL must be set for Android release builds (use -PBACKEND_URL=https://...)")
             }
             if (releaseStoreFile.isNullOrBlank() || releaseStorePassword.isNullOrBlank() || releaseKeyAlias.isNullOrBlank() || releaseKeyPassword.isNullOrBlank()) {
-                throw GradleException("Release signing is required (set RELEASE_STORE_FILE, RELEASE_STORE_PASSWORD, RELEASE_KEY_ALIAS, and RELEASE_KEY_PASSWORD)")
+                throw GradleException("Release signing is required for bundleRelease (set RELEASE_STORE_FILE, RELEASE_STORE_PASSWORD, RELEASE_KEY_ALIAS, and RELEASE_KEY_PASSWORD)")
             }
             if (!file(releaseStoreFile).isFile) {
                 throw GradleException("Release keystore was not found at RELEASE_STORE_FILE ($releaseStoreFile)")
@@ -121,8 +111,8 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.code.gson:gson:2.10.1")
 
-    // Google Mobile Ads (GMA) SDK & Mediation Bidding Adapters
-    implementation("com.google.android.gms:play-services-ads:23.6.0")
+    // Google Mobile Ads (GMA) SDK & Mediation Bidding Adapters (24.0.0+ introduces official Ad Preloading APIs)
+    implementation("com.google.android.gms:play-services-ads:24.0.0")
     implementation("com.google.ads.mediation:facebook:6.18.0.0")
     implementation("com.google.ads.mediation:unity:4.12.2.0")
     implementation("com.google.ads.mediation:inmobi:10.7.7.0")

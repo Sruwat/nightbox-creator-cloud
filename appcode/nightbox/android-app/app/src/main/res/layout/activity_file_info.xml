@@ -755,6 +755,32 @@
                     android:textStyle="bold" />
             </LinearLayout>
 
+            <!-- Slow Network Notice with Red Line Indicator -->
+            <LinearLayout
+                android:id="@+id/layoutSlowNetwork"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:visibility="gone">
+
+                <View
+                    android:layout_width="3dp"
+                    android:layout_height="14dp"
+                    android:background="#FFEF4444"
+                    android:layout_marginEnd="6dp" />
+
+                <TextView
+                    android:id="@+id/tvSlowNetworkMsg"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Taking longer due to slow network. Please wait..."
+                    android:textColor="#FFFCA5A5"
+                    android:textSize="11.5sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
             <!-- Explicit Rewarded Ad disclosure per Google AdMob Policy -->
             <LinearLayout
                 android:layout_width="wrap_content"

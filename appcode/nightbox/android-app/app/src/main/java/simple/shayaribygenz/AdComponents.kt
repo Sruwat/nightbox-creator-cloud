@@ -39,6 +39,13 @@ object AdComponents {
         forceCollapsible: Boolean = false,
         onLoaded: (() -> Unit)? = null
     ) {
+        // If an ad is already showing and cooldown is active, preserve current high-paying banner
+        val hasVisibleBanner = container.childCount > 0
+        if (!forceCollapsible && hasVisibleBanner && !AdManager.canRequestCollapsible(screenKey)) {
+            Log.d(TAG, "[$screenKey] Cooldown active and banner already visible. Keeping current high-eCPM banner.")
+            return
+        }
+
         val displayMetrics = context.resources.displayMetrics
         val density = displayMetrics.density
         // Robust width calculation taking container padding into account
@@ -53,7 +60,6 @@ object AdComponents {
             this.adUnitId = adUnitId
         }
 
-        val isCollapsibleRequest = forceCollapsible || AdManager.canRequestCollapsible(screenKey)
         val request = AdManager.buildSmartBannerRequest(
             isTop = isTop,
             screenKey = screenKey,
@@ -65,10 +71,7 @@ object AdComponents {
         newAdView.adListener = object : AdListener() {
             override fun onAdLoaded() {
                 val winner = newAdView.responseInfo?.mediationAdapterClassName ?: "Google"
-                Log.d(TAG, "Smart Banner loaded for [$screenKey]. Winning Adapter: $winner. Applying No-Flicker swap.")
-                if (isCollapsibleRequest) {
-                    AdManager.markCollapsibleLoaded(screenKey)
-                }
+                AdManager.markCollapsibleLoaded(screenKey)
 
                 // Safe swap: find and destroy old AdViews
                 val oldViews = mutableListOf<AdView>()
@@ -117,16 +120,16 @@ object AdComponents {
         onLoaded: (() -> Unit)? = null
     ): AdView {
         container.removeAllViews()
-        container.visibility = View.GONE
+        container.visibility = View.VISIBLE // Keep reserved blank space visible so no sudden layout jumping
 
         val density = context.resources.displayMetrics.density
         val padding16dp = (16 * density).toInt()
 
-        // Root vertical layout with policy buffer
+        // Root vertical layout with policy buffer (0 horizontal padding ensures full 300dp+ width for video/rich media)
         val wrapper = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(padding16dp, padding16dp, padding16dp, padding16dp)
+            setPadding(0, padding16dp, 0, padding16dp)
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
@@ -180,13 +183,47 @@ object AdComponents {
                     adView.destroy()
                 } catch (_: Exception) {}
                 container.removeAllViews()
-                container.visibility = View.GONE
+                container.visibility = View.VISIBLE // Keep reserved space intact so UI does not shift
             }
         }
 
         wrapper.addView(adView)
         adView.loadAd(AdRequest.Builder().build())
         return adView
+    }
+
+    /**
+     * Pauses any AdViews inside the container when activity is paused or goes to background.
+     */
+    fun pauseAdViews(container: ViewGroup?) {
+        if (container == null) return
+        for (i in 0 until container.childCount) {
+            val child = container.getChildAt(i)
+            if (child is AdView) {
+                try {
+                    child.pause()
+                } catch (_: Exception) {}
+            } else if (child is ViewGroup) {
+                pauseAdViews(child)
+            }
+        }
+    }
+
+    /**
+     * Resumes any AdViews inside the container when activity resumes.
+     */
+    fun resumeAdViews(container: ViewGroup?) {
+        if (container == null) return
+        for (i in 0 until container.childCount) {
+            val child = container.getChildAt(i)
+            if (child is AdView) {
+                try {
+                    child.resume()
+                } catch (_: Exception) {}
+            } else if (child is ViewGroup) {
+                resumeAdViews(child)
+            }
+        }
     }
 
     /**

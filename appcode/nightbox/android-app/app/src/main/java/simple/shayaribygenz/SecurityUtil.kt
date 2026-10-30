@@ -29,4 +29,18 @@ object SecurityUtil {
             false
         }
     }
+
+    /**
+     * Checks if the device has an active internet connection.
+     */
+    fun isOnline(context: Context): Boolean {
+        return try {
+            val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return true
+            val activeNetwork = connectivityManager.activeNetwork ?: return true
+            val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return true
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        } catch (_: Exception) {
+            true
+        }
+    }
 }

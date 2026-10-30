@@ -28,7 +28,6 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import org.json.JSONObject
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -60,6 +59,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.MediaType.Companion.toMediaType
+import org.json.JSONObject
 import simple.shayaribygenz.UiExtensions.applyPressScale
 import simple.shayaribygenz.UiExtensions.vibrateTick
 
@@ -109,16 +109,14 @@ class VideoPlayerActivity : AppCompatActivity() {
     private var localVideoUri: String? = null
     private var isFullscreen = false
     private var usingWebView = false
+    private var playbackTokenRetryUsed = false
+    private var processingRetryCount = 0
     private var viewSessionId: String? = null
     private var viewToken: String? = null
     private var viewQualified = false
-    private var viewTrackingStarted = false
-    private var viewTrackingRetries = 0
-    private var processingRetryCount = 0
     private var linkSlug: String? = null
     private var remoteHlsUrl: String? = null
     private var downloadUrl: String? = null
-    private var playbackTokenRetryUsed = false
     private var durationUpdateRunnable: Runnable? = null
     private var shouldResumePlayback = true
     private var restoredPositionMs = 0L
@@ -239,7 +237,11 @@ class VideoPlayerActivity : AppCompatActivity() {
             loadingOverlay.visibility = View.VISIBLE
             btnTopBack.visibility = View.VISIBLE
             processingRetryCount = 0
-            if (localVideoUri == null) loadRemoteVideoMetadata() else initializePlayer()
+            playbackTokenRetryUsed = false
+            if (localVideoUri == null && videoId != null) {
+                loadRemoteVideoMetadata()
+            }
+            initializePlayer()
         }
 
         // Fullscreen buttons
@@ -280,14 +282,21 @@ class VideoPlayerActivity : AppCompatActivity() {
     }
 
     private fun loadVideoAndAds() {
+        // Enforce 100% muted ads while inside the video player to completely prevent audio collision
+        AdManager.setAdsMuted(true)
+
         lifecycleScope.launch {
             if (videoId != null && localVideoUri == null) {
                 loadRemoteVideoMetadata()
-            } else {
-                initializePlayer()
             }
-            loadBannerAdWhenReady(adBannerContainerTop)
-            loadMrecAdUnderPlayer()
+            initializePlayer()
+            // Give video player full CPU & network priority first; load banner & MREC with a small delay
+            window.decorView.postDelayed({
+                if (!isFinishing && !isDestroyed) {
+                    loadBannerAdWhenReady(adBannerContainerTop)
+                    loadMrecAdUnderPlayer()
+                }
+            }, 1_500L)
         }
     }
 
@@ -304,7 +313,7 @@ class VideoPlayerActivity : AppCompatActivity() {
                             .build()
                         apiClient.newCall(linkReq).execute().use { resp ->
                             if (resp.isSuccessful) {
-                                val linkJson = org.json.JSONObject(resp.body?.string().orEmpty())
+                                val linkJson = JSONObject(resp.body?.string().orEmpty())
                                 val rawTitle = linkJson.optJSONObject("link")?.optString("title")
                                 if (!rawTitle.isNullOrBlank()) {
                                     resolvedVideoTitle = formatCleanTitle(rawTitle)
@@ -319,52 +328,28 @@ class VideoPlayerActivity : AppCompatActivity() {
                     .get()
                     .build()
                 apiClient.newCall(request).execute().use { response ->
-                    if (response.code == 202 || response.code == 409) {
-                        val status = org.json.JSONObject(response.body?.string().orEmpty()).optString("playbackStatus")
-                        withContext(Dispatchers.Main) {
-                            if (status == "failed" || response.code == 409) {
-                                showError("Video processing failed. Please contact the uploader.")
-                            } else {
-                                tvLoadingText.text = "Video is processing. Waiting for playback…"
-                                if (++processingRetryCount <= 24) {
-                                    window.decorView.postDelayed({
-                                        if (!isFinishing && !isDestroyed) loadRemoteVideoMetadata()
-                                    }, 5_000L)
-                                } else {
-                                    showError("Video is still processing. Tap Retry in a moment.")
-                                }
-                            }
-                        }
-                        return@use
-                    }
-                    if (!response.isSuccessful) throw IllegalStateException("Video metadata request failed: ${response.code}")
-                    val payload = org.json.JSONObject(response.body?.string().orEmpty())
-                    val video = payload.optJSONObject("video") ?: throw IllegalStateException("Video metadata missing")
+                    if (!response.isSuccessful) return@use
+                    val payload = JSONObject(response.body?.string().orEmpty())
+                    val video = payload.optJSONObject("video") ?: return@use
+
+                    // Never read or cache unsigned playback URLs (hlsUrl, cdnUrl, streamUrl, originHlsUrl)
+                    // Playback authorization happens only after Play is pressed via requestPlaybackTokenAndInitialize()
                     val fetchedDownloadUrl = video.optString("downloadUrl")
                         .takeIf { it.startsWith("https://") }
                     val title = video.optString("title").takeIf { it.isNotBlank() }
                     val videoSize = video.optLong("size", 0L)
-                    if (videoSize > 0L) {
-                        resolvedContentLength = videoSize
-                    }
                     val durationSec = video.optInt("duration", 0)
-                    if (durationSec > 0) {
-                        resolvedDurationMs = durationSec * 1000L
-                    }
-
 
                     withContext(Dispatchers.Main) {
-                        processingRetryCount = 0
-                        downloadUrl = fetchedDownloadUrl
-                        playbackTokenRetryUsed = false
-                        title?.let { resolvedVideoTitle = formatCleanTitle(it) }
+                        if (fetchedDownloadUrl != null) downloadUrl = fetchedDownloadUrl
+                        if (title != null) resolvedVideoTitle = formatCleanTitle(title)
+                        if (videoSize > 0L) resolvedContentLength = videoSize
+                        if (durationSec > 0) resolvedDurationMs = durationSec * 1000L
                         updateVideoMetaDetails()
-                        initializePlayer()
                     }
                 }
             } catch (error: Exception) {
-                Log.e(TAG, "Video metadata load failed", error)
-                withContext(Dispatchers.Main) { showError("Video is not available right now.") }
+                Log.w(TAG, "Background video metadata load failed", error)
             }
         }
     }
@@ -376,9 +361,13 @@ class VideoPlayerActivity : AppCompatActivity() {
         // Check for deep link
         val data: Uri? = intent?.data
         if (data != null) {
-            // URL format: https://video.nightbox.in/watch/VIDEO_ID
-            val pathSegments = data.pathSegments
-            if (pathSegments.size >= 2 && pathSegments[0] == "watch") {
+            // URL format: https://video.nightbox.in/watch/VIDEO_ID or nightbox://watch/VIDEO_ID
+            val pathSegments = if (data.scheme.equals("nightbox", ignoreCase = true)) {
+                listOf(data.host.orEmpty()) + data.pathSegments
+            } else {
+                data.pathSegments
+            }
+            if (pathSegments.size >= 2 && pathSegments[0].equals("watch", ignoreCase = true)) {
                 linkSlug = data.getQueryParameter("link")
                 return pathSegments[1]
             }
@@ -409,52 +398,100 @@ class VideoPlayerActivity : AppCompatActivity() {
     }
 
     private fun requestPlaybackTokenAndInitialize() {
-        val vid = videoId ?: return
+        val vid = videoId ?: run {
+            showError("Invalid video link. No video ID found.")
+            return
+        }
+
+        loadingOverlay.visibility = View.VISIBLE
+        btnTopBack.visibility = View.VISIBLE
+        tvLoadingText.text = "Authorizing secure playback…"
+
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val bodyJson = JSONObject().apply { linkSlug?.let { put("linkSlug", it) } }
-                val body = bodyJson.toString().toRequestBody("application/json".toMediaType())
+                val jsonBody = JSONObject().apply {
+                    val slug = linkSlug?.takeIf { it.isNotBlank() }
+                    if (slug != null) {
+                        put("linkSlug", slug)
+                        put("slug", slug)
+                    }
+                }
+                val requestBody = jsonBody.toString().toRequestBody("application/json".toMediaType())
+
                 val request = Request.Builder()
                     .url("${BuildConfig.BACKEND_URL}/api/videos/${Uri.encode(vid)}/playback-token")
-                    .post(body)
+                    .post(requestBody)
                     .build()
+
                 apiClient.newCall(request).execute().use { response ->
-                    val payload = JSONObject(response.body?.string().orEmpty())
-                    if (response.code == 202) {
+                    val respCode = response.code
+                    val bodyString = response.body?.string().orEmpty()
+
+                    // Treat 202 as processing and retry every 5 seconds, maximum 24 attempts
+                    if (respCode == 202 || respCode == 409) {
+                        val status = try { JSONObject(bodyString).optString("playbackStatus") } catch (_: Exception) { "" }
                         withContext(Dispatchers.Main) {
-                            tvLoadingText.text = "Video is processing. Waiting for playback…"
-                            if (++processingRetryCount <= 24) window.decorView.postDelayed({ if (!isFinishing && !isDestroyed) requestPlaybackTokenAndInitialize() }, 5_000L)
-                            else showError("Video is still processing. Tap Retry in a moment.")
+                            if (status == "failed" || respCode == 409) {
+                                showError("Video processing failed. Please contact the uploader.")
+                            } else {
+                                tvLoadingText.text = "Video is processing. Waiting for playback…"
+                                if (++processingRetryCount <= 24) {
+                                    window.decorView.postDelayed({
+                                        if (!isFinishing && !isDestroyed) requestPlaybackTokenAndInitialize()
+                                    }, 5_000L)
+                                } else {
+                                    showError("Video is still processing. Tap Retry in a moment.")
+                                }
+                            }
                         }
                         return@use
                     }
-                    if (response.code == 403) {
-                        val code = payload.optString("code")
-                        val message = when (code) {
-                            "VIDEO_AWAITING_APPROVAL" -> "Video is awaiting admin approval."
-                            "VIDEO_REJECTED" -> payload.optString("error", "Video was rejected.")
-                            else -> payload.optString("error", "Playback is not available.")
+
+                    // Treat 403 as approval/rejection/availability state and show the server reason
+                    if (respCode == 403) {
+                        val errorJson = try { JSONObject(bodyString) } catch (_: Exception) { null }
+                        val reason = errorJson?.optString("reason")?.takeIf { it.isNotBlank() }
+                            ?: errorJson?.optString("message")?.takeIf { it.isNotBlank() }
+                            ?: errorJson?.optString("error")?.takeIf { it.isNotBlank() }
+                            ?: "Video is unavailable or pending approval."
+                        withContext(Dispatchers.Main) {
+                            showError(reason)
                         }
-                        withContext(Dispatchers.Main) { showError(message) }
                         return@use
                     }
-                    if (!response.isSuccessful) throw IllegalStateException(payload.optString("error", "Playback authorization failed"))
-                    val manifest = payload.optString("manifestUrl").takeIf { it.startsWith("https://") }
-                        ?: throw IllegalStateException("Signed playback manifest missing")
-                    val session = payload.optString("sessionId").takeIf { it.isNotBlank() }
-                    val token = payload.optString("viewToken").takeIf { it.isNotBlank() }
+
+                    if (!response.isSuccessful) {
+                        throw IllegalStateException("Playback authorization failed: $respCode")
+                    }
+
+                    // Accept only manifestUrl, sessionId, and viewToken from the successful response
+                    val payload = JSONObject(bodyString)
+                    val manifest = payload.optString("manifestUrl").takeIf { it.isNotBlank() }
+                        ?: throw IllegalStateException("manifestUrl missing from playback authorization")
+                    val sId = payload.optString("sessionId").takeIf { it.isNotBlank() }
+                    val vToken = payload.optString("viewToken").takeIf { it.isNotBlank() }
+
+                    // Accept optional title or downloadUrl if provided in playback-token response
+                    val tokenTitle = payload.optString("title").takeIf { it.isNotBlank() }
+                    val tokenDownloadUrl = payload.optString("downloadUrl").takeIf { it.startsWith("https://") }
+
                     withContext(Dispatchers.Main) {
                         processingRetryCount = 0
                         remoteHlsUrl = manifest
-                        viewSessionId = session
-                        viewToken = token
-                        viewTrackingStarted = session != null
+                        viewSessionId = sId
+                        viewToken = vToken
+                        viewQualified = false
+                        tokenTitle?.let { resolvedVideoTitle = formatCleanTitle(it) }
+                        tokenDownloadUrl?.let { downloadUrl = it }
+                        updateVideoMetaDetails()
                         initExoPlayerHls()
                     }
                 }
             } catch (error: Exception) {
-                Log.e(TAG, "Playback authorization failed", error)
-                withContext(Dispatchers.Main) { showError(error.message ?: "Video playback is unavailable right now.") }
+                Log.e(TAG, "Playback token request failed", error)
+                withContext(Dispatchers.Main) {
+                    showError("Video stream could not be played. Tap Retry.")
+                }
             }
         }
     }
@@ -466,16 +503,22 @@ class VideoPlayerActivity : AppCompatActivity() {
     private fun initExoPlayerLocal() {
         val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                /* minBufferMs = */ 10_000,
-                /* maxBufferMs = */ 25_000,
-                /* bufferForPlaybackMs = */ 500,
-                /* bufferForPlaybackAfterRebufferMs = */ 1_500
+                /* minBufferMs = */ 2_500,
+                /* maxBufferMs = */ 15_000,
+                /* bufferForPlaybackMs = */ 250,
+                /* bufferForPlaybackAfterRebufferMs = */ 500
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
+        val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
+            .setUsage(androidx.media3.common.C.USAGE_MEDIA)
+            .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MOVIE)
+            .build()
+
         player = ExoPlayer.Builder(this)
             .setLoadControl(loadControl)
+            .setAudioAttributes(audioAttributes, /* handleAudioFocus = */ true)
             .build()
         playerView.player = player
         // Only attach to playerViewFullscreen when entering fullscreen mode
@@ -499,7 +542,7 @@ class VideoPlayerActivity : AppCompatActivity() {
             showError("Video URL is unavailable.")
             return
         }
-        Log.d(TAG, "Trying CDN URL: $mediaUrl")
+        Log.d(TAG, "Trying signed HLS URL: $mediaUrl")
 
         // Create HTTP data source with proper headers & cross-protocol redirects
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
@@ -509,39 +552,35 @@ class VideoPlayerActivity : AppCompatActivity() {
             ))
             .setAllowCrossProtocolRedirects(true)
             .setKeepPostFor302Redirects(true)
-            .setConnectTimeoutMs(8000)
-            .setReadTimeoutMs(15000)
+            .setConnectTimeoutMs(6000)
+            .setReadTimeoutMs(10000)
 
         // Playback must remain session-only. Do not attach a persistent disk
-        // cache here: HLS/progressive sources should fetch only the segments
-        // needed for the current bounded buffer. The explicit Download action
-        // (when available) remains the only path that should save a full file.
+        // cache here: HLS sources fetch only the segments needed for the current bounded buffer.
         val playbackDataSourceFactory = httpDataSourceFactory
 
-        // Remote playback is deliberately HLS-only. The URL is an API manifest
-        // gateway containing a short-lived token; it rewrites each segment to a
-        // signed Bunny CDN URL. Never fall back to unsigned MP4/origin playback.
+        // HLS-only remote player: no MP4/progressive or origin fallback logic
         val mediaSource = HlsMediaSource.Factory(playbackDataSourceFactory)
             .setAllowChunklessPreparation(true)
             .createMediaSource(MediaItem.fromUri(mediaUrl))
 
-        // Fast-start Smart LoadControl: starts playback in 1.0s, caps buffer at 30s to prevent bandwidth waste
+        // Bounded buffer: 30-second maximum remote buffer
         val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                /* minBufferMs = */ 15_000,
-                /* maxBufferMs = */ 30_000,
-                /* bufferForPlaybackMs = */ 1_000,
-                /* bufferForPlaybackAfterRebufferMs = */ 2_500
+                15_000,
+                30_000,
+                1_000,
+                2_500
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-        // Hardware decoder fallback: fixes "sound plays but video is black" bug
+        // Hardware decoder fallback: fixes sound-only/black-video devices
         val renderersFactory = DefaultRenderersFactory(this)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
             .setEnableDecoderFallback(true)
 
-        // 720p Mobile Resolution Cap: saves 60% bandwidth while staying crystal clear on 6" mobile screens
+        // 720p Mobile Resolution Cap: saves 60% bandwidth while staying clear on mobile screens
         val trackSelector = DefaultTrackSelector(this).apply {
             setParameters(
                 buildUponParameters()
@@ -551,11 +590,17 @@ class VideoPlayerActivity : AppCompatActivity() {
             )
         }
 
+        val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
+            .setUsage(androidx.media3.common.C.USAGE_MEDIA)
+            .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MOVIE)
+            .build()
+
         player = ExoPlayer.Builder(this, renderersFactory)
             .setTrackSelector(trackSelector)
             .setLoadControl(loadControl)
-            .setSeekBackIncrementMs(5000L)
-            .setSeekForwardIncrementMs(15000L)
+            .setAudioAttributes(audioAttributes, /* handleAudioFocus = */ true)
+            .setSeekBackIncrementMs(5_000L)
+            .setSeekForwardIncrementMs(15_000L)
             .build()
 
         playerView.player = player
@@ -563,7 +608,7 @@ class VideoPlayerActivity : AppCompatActivity() {
         player?.prepare()
         player?.playWhenReady = true
 
-        // Listen for errors — if native playback fails, fallback to WebView.
+        // Listen for errors and playback states
         player?.addListener(object : Player.Listener {
             override fun onRenderedFirstFrame() {
                 loadingOverlay.visibility = View.GONE
@@ -609,7 +654,9 @@ class VideoPlayerActivity : AppCompatActivity() {
                 Log.e(TAG, "Native playback failed (${error.errorCode})", error)
                 if (!playbackTokenRetryUsed && localVideoUri == null) {
                     playbackTokenRetryUsed = true
-                    window.decorView.postDelayed({ if (!isFinishing && !isDestroyed) initializePlayer() }, 350L)
+                    window.decorView.postDelayed({
+                        if (!isFinishing && !isDestroyed) initializePlayer()
+                    }, 350L)
                 } else {
                     releasePlayer()
                     showError("Video stream could not be played. Tap Retry.")
@@ -701,52 +748,40 @@ class VideoPlayerActivity : AppCompatActivity() {
         }
     }
 
-    private fun startViewTracking(slug: String) {
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val request = Request.Builder().url("${BuildConfig.BACKEND_URL}/api/links/${Uri.encode(slug)}/view/start").post(ByteArray(0).toRequestBody(null)).build()
-                apiClient.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) {
-                        val payload = org.json.JSONObject(response.body?.string().orEmpty())
-                        viewSessionId = payload.optString("sessionId").takeIf { it.isNotBlank() }
-                        viewToken = payload.optString("viewToken").takeIf { it.isNotBlank() }
-                    }
-                }
-                if (viewSessionId == null) withContext(Dispatchers.Main) { retryViewTracking() }
-            } catch (error: Exception) {
-                Log.w(TAG, "View tracking start failed", error)
-                withContext(Dispatchers.Main) { retryViewTracking() }
-            }
-        }
-    }
-
-    private fun retryViewTracking() {
-        if (viewSessionId != null || viewTrackingRetries >= 3 || isFinishing || isDestroyed) return
-        viewTrackingRetries++
-        window.decorView.postDelayed({
-            if (!isFinishing && !isDestroyed && viewSessionId == null) {
-                viewTrackingStarted = false
-                startViewTrackingIfNeeded()
-            }
-        }, 5_000L)
-    }
-
-    private fun startViewTrackingIfNeeded() {
-        val slug = linkSlug?.takeIf { it.isNotBlank() } ?: return
-        if (viewTrackingStarted || localVideoUri != null) return
-        viewTrackingStarted = true
-        startViewTracking(slug)
-    }
-
     private fun qualifyView() {
         val sessionId = viewSessionId ?: return
         viewQualified = true
+        sendQualifyRequest(sessionId, 0)
+    }
+
+    private fun sendQualifyRequest(sessionId: String, attempt: Int) {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val body = org.json.JSONObject().put("viewToken", viewToken).toString().toRequestBody("application/json".toMediaType())
-                val request = Request.Builder().url("${BuildConfig.BACKEND_URL}/api/views/${Uri.encode(sessionId)}/qualify").post(body).build()
-                apiClient.newCall(request).execute().use { response -> Log.d(TAG, "View qualification response: ${response.code}") }
-            } catch (error: Exception) { Log.w(TAG, "View qualification failed", error) }
+                val body = JSONObject().put("viewToken", viewToken).toString().toRequestBody("application/json".toMediaType())
+                val request = Request.Builder()
+                    .url("${BuildConfig.BACKEND_URL}/api/views/${Uri.encode(sessionId)}/qualify")
+                    .post(body)
+                    .build()
+                apiClient.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        Log.d(TAG, "View qualification response: ${response.code}")
+                    } else if (attempt < 3) {
+                        Log.w(TAG, "View qualification unsuccessful (${response.code}), retrying attempt ${attempt + 1}")
+                        kotlinx.coroutines.delay(3_000L * (attempt + 1))
+                        if (!isFinishing && !isDestroyed) {
+                            sendQualifyRequest(sessionId, attempt + 1)
+                        }
+                    }
+                }
+            } catch (error: Exception) {
+                Log.w(TAG, "View qualification failed", error)
+                if (attempt < 3) {
+                    kotlinx.coroutines.delay(3_000L * (attempt + 1))
+                    if (!isFinishing && !isDestroyed) {
+                        sendQualifyRequest(sessionId, attempt + 1)
+                    }
+                }
+            }
         }
     }
 
@@ -909,6 +944,10 @@ class VideoPlayerActivity : AppCompatActivity() {
         fullscreenPlayerContainer.visibility = View.VISIBLE
         mainContent.visibility = View.GONE
         adBannerContainerTop.visibility = View.GONE
+        AdComponents.pauseAdViews(adBannerContainerTop)
+        if (::mrecPlayerContainer.isInitialized) {
+            AdComponents.pauseAdViews(mrecPlayerContainer)
+        }
 
         // Go landscape
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
@@ -935,6 +974,10 @@ class VideoPlayerActivity : AppCompatActivity() {
         mainContent.visibility = View.VISIBLE
         adBannerContainerTop.visibility = View.VISIBLE
         fullscreenPlayerContainer.visibility = View.GONE
+        AdComponents.resumeAdViews(adBannerContainerTop)
+        if (::mrecPlayerContainer.isInitialized) {
+            AdComponents.resumeAdViews(mrecPlayerContainer)
+        }
 
         // Back to portrait
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
@@ -1272,6 +1315,7 @@ class VideoPlayerActivity : AppCompatActivity() {
         hudDismissRunnable = null
         player?.let {
             it.stop()
+            it.clearMediaItems()
             it.release()
         }
         player = null
@@ -1279,22 +1323,38 @@ class VideoPlayerActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
-        shouldResumePlayback = player?.isPlaying == true
+        AdManager.setAdsMuted(false)
+        shouldResumePlayback = player?.playWhenReady ?: true
         player?.pause()
         if (usingWebView) webViewPlayer.onPause()
+        AdComponents.pauseAdViews(adBannerContainerTop)
+        if (::mrecPlayerContainer.isInitialized) {
+            AdComponents.pauseAdViews(mrecPlayerContainer)
+        }
     }
 
     override fun onResume() {
         super.onResume()
+        AdManager.setAdsMuted(true)
         SecurityUtil.checkVpn(this)
-        if (shouldResumePlayback) player?.play()
+        if (shouldResumePlayback) {
+            player?.playWhenReady = true
+            player?.play()
+        }
         if (usingWebView) webViewPlayer.onResume()
+        if (!isFullscreen) {
+            AdComponents.resumeAdViews(adBannerContainerTop)
+            if (::mrecPlayerContainer.isInitialized) {
+                AdComponents.resumeAdViews(mrecPlayerContainer)
+            }
+        }
         if (adBannerContainerTop.childCount == 0 || (bannerAdView != null && AdManager.canRequestCollapsible("video_player"))) {
             loadBannerAd(adBannerContainerTop)
         }
     }
 
     override fun onDestroy() {
+        AdManager.setAdsMuted(false)
         releasePlayer()
         AdComponents.destroyAdViews(adBannerContainerTop)
         if (::mrecPlayerContainer.isInitialized) {

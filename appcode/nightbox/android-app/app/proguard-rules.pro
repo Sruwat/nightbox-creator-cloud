@@ -14,8 +14,25 @@
 # ExoPlayer / Media3
 -dontwarn androidx.media3.**
 
-# Google AdMob Mediation Adapters
--keep class com.google.ads.mediation.** { *; }
+# Google AdMob SDK & Play Services Ads
+-keep public class com.google.android.gms.ads.** {
+    public *;
+}
+-keep class com.google.ads.** { *; }
+-keep class com.google.android.gms.common.** { *; }
+-dontwarn com.google.android.gms.**
+
+# NightBox App & Ad Engine
+-keep class simple.shayaribygenz.AdManager { *; }
+-keep class simple.shayaribygenz.AdComponents { *; }
+-keep class simple.shayaribygenz.NightBoxApp { *; }
+-keep class simple.shayaribygenz.SecurityUtil { *; }
+-keep public class * extends android.app.Activity
+-keep public class * extends android.view.View {
+    public <init>(android.content.Context);
+    public <init>(android.content.Context, android.util.AttributeSet);
+    public <init>(android.content.Context, android.util.AttributeSet, int);
+}
 
 # Meta Audience Network
 -dontwarn com.facebook.ads.**
@@ -36,3 +53,4 @@
 # Liftoff Monetize (Vungle)
 -keep class com.vungle.ads.** { *; }
 -dontwarn com.vungle.ads.**
+

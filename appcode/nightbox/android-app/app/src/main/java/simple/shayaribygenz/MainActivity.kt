@@ -85,7 +85,8 @@ class MainActivity : AppCompatActivity() {
         androidx.activity.result.contract.ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
         if (result.resultCode != RESULT_OK) {
-            // Update cancelled or failed - continue gracefully
+            // Strict Force Update: Re-check and block bypass if update was dismissed
+            checkForAppUpdate()
         }
     }
 
@@ -255,6 +256,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         SecurityUtil.checkVpn(this)
         checkClipboardForNightBoxLink()
+        AdComponents.resumeAdViews(adBannerContainer)
         if (adBannerContainer.childCount == 0 || (bannerAdView != null && AdManager.canRequestCollapsible("home"))) {
             loadAds()
         }
@@ -286,9 +288,13 @@ class MainActivity : AppCompatActivity() {
         if (deepLinkProcessed) return
         val data: Uri? = intent.data
         if (data != null) {
-            val pathSegments = if (data.scheme.equals("nightbox", ignoreCase = true)) {
-                listOf(data.host.orEmpty()) + data.pathSegments
-            } else data.pathSegments
+            val pathSegments =
+                if (data.scheme.equals("nightbox", ignoreCase = true)) {
+                    listOf(data.host.orEmpty()) + data.pathSegments
+                } else {
+                    data.pathSegments
+                }
+
             if (pathSegments.size >= 2 && pathSegments[0].equals("watch", ignoreCase = true)) {
                 val videoId = pathSegments[1]
                 deepLinkProcessed = true
@@ -339,10 +345,18 @@ class MainActivity : AppCompatActivity() {
     /**
      * Extract video ID from various input formats:
      * - Full URL: https://public-video-host/watch/VIDEO_ID
+     * - Custom scheme: nightbox://watch/VIDEO_ID
      * - Just the ID: VIDEO_ID (UUID-like format)
      * - Partial URL: public-video-host/watch/VIDEO_ID
      */
     private fun extractVideoId(input: String): String? {
+        try {
+            if (input.startsWith("nightbox://watch/", ignoreCase = true)) {
+                val candidate = Uri.parse(input).pathSegments.firstOrNull()?.takeIf { it.isNotBlank() }
+                if (candidate != null) return candidate
+            }
+        } catch (_: Exception) {}
+
         // Try to extract from full URL
         val urlPattern = Regex("""/watch/([a-f0-9-]+)""", RegexOption.IGNORE_CASE)
         val matchUrl = urlPattern.find(input)
@@ -370,6 +384,9 @@ class MainActivity : AppCompatActivity() {
             val uri = Uri.parse(normalized)
             val querySlug = uri.getQueryParameter("link")?.takeIf { it.isNotBlank() }
             if (querySlug != null) return querySlug
+            if (uri.scheme.equals("nightbox", ignoreCase = true) && uri.host.equals("l", ignoreCase = true)) {
+                return uri.pathSegments.firstOrNull()?.takeIf { it.isNotBlank() }
+            }
             val segments = uri.pathSegments
             val linkIndex = segments.indexOfFirst { it.equals("l", ignoreCase = true) }
             if (linkIndex >= 0) segments.getOrNull(linkIndex + 1)?.takeIf { it.isNotBlank() } else null
@@ -381,7 +398,12 @@ class MainActivity : AppCompatActivity() {
     private fun isWatchPath(input: String): Boolean {
         return try {
             val normalized = if (input.contains("://")) input else "https://$input"
-            Uri.parse(normalized).pathSegments.firstOrNull()?.equals("watch", ignoreCase = true) == true
+            val uri = Uri.parse(normalized)
+            if (uri.scheme.equals("nightbox", ignoreCase = true)) {
+                uri.host.equals("watch", ignoreCase = true) || uri.pathSegments.firstOrNull()?.equals("watch", ignoreCase = true) == true
+            } else {
+                uri.pathSegments.firstOrNull()?.equals("watch", ignoreCase = true) == true
+            }
         } catch (_: Exception) {
             false
         }
@@ -551,12 +573,6 @@ class MainActivity : AppCompatActivity() {
         startActivity(intent)
     }
 
-    override fun onDestroy() {
-        AdComponents.destroyAdViews(adBannerContainer)
-        bannerAdView = null
-        super.onDestroy()
-    }
-
     private fun checkForAppUpdate() {
         val appUpdateInfoTask = appUpdateManager.appUpdateInfo
         appUpdateInfoTask.addOnSuccessListener { appUpdateInfo ->
@@ -641,5 +657,16 @@ class MainActivity : AppCompatActivity() {
             }
             chipClipboardLink.visibility = View.GONE
         } catch (_: Exception) {}
+    }
+
+    override fun onPause() {
+        AdComponents.pauseAdViews(adBannerContainer)
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        AdComponents.destroyAdViews(adBannerContainer)
+        bannerAdView = null
+        super.onDestroy()
     }
 }
