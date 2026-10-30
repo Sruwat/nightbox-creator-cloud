@@ -72,6 +72,7 @@ const allowedOrigins = [...new Set([
   'https://www.nightbox.in',
   // Android ExoPlayer sends the API origin on manifest/segment proxy requests.
   // Keep it explicitly allow-listed so playback does not fail after token auth.
+  'https://api.nightbox.in',
   PUBLIC_API_URL,
   'https://admin.nightbox.in',
   'https://video.nightbox.in',
