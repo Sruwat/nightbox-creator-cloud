@@ -50,6 +50,9 @@ const BUNNY_LOCAL_STORAGE = String(process.env.VIDEO_STORAGE_DRIVER || '').toLow
 // Both storage drivers can publish HLS: local mode writes segments under the
 // media origin's /nightbox/hls path, which the CDN pulls on demand.
 const HLS_TRANSCODE_ENABLED = process.env.ENABLE_HLS_TRANSCODE !== 'false' && Boolean(process.env.BUNNY_CDN_HOST);
+// Admin approval is optional. Keep it enabled only when explicitly requested;
+// otherwise a completed, copyright-approved HLS asset becomes visible automatically.
+const REQUIRE_ADMIN_APPROVAL = String(process.env.REQUIRE_ADMIN_APPROVAL || 'false').toLowerCase() === 'true';
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || crypto.randomBytes(32).toString('hex');
 // Conversion bots can identify a creator by Telegram's verified sender ID.
 // This is deliberately separate from creator API keys: the shared secret
@@ -221,10 +224,10 @@ function decodePlaybackToken(value) {
 function playbackReady(video) {
   return Boolean(video
     && video.processing_status === 'completed'
-    && video.approval_status === 'approved'
     && video.copyright_status === 'approved'
     && video.visibility === 'visible'
-    && video.cdn_verified_at);
+    && video.cdn_verified_at
+    && (!REQUIRE_ADMIN_APPROVAL || video.approval_status === 'approved'));
 }
 
 function videoLifecycle(videoId) {
@@ -245,8 +248,10 @@ function notifyVideo(videoId, type, payload = {}) {
 function finalizeVideoVisibility(videoId) {
   const video = videoLifecycle(videoId);
   if (!video || video.processing_status !== 'completed' || !video.cdn_verified_at) return video;
-  if (video.approval_status === 'approved' && video.copyright_status === 'approved' && video.visibility !== 'visible') {
-    store.db.prepare("UPDATE videos SET visibility='visible',approved_at=COALESCE(approved_at,?),processing_stage='completed' WHERE id=?").run(store.now(), videoId);
+  const approvalReady = !REQUIRE_ADMIN_APPROVAL || video.approval_status === 'approved';
+  if (approvalReady && video.copyright_status === 'approved' && video.visibility !== 'visible') {
+    store.db.prepare("UPDATE videos SET approval_status=CASE WHEN ? THEN 'approved' ELSE approval_status END,visibility='visible',approved_at=COALESCE(approved_at,?),processing_stage='completed' WHERE id=?")
+      .run(!REQUIRE_ADMIN_APPROVAL, store.now(), videoId);
     notifyVideo(videoId, 'video_ready', { watchUrl: bunny.getWatchUrl(videoId) });
   }
   return videoLifecycle(videoId);
@@ -998,7 +1003,7 @@ function publicVideoState(video) {
   if (video.processing_status === 'failed') return 'failed';
   if (video.approval_status === 'rejected' || video.copyright_status === 'rejected') return 'rejected';
   if (video.processing_status !== 'completed') return 'processing';
-  if (video.approval_status !== 'approved' || video.visibility !== 'visible') return 'awaiting_approval';
+  if ((REQUIRE_ADMIN_APPROVAL && video.approval_status !== 'approved') || video.visibility !== 'visible') return 'awaiting_approval';
   return 'ready';
 }
 
@@ -1036,7 +1041,7 @@ app.post('/api/videos/:id/playback-token', async (req, res) => {
     return res.status(202).json({ error: 'Video is still processing', code: 'VIDEO_PROCESSING', state: 'processing', processingStage: video.processing_stage });
   }
   if (video.approval_status === 'rejected' || video.copyright_status === 'rejected') return res.status(403).json({ error: video.rejection_reason || 'Video was rejected', code: 'VIDEO_REJECTED', state: 'rejected' });
-  if (!playbackReady(video)) return res.status(403).json({ error: 'Video is awaiting admin approval', code: 'VIDEO_AWAITING_APPROVAL', state: 'awaiting_approval' });
+  if (!playbackReady(video)) return res.status(403).json({ error: REQUIRE_ADMIN_APPROVAL ? 'Video is awaiting admin approval' : 'Video is not ready for playback', code: REQUIRE_ADMIN_APPROVAL ? 'VIDEO_AWAITING_APPROVAL' : 'VIDEO_NOT_READY', state: publicVideoState(video) });
   if (await viewerIsBlocked(req)) return res.status(403).json({ error: 'Viewer did not pass traffic quality checks', code: 'VIEWER_BLOCKED' });
   // Bunny token authentication is optional for the current production Pull
   // Zone. When it is enabled, the manifest proxy signs every CDN URL. When it
@@ -2254,11 +2259,13 @@ app.post('/upload-file', (req, res, next) => {
       watchUrl: null,
       embedUrl: null,
       link: null,
-      approvalStatus: 'pending',
+      approvalStatus: REQUIRE_ADMIN_APPROVAL ? 'pending' : 'automatic',
       playable: false,
       status: HLS_TRANSCODE_ENABLED ? 'processing' : 'active',
       playbackStatus: HLS_TRANSCODE_ENABLED ? 'processing' : 'ready',
-      message: 'Upload received. Video is processing and awaiting approval. You will receive the playable link after approval.',
+      message: REQUIRE_ADMIN_APPROVAL
+        ? 'Upload received. Video is processing and awaiting approval.'
+        : 'Upload received. Video is processing. The playable link will be available automatically when processing completes.',
     });
   } catch (error) {
     console.error('Upload error:', error.message);
@@ -2321,11 +2328,13 @@ app.post('/upload-from-url', async (req, res) => {
       watchUrl: null,
       embedUrl: null,
       link: null,
-      approvalStatus: 'pending',
+      approvalStatus: REQUIRE_ADMIN_APPROVAL ? 'pending' : 'automatic',
       playable: false,
       status: HLS_TRANSCODE_ENABLED ? 'processing' : 'active',
       playbackStatus: HLS_TRANSCODE_ENABLED ? 'processing' : 'ready',
-      message: 'Upload received. Video is processing and awaiting approval. You will receive the playable link after approval.',
+      message: REQUIRE_ADMIN_APPROVAL
+        ? 'Upload received. Video is processing and awaiting approval.'
+        : 'Upload received. Video is processing. The playable link will be available automatically when processing completes.',
     });
   } catch (error) {
     console.error('URL upload error:', error.message);
