@@ -457,7 +457,7 @@ async def wait_for_approved_watch(video_id, chat_id, telegram_id="", timeout_sec
                 reason = data.get("video", {}).get("processingError") or data.get("video", {}).get("rejectionReason") or data.get("state")
                 raise Exception(f"Video was not approved: {reason}")
             await asyncio.sleep(5)
-    raise Exception("Video is still processing; the playable link will be sent after approval.")
+    raise Exception("Video is still processing; the playable link will be sent automatically after HLS conversion and CDN verification.")
 
 async def import_nightbox_link(url, chat_id, telegram_id=""):
     headers = backend_headers(chat_id, telegram_id)
@@ -771,7 +771,7 @@ async def handle(c, m):
         watch = response_watch_url(res)
         video_id = response_video_id(res)
         if not watch and video_id:
-            await status.edit_text("⏳ Upload received. Waiting for HLS conversion, CDN verification and admin approval...")
+            await status.edit_text("⏳ Upload received. Waiting for HLS conversion and CDN verification...")
             watch = await wait_for_approved_watch(video_id, m.chat.id, telegram_id)
         if not watch:
             raise Exception("Backend did not return a NightBox link")
