@@ -410,9 +410,39 @@ async def upload_video(fpath, title, chat_id, telegram_id=""):
             data.add_field('title', title)
             headers = backend_headers(chat_id, telegram_id)
             async with session.post(f"{BACKEND_URL}/upload-file", data=data, headers=headers) as resp:
-                if resp.status == 200: return await resp.json()
-                err = await resp.text()
-                raise Exception(f"Upload error: {err[:100]}")
+                data = await resp.json(content_type=None)
+                if resp.status in {200, 201}:
+                    return data
+                detail = data.get("error") or data.get("message") or f"HTTP {resp.status}"
+                raise Exception(f"Upload error: {str(detail)[:180]}")
+
+
+def response_video_id(payload):
+    """Read video IDs from both current and legacy backend response shapes."""
+    if not isinstance(payload, dict):
+        return ""
+    video = payload.get("video") if isinstance(payload.get("video"), dict) else {}
+    return str(
+        payload.get("videoId")
+        or payload.get("id")
+        or video.get("videoId")
+        or video.get("id")
+        or ""
+    ).strip()
+
+
+def response_watch_url(payload):
+    """Read a final watch/link URL without accepting an unsigned media URL."""
+    if not isinstance(payload, dict):
+        return ""
+    video = payload.get("video") if isinstance(payload.get("video"), dict) else {}
+    return str(
+        payload.get("link")
+        or payload.get("watchUrl")
+        or video.get("link")
+        or video.get("watchUrl")
+        or ""
+    ).strip()
 
 async def wait_for_approved_watch(video_id, chat_id, telegram_id="", timeout_seconds=3600):
     headers = backend_headers(chat_id, telegram_id)
@@ -696,9 +726,10 @@ async def handle(c, m):
                 await status.edit_text(f"⏳ Converting NightBox link {index}/{len(valid_urls)}...")
                 try:
                     res = await import_nightbox_link(url, m.chat.id, telegram_id)
-                    replacement = res.get('link', '')
-                    if not replacement and res.get('videoId'):
-                        replacement = await wait_for_approved_watch(res['videoId'], m.chat.id, telegram_id)
+                    replacement = response_watch_url(res)
+                    video_id = response_video_id(res)
+                    if not replacement and video_id:
+                        replacement = await wait_for_approved_watch(video_id, m.chat.id, telegram_id)
                     if not replacement:
                         raise Exception("Backend did not return a NightBox link")
                     replacements[url] = replacement
@@ -737,10 +768,11 @@ async def handle(c, m):
             
         await status.edit_text("\u2601 **Uploading to server...**")
         res = await upload_video(info["path"], info["title"], m.chat.id, telegram_id)
-        watch = res.get("link") or res.get("watchUrl", "")
-        if not watch and res.get("videoId"):
+        watch = response_watch_url(res)
+        video_id = response_video_id(res)
+        if not watch and video_id:
             await status.edit_text("⏳ Upload received. Waiting for HLS conversion, CDN verification and admin approval...")
-            watch = await wait_for_approved_watch(res["videoId"], m.chat.id, telegram_id)
+            watch = await wait_for_approved_watch(video_id, m.chat.id, telegram_id)
         if not watch:
             raise Exception("Backend did not return a NightBox link")
 
