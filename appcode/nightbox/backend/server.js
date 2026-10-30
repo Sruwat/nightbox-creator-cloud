@@ -1038,7 +1038,10 @@ app.post('/api/videos/:id/playback-token', async (req, res) => {
   if (video.approval_status === 'rejected' || video.copyright_status === 'rejected') return res.status(403).json({ error: video.rejection_reason || 'Video was rejected', code: 'VIDEO_REJECTED', state: 'rejected' });
   if (!playbackReady(video)) return res.status(403).json({ error: 'Video is awaiting admin approval', code: 'VIDEO_AWAITING_APPROVAL', state: 'awaiting_approval' });
   if (await viewerIsBlocked(req)) return res.status(403).json({ error: 'Viewer did not pass traffic quality checks', code: 'VIEWER_BLOCKED' });
-  if (!bunny.hasTokenAuth()) return res.status(503).json({ error: 'Secure CDN playback is not configured on the server', code: 'CDN_TOKEN_AUTH_NOT_CONFIGURED' });
+  // Bunny token authentication is optional for the current production Pull
+  // Zone. When it is enabled, the manifest proxy signs every CDN URL. When it
+  // is disabled, the same authorized backend session still gates playback and
+  // the proxy returns normal CDN URLs so existing videos remain playable.
 
   const requestedSlug = String(req.body?.linkSlug || '').trim();
   const link = requestedSlug
@@ -1066,7 +1069,7 @@ app.get('/api/playback-manifest/:id', async (req, res) => {
   const decoded = decodePlaybackToken(String(req.query.token || ''));
   if (!decoded || decoded.videoId !== req.params.id) return res.status(401).send('Invalid or expired playback token');
   const video = videoLifecycle(req.params.id);
-  if (!playbackReady(video) || !bunny.hasTokenAuth()) return res.status(403).send('Playback is not available');
+  if (!playbackReady(video)) return res.status(403).send('Playback is not available');
   try {
     const sourceUrl = bunny.getHlsUrl(req.params.id);
     const response = await axios.get(sourceUrl, { timeout: 15000, responseType: 'text' });
@@ -1075,7 +1078,7 @@ app.get('/api/playback-manifest/:id', async (req, res) => {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) return line;
       const absolute = new URL(trimmed, sourceUrl).toString();
-      return bunny.getSignedCdnUrl(absolute, expiresAt);
+      return bunny.hasTokenAuth() ? bunny.getSignedCdnUrl(absolute, expiresAt) : absolute;
     }).join('\n');
     res.status(200).type('application/vnd.apple.mpegurl').set('Cache-Control', 'private, no-store').send(playlist);
   } catch (error) {
