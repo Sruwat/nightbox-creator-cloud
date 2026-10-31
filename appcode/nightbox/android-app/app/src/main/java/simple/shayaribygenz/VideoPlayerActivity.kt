@@ -405,7 +405,7 @@ class VideoPlayerActivity : AppCompatActivity() {
 
         loadingOverlay.visibility = View.VISIBLE
         btnTopBack.visibility = View.VISIBLE
-        tvLoadingText.text = "Authorizing secure playback…"
+        tvLoadingText.text = "Preparing your video…"
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
@@ -447,15 +447,10 @@ class VideoPlayerActivity : AppCompatActivity() {
                         return@use
                     }
 
-                    // Treat 403 as approval/rejection/availability state and show the server reason
+                    // Keep server-side state details out of the user-facing player.
                     if (respCode == 403) {
-                        val errorJson = try { JSONObject(bodyString) } catch (_: Exception) { null }
-                        val reason = errorJson?.optString("reason")?.takeIf { it.isNotBlank() }
-                            ?: errorJson?.optString("message")?.takeIf { it.isNotBlank() }
-                            ?: errorJson?.optString("error")?.takeIf { it.isNotBlank() }
-                            ?: "This video is not available right now."
                         withContext(Dispatchers.Main) {
-                            showError(reason)
+                            showError("This video is not available right now.")
                         }
                         return@use
                     }
@@ -572,6 +567,7 @@ class VideoPlayerActivity : AppCompatActivity() {
                 1_000,
                 2_500
             )
+            .setBackBuffer(0, false)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
@@ -606,7 +602,9 @@ class VideoPlayerActivity : AppCompatActivity() {
         playerView.player = player
         player?.setMediaSource(mediaSource)
         player?.prepare()
-        player?.playWhenReady = true
+        // Prepare the bounded HLS buffer without autoplay. Playback starts only
+        // when the user presses the player play button.
+        player?.playWhenReady = false
 
         // Listen for errors and playback states
         player?.addListener(object : Player.Listener {
@@ -1384,6 +1382,14 @@ class VideoPlayerActivity : AppCompatActivity() {
             webViewPlayer.goBack()
             return
         }
+        // Stop immediately so no HLS segment request continues after Back.
+        if (usingWebView) webViewPlayer.stopLoading()
+        releasePlayer()
         finish()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (isFinishing) releasePlayer()
     }
 }
