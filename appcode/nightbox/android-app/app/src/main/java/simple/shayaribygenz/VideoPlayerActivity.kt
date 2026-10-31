@@ -118,9 +118,9 @@ class VideoPlayerActivity : AppCompatActivity() {
     private var remoteHlsUrl: String? = null
     private var downloadUrl: String? = null
     private var durationUpdateRunnable: Runnable? = null
-    private var shouldResumePlayback = true
+    private var shouldResumePlayback = false
     private var restoredPositionMs = 0L
-    private var restoredPlayWhenReady = true
+    private var restoredPlayWhenReady = false
     private var resolvedVideoTitle: String = "NightBox Video"
     private var resolvedDurationMs: Long = 256_000L
     private var resolvedContentLength: Long = 11_220_967L
@@ -164,7 +164,7 @@ class VideoPlayerActivity : AppCompatActivity() {
         setContentView(R.layout.activity_video_player)
 
         restoredPositionMs = savedInstanceState?.getLong("player_position_ms", 0L) ?: 0L
-        restoredPlayWhenReady = savedInstanceState?.getBoolean("player_play_when_ready", true) ?: true
+        restoredPlayWhenReady = savedInstanceState?.getBoolean("player_play_when_ready", false) ?: false
 
         // Bind views
         playerView = findViewById(R.id.playerView)
@@ -715,7 +715,9 @@ class VideoPlayerActivity : AppCompatActivity() {
                 current.seekTo(restoredPositionMs.coerceAtMost(current.duration))
                 restoredPositionMs = 0L
             }
-            current.playWhenReady = restoredPlayWhenReady
+            // Remote playback is prepared paused on first open. Local gallery
+            // videos keep their existing immediate-play behavior.
+            if (localVideoUri == null) current.playWhenReady = restoredPlayWhenReady
         }
     }
 
