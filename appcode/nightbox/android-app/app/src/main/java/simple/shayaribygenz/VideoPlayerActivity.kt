@@ -432,15 +432,15 @@ class VideoPlayerActivity : AppCompatActivity() {
                         val status = try { JSONObject(bodyString).optString("playbackStatus") } catch (_: Exception) { "" }
                         withContext(Dispatchers.Main) {
                             if (status == "failed" || respCode == 409) {
-                                showError("Video processing failed. Please contact the uploader.")
+                                showError("This video is not available right now. Please try again later.")
                             } else {
-                                tvLoadingText.text = "Video is processing. Waiting for playback…"
+                                tvLoadingText.text = "Preparing your video…"
                                 if (++processingRetryCount <= 24) {
                                     window.decorView.postDelayed({
                                         if (!isFinishing && !isDestroyed) requestPlaybackTokenAndInitialize()
                                     }, 5_000L)
                                 } else {
-                                    showError("Video is still processing. Tap Retry in a moment.")
+                                    showError("Your video is still being prepared. Tap Retry shortly.")
                                 }
                             }
                         }
@@ -453,7 +453,7 @@ class VideoPlayerActivity : AppCompatActivity() {
                         val reason = errorJson?.optString("reason")?.takeIf { it.isNotBlank() }
                             ?: errorJson?.optString("message")?.takeIf { it.isNotBlank() }
                             ?: errorJson?.optString("error")?.takeIf { it.isNotBlank() }
-                            ?: "Video is unavailable or pending approval."
+                            ?: "This video is not available right now."
                         withContext(Dispatchers.Main) {
                             showError(reason)
                         }
@@ -461,13 +461,13 @@ class VideoPlayerActivity : AppCompatActivity() {
                     }
 
                     if (!response.isSuccessful) {
-                        throw IllegalStateException("Playback authorization failed: $respCode")
+                        throw IllegalStateException("Video is not available right now ($respCode)")
                     }
 
                     // Accept only manifestUrl, sessionId, and viewToken from the successful response
                     val payload = JSONObject(bodyString)
                     val manifest = payload.optString("manifestUrl").takeIf { it.isNotBlank() }
-                        ?: throw IllegalStateException("manifestUrl missing from playback authorization")
+                        ?: throw IllegalStateException("Video stream is not available right now")
                     val sId = payload.optString("sessionId").takeIf { it.isNotBlank() }
                     val vToken = payload.optString("viewToken").takeIf { it.isNotBlank() }
 

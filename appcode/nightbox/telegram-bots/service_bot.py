@@ -352,7 +352,7 @@ async def remote_upload(_, message):
     if not urls:
         await message.reply_text("Send one or more http(s) video URLs.")
         return
-    progress = await message.reply_text(f"Processing {len(urls)} link(s) with {LABEL}...")
+    progress = await message.reply_text("⏳ Your video is being prepared...")
     results = []
     async with aiohttp.ClientSession() as session:
         for index, url in enumerate(urls, start=1):
@@ -364,10 +364,10 @@ async def remote_upload(_, message):
                         raise RuntimeError(data.get("error", f"HTTP {response.status}"))
                 # Upload responses intentionally do not expose a playable URL
                 # until HLS/CDN verification and admin approval are complete.
-                results.append(f"✅ Upload received ({data.get('videoId', 'queued')}). Processing and approval are pending.")
+                results.append("✅ Video received. Your video link will appear shortly.")
             except Exception as error:
                 log.exception("service upload failed")
-                results.append(f"❌ {index}. {str(error)[:180]}")
+                results.append(f"❌ {index}. We could not prepare this video. Please try again.")
     await progress.edit_text("\n".join(result for result in results if result))
 
 

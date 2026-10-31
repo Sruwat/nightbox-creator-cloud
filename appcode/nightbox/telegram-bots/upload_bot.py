@@ -262,10 +262,11 @@ async def deliver_approved_link(client, source_message, video_id, chat_id, capti
                     return
                 if state in {"failed", "rejected"}:
                     reason = payload.get("video", {}).get("processingError") or payload.get("video", {}).get("rejectionReason") or state
-                    await status_message.edit_text(f"❌ Video could not be published: {reason}")
+                    logger.error("Video %s could not be published: %s", video_id, reason)
+                    await status_message.edit_text("❌ We could not prepare this video. Please try again later.")
                     return
                 await asyncio.sleep(5)
-        await status_message.edit_text("⏳ Video is still processing. The playable link will appear after approval.")
+        await status_message.edit_text("⏳ Your video is being prepared. The video link will appear shortly.")
     except Exception as error:
         logger.exception("Approval delivery failed: %s", error)
 @app.on_message(filters.command("start"))
@@ -621,9 +622,8 @@ async def handle_video(client: Client, message: Message):
             if not video_id:
                 raise Exception("Backend did not return a video ID")
             await status_msg.edit_text(
-                "✅ Upload received.\n\n"
-                "⏳ HLS conversion, CDN verification and admin approval are in progress.\n"
-                "The playable NightBox link will be sent after approval."
+                "⏳ Your video is being prepared.\n"
+                "The video link will appear shortly."
             )
             asyncio.create_task(deliver_approved_link(client, message, video_id, message.chat.id, "", status_msg))
             logger.info(f"Video uploaded: {video_id} ({size_mb} MB)")
@@ -632,9 +632,8 @@ async def handle_video(client: Client, message: Message):
         logger.error(f"Error handling video: {e}")
         try:
             await status_msg.edit_text(
-                f"❌ **Upload Failed**\n\n"
-                f"Error: {str(e)[:300]}\n\n"
-                "💡 Try again or send a different file.",
+                "❌ **Upload failed**\n\n"
+                "Please try again or send a different video.",
             )
         except Exception:
             pass

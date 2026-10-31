@@ -282,7 +282,7 @@ class FileInfoActivity : AppCompatActivity() {
         viewCountDownTimer = object : CountDownTimer(5_000L, 1_000L) {
             override fun onTick(millisUntilFinished: Long) {
                 val secondsLeft = ((millisUntilFinished + 999) / 1000).coerceAtLeast(1)
-                tvOpenVideoText?.text = "Stream ready in ${secondsLeft}s..."
+                tvOpenVideoText?.text = "Ready in ${secondsLeft}s..."
             }
 
             override fun onFinish() {
