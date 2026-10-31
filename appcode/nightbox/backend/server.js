@@ -1080,7 +1080,12 @@ app.get('/api/playback-manifest/:id', async (req, res) => {
   const video = videoLifecycle(req.params.id);
   if (!playbackReady(video)) return res.status(403).send('Playback is not available');
   try {
-    const sourceUrl = bunny.getHlsUrl(req.params.id);
+    // Bunny rejects an unsigned manifest when Pull Zone token authentication
+    // is enabled. Fetch through the same signed directory URL that will be
+    // used for the playlist's segment requests.
+    const sourceUrl = bunny.hasTokenAuth()
+      ? bunny.getSignedHlsUrl(req.params.id, decoded.exp)
+      : bunny.getHlsUrl(req.params.id);
     const response = await axios.get(sourceUrl, { timeout: 15000, responseType: 'text' });
     const expiresAt = decoded.exp;
     const playlist = String(response.data || '').split(/\r?\n/).map((line) => {
