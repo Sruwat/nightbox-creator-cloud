@@ -245,52 +245,19 @@ async def upload_to_backend(file_path, file_name, title, chat_id):
 
 
 async def deliver_approved_link(client, source_message, video_id, chat_id, caption, status_message):
-    """Wait for HLS/CDN verification + admin approval before publishing a link."""
+    """Publish the stable watch link immediately after source upload."""
     try:
-        headers = bot_headers(chat_id)
-        last_update = None
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-            for _ in range(720):  # up to one hour, survives slow transcoding
-                async with session.get(f"{BACKEND_URL}/api/videos/{video_id}/status", headers=headers) as response:
-                    payload = await response.json(content_type=None)
-                if response.status in {401, 403}:
-                    raise RuntimeError("Bot authorization was rejected while checking video status")
-                if response.status >= 500:
-                    await asyncio.sleep(5)
-                    continue
-                if response.status >= 400:
-                    raise RuntimeError(f"Backend status check failed (HTTP {response.status})")
-                state = payload.get("state")
-                watch_url = payload.get("watchUrl") or f"{PUBLIC_WATCH_URL}/watch/{video_id}"
-                if state not in {"ready", "failed", "rejected"}:
-                    stage = payload.get("stage") or "Preparing video"
-                    progress = max(0, min(99, int(payload.get("progress") or 0)))
-                    update = f"⏳ **Video is processing**\n\n**Stage:** {stage}\n**Progress:** {progress}%"
-                    if update != last_update:
-                        try:
-                            await status_message.edit_text(update)
-                            last_update = update
-                        except Exception:
-                            pass
-                if state == "ready" and payload.get("playable"):
-                    final_caption = build_upload_caption(source_message, watch_url)
-                    try:
-                        await status_message.delete()
-                    except Exception:
-                        pass
-                    await source_message.copy(chat_id=chat_id, caption=final_caption or watch_url)
-                    return
-                if state in {"failed", "rejected"}:
-                    reason = payload.get("video", {}).get("processingError") or payload.get("video", {}).get("rejectionReason") or state
-                    logger.error("Video %s could not be published: %s", video_id, reason)
-                    await status_message.edit_text("❌ We could not prepare this video. Please try again later.")
-                    return
-                await asyncio.sleep(5)
-        await status_message.edit_text("⏳ Your video is being prepared. The video link will appear shortly.")
-    except Exception as error:
-        logger.exception("Approval delivery failed: %s", error)
+        watch_url = f"{PUBLIC_WATCH_URL}/watch/{video_id}"
+        final_caption = build_upload_caption(source_message, watch_url)
         try:
-            await status_message.edit_text("❌ We could not finish preparing this video. Please try again.")
+            await status_message.delete()
+        except Exception:
+            pass
+        await source_message.copy(chat_id=chat_id, caption=final_caption or watch_url)
+    except Exception as error:
+        logger.exception("Immediate link delivery failed: %s", error)
+        try:
+            await status_message.edit_text("❌ Upload completed, but the link could not be sent. Please try again.")
         except Exception:
             pass
 @app.on_message(filters.command("start"))

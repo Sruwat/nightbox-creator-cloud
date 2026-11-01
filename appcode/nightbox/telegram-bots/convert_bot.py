@@ -751,7 +751,7 @@ async def handle(c, m):
                     replacement = response_watch_url(res)
                     video_id = response_video_id(res)
                     if not replacement and video_id:
-                        replacement = await wait_for_approved_watch(video_id, m.chat.id, telegram_id)
+                        replacement = f"{PUBLIC_WATCH_URL}/watch/{video_id}"
                     if not replacement:
                         raise Exception("Backend did not return a NightBox link")
                     replacements[url] = replacement
@@ -794,8 +794,7 @@ async def handle(c, m):
         watch = response_watch_url(res)
         video_id = response_video_id(res)
         if not watch and video_id:
-            await status.edit_text("⏳ **Video is processing**\n\n**Stage:** Preparing video\n**Progress:** 0%")
-            watch = await wait_for_approved_watch(video_id, m.chat.id, telegram_id, status_message=status)
+            watch = f"{PUBLIC_WATCH_URL}/watch/{video_id}"
         if not watch:
             raise Exception("Backend did not return a NightBox link")
 
