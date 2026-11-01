@@ -445,9 +445,10 @@ def response_watch_url(payload):
         or ""
     ).strip()
 
-async def wait_for_approved_watch(video_id, chat_id, telegram_id="", timeout_seconds=3600):
+async def wait_for_approved_watch(video_id, chat_id, telegram_id="", timeout_seconds=3600, status_message=None):
     headers = backend_headers(chat_id, telegram_id)
     deadline = time.time() + timeout_seconds
+    last_update = None
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
         while time.time() < deadline:
             async with session.get(f"{BACKEND_URL}/api/videos/{video_id}/status", headers=headers) as resp:
@@ -459,6 +460,17 @@ async def wait_for_approved_watch(video_id, chat_id, telegram_id="", timeout_sec
                 continue
             if resp.status >= 400:
                 raise RuntimeError(f"Backend status check failed (HTTP {resp.status})")
+            state = data.get("state")
+            if state not in {"ready", "failed", "rejected"} and status_message is not None:
+                stage = data.get("stage") or "Preparing video"
+                progress = max(0, min(99, int(data.get("progress") or 0)))
+                update = f"⏳ **Video is processing**\n\n**Stage:** {stage}\n**Progress:** {progress}%"
+                if update != last_update:
+                    try:
+                        await status_message.edit_text(update)
+                        last_update = update
+                    except Exception:
+                        pass
             if data.get("state") == "ready" and data.get("playable"):
                 return data.get("watchUrl") or f"{PUBLIC_WATCH_URL}/watch/{video_id}"
             if data.get("state") == "ready" and data.get("playable") and data.get("watchUrl"):
@@ -782,8 +794,8 @@ async def handle(c, m):
         watch = response_watch_url(res)
         video_id = response_video_id(res)
         if not watch and video_id:
-            await status.edit_text("⏳ Your video is being prepared. Please wait...")
-            watch = await wait_for_approved_watch(video_id, m.chat.id, telegram_id)
+            await status.edit_text("⏳ **Video is processing**\n\n**Stage:** Preparing video\n**Progress:** 0%")
+            watch = await wait_for_approved_watch(video_id, m.chat.id, telegram_id, status_message=status)
         if not watch:
             raise Exception("Backend did not return a NightBox link")
 

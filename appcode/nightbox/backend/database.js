@@ -37,6 +37,7 @@ db.exec(`
     approval_status TEXT NOT NULL DEFAULT 'pending',
     visibility TEXT NOT NULL DEFAULT 'hidden',
     processing_stage TEXT NOT NULL DEFAULT 'queued',
+    processing_progress INTEGER NOT NULL DEFAULT 0,
     processing_error TEXT,
     processing_attempts INTEGER NOT NULL DEFAULT 0,
     processing_started_at TEXT,
@@ -366,6 +367,7 @@ for (const statement of [
   'ALTER TABLE videos ADD COLUMN approval_status TEXT NOT NULL DEFAULT \'pending\'',
   'ALTER TABLE videos ADD COLUMN visibility TEXT NOT NULL DEFAULT \'hidden\'',
   'ALTER TABLE videos ADD COLUMN processing_stage TEXT NOT NULL DEFAULT \'queued\'',
+  'ALTER TABLE videos ADD COLUMN processing_progress INTEGER NOT NULL DEFAULT 0',
   'ALTER TABLE videos ADD COLUMN processing_error TEXT',
   'ALTER TABLE videos ADD COLUMN processing_attempts INTEGER NOT NULL DEFAULT 0',
   'ALTER TABLE videos ADD COLUMN processing_started_at TEXT',
@@ -522,7 +524,7 @@ module.exports = {
     db.prepare(`INSERT OR REPLACE INTO video_jobs (video_id,job_type,status,attempts,last_error,next_attempt_at,locked_at,updated_at) VALUES (?,?,?,?,?,?,?,?)`)
       .run(video.id, 'hls', video.processingStatus === 'completed' ? 'completed' : 'queued', 0, null, timestamp, null, timestamp);
   },
-  getVideoPlayback(videoId) { return db.prepare('SELECT playback_status AS playbackStatus,hls_url AS hlsUrl,playback_error AS playbackError,processing_status AS processingStatus,copyright_status AS copyrightStatus,approval_status AS approvalStatus,visibility,processing_stage AS processingStage,cdn_verified_at AS cdnVerifiedAt FROM videos WHERE id=?').get(videoId) || null; },
+  getVideoPlayback(videoId) { return db.prepare('SELECT playback_status AS playbackStatus,hls_url AS hlsUrl,playback_error AS playbackError,processing_status AS processingStatus,copyright_status AS copyrightStatus,approval_status AS approvalStatus,visibility,processing_stage AS processingStage,processing_progress AS processingProgress,cdn_verified_at AS cdnVerifiedAt FROM videos WHERE id=?').get(videoId) || null; },
   updateVideoPlayback(videoId, playbackStatus, hlsUrl = null, playbackError = null) {
     const ready = playbackStatus === 'ready';
     const timestamp = now();

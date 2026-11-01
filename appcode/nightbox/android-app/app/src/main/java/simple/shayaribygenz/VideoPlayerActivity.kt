@@ -429,12 +429,14 @@ class VideoPlayerActivity : AppCompatActivity() {
 
                     // Treat 202 as processing and retry every 5 seconds, maximum 24 attempts
                     if (respCode == 202 || respCode == 409) {
-                        val status = try { JSONObject(bodyString).optString("playbackStatus") } catch (_: Exception) { "" }
+                        val processingBody = try { JSONObject(bodyString) } catch (_: Exception) { JSONObject() }
+                        val status = processingBody.optString("playbackStatus")
+                        val processingStage = processingBody.optString("processingStage").takeIf { it.isNotBlank() }
                         withContext(Dispatchers.Main) {
                             if (status == "failed" || respCode == 409) {
                                 showError("This video is not available right now. Please try again later.")
                             } else {
-                                tvLoadingText.text = "Preparing your video…"
+                                tvLoadingText.text = processingStage ?: "Preparing your video…"
                                 if (++processingRetryCount <= 24) {
                                     window.decorView.postDelayed({
                                         if (!isFinishing && !isDestroyed) requestPlaybackTokenAndInitialize()

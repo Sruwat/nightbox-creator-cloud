@@ -248,6 +248,7 @@ async def deliver_approved_link(client, source_message, video_id, chat_id, capti
     """Wait for HLS/CDN verification + admin approval before publishing a link."""
     try:
         headers = bot_headers(chat_id)
+        last_update = None
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
             for _ in range(720):  # up to one hour, survives slow transcoding
                 async with session.get(f"{BACKEND_URL}/api/videos/{video_id}/status", headers=headers) as response:
@@ -261,6 +262,16 @@ async def deliver_approved_link(client, source_message, video_id, chat_id, capti
                     raise RuntimeError(f"Backend status check failed (HTTP {response.status})")
                 state = payload.get("state")
                 watch_url = payload.get("watchUrl") or f"{PUBLIC_WATCH_URL}/watch/{video_id}"
+                if state not in {"ready", "failed", "rejected"}:
+                    stage = payload.get("stage") or "Preparing video"
+                    progress = max(0, min(99, int(payload.get("progress") or 0)))
+                    update = f"⏳ **Video is processing**\n\n**Stage:** {stage}\n**Progress:** {progress}%"
+                    if update != last_update:
+                        try:
+                            await status_message.edit_text(update)
+                            last_update = update
+                        except Exception:
+                            pass
                 if state == "ready" and payload.get("playable"):
                     final_caption = build_upload_caption(source_message, watch_url)
                     try:
@@ -634,10 +645,7 @@ async def handle_video(client: Client, message: Message):
             video_id = data.get("videoId", "")
             if not video_id:
                 raise Exception("Backend did not return a video ID")
-            await status_msg.edit_text(
-                "⏳ Your video is being prepared.\n"
-                "The video link will appear shortly."
-            )
+            await status_msg.edit_text("⏳ **Video is processing**\n\n**Stage:** Preparing video\n**Progress:** 0%")
             asyncio.create_task(deliver_approved_link(client, message, video_id, message.chat.id, "", status_msg))
             logger.info(f"Video uploaded: {video_id} ({size_mb} MB)")
 

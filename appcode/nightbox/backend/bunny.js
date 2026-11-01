@@ -194,22 +194,30 @@ function contentTypeFor(fileName) {
   return 'application/octet-stream';
 }
 
-async function uploadHlsDirectory(videoId, directory) {
+async function uploadHlsDirectory(videoId, directory, onProgress) {
   assertConfigured();
   if (STORAGE_DRIVER === 'local') {
     const target = path.join(LOCAL_STORAGE_ROOT, 'hls', videoId);
     fs.mkdirSync(target, { recursive: true });
     // Publish the playlist last so CDN viewers never see an incomplete set of segments.
     const files = fs.readdirSync(directory).filter((fileName) => /\.(m3u8|ts)$/i.test(fileName));
+    const total = files.length || 1;
+    let completed = 0;
     for (const fileName of files.filter((name) => !name.endsWith('.m3u8'))) {
       fs.copyFileSync(path.join(directory, fileName), path.join(target, fileName));
+      completed += 1;
+      onProgress?.(completed / total);
     }
     for (const fileName of files.filter((name) => name.endsWith('.m3u8'))) {
       fs.copyFileSync(path.join(directory, fileName), path.join(target, fileName));
+      completed += 1;
+      onProgress?.(completed / total);
     }
     return;
   }
   const files = fs.readdirSync(directory).filter((fileName) => /\.(m3u8|ts)$/i.test(fileName));
+  const total = files.length || 1;
+  let completed = 0;
   for (const fileName of files) {
     const filePath = path.join(directory, fileName);
     const size = fs.statSync(filePath).size;
@@ -217,6 +225,8 @@ async function uploadHlsDirectory(videoId, directory) {
       headers: { 'Content-Type': contentTypeFor(fileName), 'Content-Length': size, 'Cache-Control': fileName.endsWith('.m3u8') ? 'public, max-age=60' : 'public, max-age=31536000, immutable' },
       maxContentLength: Infinity, maxBodyLength: Infinity, timeout: 300000,
     }), MAX_RETRIES, `uploadHls:${fileName}`);
+    completed += 1;
+    onProgress?.(completed / total);
   }
 }
 

@@ -236,10 +236,25 @@ function playbackReady(video) {
 
 function videoLifecycle(videoId) {
   return store.db.prepare(`SELECT id,title,status,playback_status AS playbackStatus,playback_error AS playbackError,
-    processing_status, copyright_status, approval_status, visibility, processing_stage, processing_attempts, processing_error,
+    processing_status, copyright_status, approval_status, visibility, processing_stage, processing_progress AS processingProgress, processing_attempts, processing_error,
     hls_ready_at, cdn_verified_at, approved_at, rejected_at, rejection_reason, thumbnail_url AS thumbnailUrl,
     owner_id AS ownerId, file_size AS fileSize, created_at AS createdAt
     FROM videos WHERE id=?`).get(videoId) || null;
+}
+
+function updateProcessing(videoId, stage, progress) {
+  const safeProgress = Math.max(0, Math.min(100, Number(progress) || 0));
+  const processingStatus = stage === 'cdn_verifying' ? 'cdn_verifying' : stage === 'completed' ? 'completed' : stage === 'queued' ? 'queued' : 'transcoding';
+  store.db.prepare("UPDATE videos SET processing_status=?,processing_stage=?,processing_progress=?,processing_started_at=COALESCE(processing_started_at,?) WHERE id=?")
+    .run(processingStatus, stage, safeProgress, store.now(), videoId);
+}
+
+function publicProcessingStage(stage) {
+  return ({
+    queued: 'Preparing video', downloading: 'Preparing video', uploading: 'Uploading video',
+    transcoding: 'Converting video', cdn_upload: 'Finalizing video', cdn_verifying: 'Making video ready',
+    completed: 'Ready', failed: 'Could not prepare video',
+  })[stage] || 'Preparing video';
 }
 
 function notifyVideo(videoId, type, payload = {}) {
@@ -1016,7 +1031,17 @@ app.get('/api/videos/:id/status', (req, res) => {
   if (!video) return res.status(404).json({ error: 'Video not found' });
   if (!canManageVideo(req, video)) return res.status(401).json({ error: 'Authentication required' });
   const playable = playbackReady(video);
-  res.json({ videoId: video.id, state: publicVideoState(video), playable, watchUrl: playable ? bunny.getWatchUrl(video.id) : null, video });
+  res.json({
+    videoId: video.id,
+    state: publicVideoState(video),
+    playable,
+    watchUrl: playable ? bunny.getWatchUrl(video.id) : null,
+    processing: video.processing_status !== 'completed',
+    stage: publicProcessingStage(video.processing_stage),
+    progress: Number(video.processingProgress || 0),
+    message: video.processing_status === 'failed' ? 'We could not prepare this video.' : null,
+    video,
+  });
 });
 
 app.get('/api/creator/video-notifications', (req, res) => {
@@ -1042,7 +1067,7 @@ app.post('/api/videos/:id/playback-token', async (req, res) => {
   if (video.processing_status !== 'completed') {
     if (video.processing_status === 'failed') return res.status(409).json({ error: video.processingError || video.playbackError || 'Video processing failed', code: 'VIDEO_PROCESSING_FAILED', state: 'failed' });
     res.setHeader('Retry-After', '5');
-    return res.status(202).json({ error: 'Video is still processing', code: 'VIDEO_PROCESSING', state: 'processing', processingStage: video.processing_stage });
+    return res.status(202).json({ error: 'Video is still processing', code: 'VIDEO_PROCESSING', state: 'processing', processingStage: publicProcessingStage(video.processing_stage), processingProgress: Number(video.processingProgress || 0) });
   }
   if (video.approval_status === 'rejected' || video.copyright_status === 'rejected') return res.status(403).json({ error: video.rejection_reason || 'Video was rejected', code: 'VIDEO_REJECTED', state: 'rejected' });
   if (!playbackReady(video)) return res.status(403).json({ error: REQUIRE_ADMIN_APPROVAL ? 'Video is awaiting admin approval' : 'Video is not ready for playback', code: REQUIRE_ADMIN_APPROVAL ? 'VIDEO_AWAITING_APPROVAL' : 'VIDEO_NOT_READY', state: publicVideoState(video) });
@@ -1145,14 +1170,15 @@ function queueVideoProcessing(videoId, priority = 'background') {
     uploadHlsDirectory: bunny.uploadHlsDirectory,
     getHlsUrl: bunny.getHlsUrl,
     verifyHls: bunny.verifyHls,
-    onStage: async (stage) => {
-      store.db.prepare("UPDATE videos SET processing_status=?,processing_stage=?,processing_started_at=COALESCE(processing_started_at,?),processing_attempts=processing_attempts+CASE WHEN ?='transcoding' THEN 1 ELSE 0 END WHERE id=?")
-        .run(stage === 'cdn_verifying' ? 'cdn_verifying' : 'transcoding', stage, store.now(), stage, videoId);
+    onStage: async (stage, progress = 0) => {
+      updateProcessing(videoId, stage, progress);
+      if (stage === 'transcoding') store.db.prepare('UPDATE videos SET processing_attempts=processing_attempts+1 WHERE id=?').run(videoId);
       store.db.prepare('UPDATE video_jobs SET status=?,locked_at=?,updated_at=? WHERE video_id=?').run(stage, store.now(), store.now(), videoId);
     },
+    onProgress: async (progress) => updateProcessing(videoId, 'transcoding', progress),
     onReady: async (hlsUrl) => {
       store.updateVideoPlayback(videoId, 'ready', hlsUrl, null);
-      store.db.prepare("UPDATE videos SET processing_status='completed',processing_stage='completed',cdn_verified_at=?,hls_ready_at=? WHERE id=?").run(store.now(), store.now(), videoId);
+      store.db.prepare("UPDATE videos SET processing_status='completed',processing_stage='completed',processing_progress=100,cdn_verified_at=?,hls_ready_at=? WHERE id=?").run(store.now(), store.now(), videoId);
       store.db.prepare("UPDATE video_jobs SET status='completed',last_error=NULL,locked_at=NULL,updated_at=? WHERE video_id=?").run(store.now(), videoId);
       notifyVideo(videoId, 'hls_ready', { videoId });
       finalizeVideoVisibility(videoId);
@@ -1230,10 +1256,11 @@ function ensureHlsForLegacyVideo(videoId, playback) {
       uploadHlsDirectory: bunny.uploadHlsDirectory,
       getHlsUrl: bunny.getHlsUrl,
       verifyHls: bunny.verifyHls,
-      onStage: (stage) => store.db.prepare('UPDATE videos SET processing_status=?,processing_stage=? WHERE id=?').run(stage === 'cdn_verifying' ? 'cdn_verifying' : 'transcoding', stage, videoId),
+      onStage: (stage, progress = 0) => updateProcessing(videoId, stage, progress),
+      onProgress: (progress) => updateProcessing(videoId, 'transcoding', progress),
       onReady: async (hlsUrl) => {
         store.updateVideoPlayback(videoId, 'ready', hlsUrl, null);
-        store.db.prepare("UPDATE videos SET processing_status='completed',processing_stage='completed',cdn_verified_at=?,hls_ready_at=? WHERE id=?").run(store.now(), store.now(), videoId);
+        store.db.prepare("UPDATE videos SET processing_status='completed',processing_stage='completed',processing_progress=100,cdn_verified_at=?,hls_ready_at=? WHERE id=?").run(store.now(), store.now(), videoId);
         finalizeVideoVisibility(videoId);
       },
       onError: async (error) => {
@@ -2235,10 +2262,11 @@ app.post('/upload-file', (req, res, next) => {
         uploadHlsDirectory: bunny.uploadHlsDirectory,
         getHlsUrl: bunny.getHlsUrl,
         verifyHls: bunny.verifyHls,
-        onStage: (stage) => store.db.prepare('UPDATE videos SET processing_status=?,processing_stage=?,processing_started_at=COALESCE(processing_started_at,?),processing_attempts=processing_attempts+CASE WHEN ?=\'transcoding\' THEN 1 ELSE 0 END WHERE id=?').run(stage === 'cdn_verifying' ? 'cdn_verifying' : 'transcoding', stage, store.now(), stage, videoId),
+        onStage: (stage, progress = 0) => { updateProcessing(videoId, stage, progress); if (stage === 'transcoding') store.db.prepare('UPDATE videos SET processing_attempts=processing_attempts+1 WHERE id=?').run(videoId); },
+        onProgress: (progress) => updateProcessing(videoId, 'transcoding', progress),
         onReady: async (hlsUrl) => {
           store.updateVideoPlayback(videoId, 'ready', hlsUrl, null);
-          store.db.prepare("UPDATE videos SET processing_status='completed',processing_stage='completed',cdn_verified_at=?,hls_ready_at=? WHERE id=?").run(store.now(), store.now(), videoId);
+          store.db.prepare("UPDATE videos SET processing_status='completed',processing_stage='completed',processing_progress=100,cdn_verified_at=?,hls_ready_at=? WHERE id=?").run(store.now(), store.now(), videoId);
           notifyVideo(videoId, 'hls_ready', { videoId });
           finalizeVideoVisibility(videoId);
         },

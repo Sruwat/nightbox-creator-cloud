@@ -10,12 +10,25 @@ let active = 0;
 const urgentQueue = [];
 const backgroundQueue = [];
 
-function runFfmpeg(sourcePath, outputDir) {
+function probeDuration(sourcePath) {
+  return new Promise((resolve) => {
+    const child = spawn(process.env.FFPROBE_BIN || 'ffprobe', [
+      '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', sourcePath,
+    ], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let output = '';
+    child.stdout.on('data', (chunk) => { output += chunk.toString(); });
+    child.on('close', () => resolve(Number(output.trim()) || 0));
+    child.on('error', () => resolve(0));
+  });
+}
+
+async function runFfmpeg(sourcePath, outputDir, onProgress) {
+  const duration = await probeDuration(sourcePath);
   return new Promise((resolve, reject) => {
     const playlistPath = path.join(outputDir, 'master.m3u8');
     const segmentPattern = path.join(outputDir, 'segment_%05d.ts');
     const args = [
-      '-hide_banner', '-loglevel', 'error', '-y', '-i', sourcePath,
+      '-hide_banner', '-loglevel', 'error', '-progress', 'pipe:2', '-nostats', '-y', '-i', sourcePath,
       '-map', '0:v:0', '-map', '0:a:0?',
       '-vf', "scale=w='min(1280,iw)':h='min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
       '-c:v', 'libx264', '-preset', process.env.FFMPEG_PRESET || 'veryfast',
@@ -32,7 +45,21 @@ function runFfmpeg(sourcePath, outputDir) {
     const child = spawn(FFMPEG_BIN, args, { stdio: ['ignore', 'ignore', 'pipe'] });
     try { os.setPriority(child.pid, os.constants.priority.PRIORITY_BELOW_NORMAL); } catch (_) { /* Keep default priority if unsupported. */ }
     let stderr = '';
-    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    let progressBuffer = '';
+    child.stderr.on('data', (chunk) => {
+      progressBuffer += chunk.toString();
+      const lines = progressBuffer.split(/\r?\n/);
+      progressBuffer = lines.pop() || '';
+      for (const line of lines) {
+        const match = line.match(/^out_time_ms=(\d+)/);
+        if (match && duration && onProgress) {
+          const ratio = Math.max(0, Math.min(1, Number(match[1]) / 1000000 / duration));
+          void onProgress(Math.min(70, 30 + Math.round(ratio * 40)));
+        } else if (line && !/^(frame|fps|bitrate|total_size|out_time|progress)=/.test(line)) {
+          stderr += `${line}\n`;
+        }
+      }
+    });
     child.on('error', (error) => reject(error));
     child.on('close', (code) => {
       if (code === 0 && fs.existsSync(playlistPath)) return resolve();
@@ -47,13 +74,18 @@ async function processOne(job) {
   try {
     await fs.promises.mkdir(TEMP_ROOT, { recursive: true });
     outputDir = await fs.promises.mkdtemp(path.join(TEMP_ROOT, 'nightbox-hls-'));
-    if (!sourcePath && job.prepareSource) sourcePath = await job.prepareSource();
+    if (!sourcePath && job.prepareSource) {
+      if (job.onStage) await job.onStage('downloading', 5);
+      sourcePath = await job.prepareSource();
+    }
     if (!sourcePath) throw new Error('Transcode source is unavailable');
-    if (job.onStage) await job.onStage('transcoding');
-    await runFfmpeg(sourcePath, outputDir);
-    if (job.onStage) await job.onStage('cdn_verifying');
-    await job.uploadHlsDirectory(job.videoId, outputDir);
+    if (job.onStage) await job.onStage('transcoding', 30);
+    await runFfmpeg(sourcePath, outputDir, (progress) => job.onProgress?.(progress));
+    if (job.onStage) await job.onStage('cdn_upload', 72);
+    await job.uploadHlsDirectory(job.videoId, outputDir, (ratio) => job.onProgress?.(72 + Math.round(ratio * 18)));
+    if (job.onStage) await job.onStage('cdn_verifying', 95);
     if (job.verifyHls) await job.verifyHls(job.videoId);
+    if (job.onProgress) await job.onProgress(100);
     await job.onReady(job.getHlsUrl(job.videoId));
   } catch (error) {
     await job.onError(error);
