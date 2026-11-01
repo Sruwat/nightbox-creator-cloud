@@ -528,8 +528,8 @@ module.exports = {
   updateVideoPlayback(videoId, playbackStatus, hlsUrl = null, playbackError = null) {
     const ready = playbackStatus === 'ready';
     const timestamp = now();
-    db.prepare(`UPDATE videos SET playback_status=?,hls_url=?,playback_error=?,processing_status=?,processing_stage=?,hls_ready_at=CASE WHEN ? THEN COALESCE(hls_ready_at,?) ELSE hls_ready_at END WHERE id=?`)
-      .run(playbackStatus, hlsUrl, playbackError, ready ? 'completed' : (playbackStatus === 'failed' ? 'failed' : 'transcoding'), ready ? 'completed' : (playbackStatus === 'failed' ? 'failed' : 'transcoding'), ready ? 1 : 0, timestamp, videoId);
+    db.prepare(`UPDATE videos SET playback_status=?,hls_url=?,playback_error=?,processing_status=?,processing_stage=?,processing_progress=CASE WHEN ? THEN 100 ELSE processing_progress END,hls_ready_at=CASE WHEN ? THEN COALESCE(hls_ready_at,?) ELSE hls_ready_at END WHERE id=?`)
+      .run(playbackStatus, hlsUrl, playbackError, ready ? 'completed' : (playbackStatus === 'failed' ? 'failed' : 'transcoding'), ready ? 'completed' : (playbackStatus === 'failed' ? 'failed' : 'transcoding'), ready ? 1 : 0, ready ? 1 : 0, timestamp, videoId);
     db.prepare('UPDATE video_jobs SET status=?,last_error=?,locked_at=NULL,updated_at=? WHERE video_id=?').run(ready ? 'completed' : (playbackStatus === 'failed' ? 'failed' : 'processing'), playbackError, timestamp, videoId);
   },
   findVideoByHash(contentHash, ownerId) { return db.prepare('SELECT id,title,watch_url AS watchUrl,embed_url AS embedUrl FROM videos WHERE content_hash = ? AND (owner_id = ? OR owner_id IS NULL) ORDER BY created_at ASC LIMIT 1').get(contentHash, ownerId || null); },

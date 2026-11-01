@@ -2743,7 +2743,7 @@ async function migrateLegacyVideos() {
     try {
       await bunny.verifyHls(row.id);
       const now = store.now();
-      store.db.prepare("UPDATE videos SET processing_status='completed',processing_stage='completed',copyright_status='approved',approval_status='approved',visibility='visible',cdn_verified_at=COALESCE(cdn_verified_at,?),hls_ready_at=COALESCE(hls_ready_at,?),approved_at=COALESCE(approved_at,?) WHERE id=?").run(now, now, now, row.id);
+      store.db.prepare("UPDATE videos SET processing_status='completed',processing_stage='completed',processing_progress=100,copyright_status='approved',approval_status='approved',visibility='visible',cdn_verified_at=COALESCE(cdn_verified_at,?),hls_ready_at=COALESCE(hls_ready_at,?),approved_at=COALESCE(approved_at,?) WHERE id=?").run(now, now, now, row.id);
       store.db.prepare("INSERT OR REPLACE INTO video_jobs (video_id,job_type,status,attempts,last_error,next_attempt_at,locked_at,updated_at) VALUES (?, 'hls', 'completed', 0, NULL, ?, NULL, ?)").run(row.id, now, now);
       verified += 1;
     } catch (error) {
