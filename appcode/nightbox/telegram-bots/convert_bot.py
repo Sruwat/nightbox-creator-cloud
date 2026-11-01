@@ -38,6 +38,7 @@ BOT_TOKEN = os.getenv(f"TELEGRAM_BOT_TOKEN_{BOT_KIND}")
 API_ID = os.getenv("TELEGRAM_API_ID")
 API_HASH = os.getenv("TELEGRAM_API_HASH")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:3000").rstrip("/")
+PUBLIC_WATCH_URL = os.getenv("PUBLIC_WATCH_URL", "https://nightbox.in").rstrip("/")
 CREATOR_API_KEY = os.getenv("CREATOR_API_KEY", "")
 BOT_NAME = os.getenv("BOT_NAME", BOT_KIND.lower())
 REQUIRE_CONNECT = os.getenv("TELEGRAM_REQUIRE_CONNECT", "true").lower() == "true"
@@ -451,6 +452,15 @@ async def wait_for_approved_watch(video_id, chat_id, telegram_id="", timeout_sec
         while time.time() < deadline:
             async with session.get(f"{BACKEND_URL}/api/videos/{video_id}/status", headers=headers) as resp:
                 data = await resp.json(content_type=None)
+            if resp.status in {401, 403}:
+                raise RuntimeError("Bot authorization was rejected while checking video status")
+            if resp.status >= 500:
+                await asyncio.sleep(5)
+                continue
+            if resp.status >= 400:
+                raise RuntimeError(f"Backend status check failed (HTTP {resp.status})")
+            if data.get("state") == "ready" and data.get("playable"):
+                return data.get("watchUrl") or f"{PUBLIC_WATCH_URL}/watch/{video_id}"
             if data.get("state") == "ready" and data.get("playable") and data.get("watchUrl"):
                 return data["watchUrl"]
             if data.get("state") in {"failed", "rejected"}:

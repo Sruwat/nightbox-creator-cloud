@@ -61,6 +61,7 @@ BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:3000").rstrip("/")
 CREATOR_API_KEY = os.getenv("CREATOR_API_KEY", "")
 BOT_NAME = os.getenv("BOT_NAME", "videos-upload")
 REQUIRE_CONNECT = os.getenv("TELEGRAM_REQUIRE_CONNECT", "true").lower() == "true"
+PUBLIC_WATCH_URL = os.getenv("PUBLIC_WATCH_URL", "https://nightbox.in").rstrip("/")
 
 # Limits
 MAX_CONCURRENT_UPLOADS = 10
@@ -251,14 +252,22 @@ async def deliver_approved_link(client, source_message, video_id, chat_id, capti
             for _ in range(720):  # up to one hour, survives slow transcoding
                 async with session.get(f"{BACKEND_URL}/api/videos/{video_id}/status", headers=headers) as response:
                     payload = await response.json(content_type=None)
+                if response.status in {401, 403}:
+                    raise RuntimeError("Bot authorization was rejected while checking video status")
+                if response.status >= 500:
+                    await asyncio.sleep(5)
+                    continue
+                if response.status >= 400:
+                    raise RuntimeError(f"Backend status check failed (HTTP {response.status})")
                 state = payload.get("state")
-                if state == "ready" and payload.get("playable") and payload.get("watchUrl"):
-                    final_caption = build_upload_caption(source_message, payload["watchUrl"])
+                watch_url = payload.get("watchUrl") or f"{PUBLIC_WATCH_URL}/watch/{video_id}"
+                if state == "ready" and payload.get("playable"):
+                    final_caption = build_upload_caption(source_message, watch_url)
                     try:
                         await status_message.delete()
                     except Exception:
                         pass
-                    await source_message.copy(chat_id=chat_id, caption=final_caption or payload["watchUrl"])
+                    await source_message.copy(chat_id=chat_id, caption=final_caption or watch_url)
                     return
                 if state in {"failed", "rejected"}:
                     reason = payload.get("video", {}).get("processingError") or payload.get("video", {}).get("rejectionReason") or state
@@ -269,6 +278,10 @@ async def deliver_approved_link(client, source_message, video_id, chat_id, capti
         await status_message.edit_text("⏳ Your video is being prepared. The video link will appear shortly.")
     except Exception as error:
         logger.exception("Approval delivery failed: %s", error)
+        try:
+            await status_message.edit_text("❌ We could not finish preparing this video. Please try again.")
+        except Exception:
+            pass
 @app.on_message(filters.command("start"))
 async def start_command(client: Client, message: Message):
     """Handle /start command"""
