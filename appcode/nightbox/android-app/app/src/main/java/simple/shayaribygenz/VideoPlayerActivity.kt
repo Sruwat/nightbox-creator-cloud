@@ -40,6 +40,7 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.hls.HlsMediaSource
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -116,6 +117,7 @@ class VideoPlayerActivity : AppCompatActivity() {
     private var viewQualified = false
     private var linkSlug: String? = null
     private var remoteHlsUrl: String? = null
+    private var remoteProgressiveUrl: String? = null
     private var downloadUrl: String? = null
     private var durationUpdateRunnable: Runnable? = null
     private var shouldResumePlayback = false
@@ -461,10 +463,11 @@ class VideoPlayerActivity : AppCompatActivity() {
                         throw IllegalStateException("Video is not available right now ($respCode)")
                     }
 
-                    // Accept only manifestUrl, sessionId, and viewToken from the successful response
+                    // Accept only an authorized manifest or temporary processing media URL.
                     val payload = JSONObject(bodyString)
                     val manifest = payload.optString("manifestUrl").takeIf { it.isNotBlank() }
-                        ?: throw IllegalStateException("Video stream is not available right now")
+                    val progressive = payload.optString("mediaUrl").takeIf { it.isNotBlank() }
+                    if (manifest == null && progressive == null) throw IllegalStateException("Video stream is not available right now")
                     val sId = payload.optString("sessionId").takeIf { it.isNotBlank() }
                     val vToken = payload.optString("viewToken").takeIf { it.isNotBlank() }
 
@@ -472,16 +475,18 @@ class VideoPlayerActivity : AppCompatActivity() {
                     val tokenTitle = payload.optString("title").takeIf { it.isNotBlank() }
                     val tokenDownloadUrl = payload.optString("downloadUrl").takeIf { it.startsWith("https://") }
 
+                    val mediaType = payload.optString("mediaType")
                     withContext(Dispatchers.Main) {
                         processingRetryCount = 0
                         remoteHlsUrl = manifest
+                        remoteProgressiveUrl = progressive
                         viewSessionId = sId
                         viewToken = vToken
                         viewQualified = false
                         tokenTitle?.let { resolvedVideoTitle = formatCleanTitle(it) }
                         tokenDownloadUrl?.let { downloadUrl = it }
                         updateVideoMetaDetails()
-                        initExoPlayerHls()
+                        initExoPlayerHls(isProgressive = mediaType == "progressive" || manifest == null)
                     }
                 }
             } catch (error: Exception) {
@@ -532,10 +537,10 @@ class VideoPlayerActivity : AppCompatActivity() {
      * ExoPlayer with a CDN MP4 source.
      */
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-    private fun initExoPlayerHls() {
+    private fun initExoPlayerHls(isProgressive: Boolean = false) {
         val vid = videoId ?: return
 
-        val mediaUrl = remoteHlsUrl ?: run {
+        val mediaUrl = (if (isProgressive) remoteProgressiveUrl else remoteHlsUrl) ?: run {
             showError("Video URL is unavailable.")
             return
         }
@@ -556,12 +561,16 @@ class VideoPlayerActivity : AppCompatActivity() {
         // cache here: HLS sources fetch only the segments needed for the current bounded buffer.
         val playbackDataSourceFactory = httpDataSourceFactory
 
-        // HLS-only remote player: no MP4/progressive or origin fallback logic
-        val mediaSource = HlsMediaSource.Factory(playbackDataSourceFactory)
-            .setAllowChunklessPreparation(true)
-            .createMediaSource(MediaItem.fromUri(mediaUrl))
+        val mediaSource = if (isProgressive) {
+            ProgressiveMediaSource.Factory(playbackDataSourceFactory)
+                .createMediaSource(MediaItem.fromUri(mediaUrl))
+        } else {
+            HlsMediaSource.Factory(playbackDataSourceFactory)
+                .setAllowChunklessPreparation(true)
+                .createMediaSource(MediaItem.fromUri(mediaUrl))
+        }
 
-        // Bounded buffer: 30-second maximum remote buffer
+        // Bounded buffer: processing fallback and HLS both avoid full-file downloads.
         val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
             .setBufferDurationsMs(
                 15_000,

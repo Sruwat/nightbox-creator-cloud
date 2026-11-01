@@ -1064,13 +1064,8 @@ app.post('/api/creator/video-notifications/:id/ack', (req, res) => {
 app.post('/api/videos/:id/playback-token', async (req, res) => {
   const video = videoLifecycle(req.params.id);
   if (!video || video.status === 'deleted') return res.status(404).json({ error: 'Video not found' });
-  if (video.processing_status !== 'completed') {
-    if (video.processing_status === 'failed') return res.status(409).json({ error: video.processingError || video.playbackError || 'Video processing failed', code: 'VIDEO_PROCESSING_FAILED', state: 'failed' });
-    res.setHeader('Retry-After', '5');
-    return res.status(202).json({ error: 'Video is still processing', code: 'VIDEO_PROCESSING', state: 'processing', processingStage: publicProcessingStage(video.processing_stage), processingProgress: Number(video.processingProgress || 0) });
-  }
+  if (video.processing_status === 'failed') return res.status(409).json({ error: video.processingError || video.playbackError || 'Video processing failed', code: 'VIDEO_PROCESSING_FAILED', state: 'failed' });
   if (video.approval_status === 'rejected' || video.copyright_status === 'rejected') return res.status(403).json({ error: video.rejection_reason || 'Video was rejected', code: 'VIDEO_REJECTED', state: 'rejected' });
-  if (!playbackReady(video)) return res.status(403).json({ error: REQUIRE_ADMIN_APPROVAL ? 'Video is awaiting admin approval' : 'Video is not ready for playback', code: REQUIRE_ADMIN_APPROVAL ? 'VIDEO_AWAITING_APPROVAL' : 'VIDEO_NOT_READY', state: publicVideoState(video) });
   if (await viewerIsBlocked(req)) return res.status(403).json({ error: 'Viewer did not pass traffic quality checks', code: 'VIEWER_BLOCKED' });
   // Bunny token authentication is optional for the current production Pull
   // Zone. When it is enabled, the manifest proxy signs every CDN URL. When it
@@ -1096,7 +1091,55 @@ app.post('/api/videos/:id/playback-token', async (req, res) => {
   }
   const expiresAt = Math.floor(Date.now() / 1000) + PLAYBACK_TOKEN_TTL_SECONDS;
   const token = encodePlaybackToken(video.id, sessionId, expiresAt);
+  if (video.processing_status !== 'completed') {
+    const mediaUrl = bunny.hasTokenAuth()
+      ? bunny.getSignedDirectPlayUrl(video.id, expiresAt)
+      : `${PUBLIC_API_URL}/api/playback-media/${encodeURIComponent(video.id)}?token=${encodeURIComponent(token)}`;
+    return res.json({
+      mediaUrl,
+      mediaType: 'progressive',
+      processing: true,
+      processingStage: publicProcessingStage(video.processing_stage),
+      processingProgress: Number(video.processingProgress || 0),
+      expiresAt: new Date(expiresAt * 1000).toISOString(),
+      sessionId,
+      viewToken,
+      minWatchSeconds: store.db.prepare('SELECT minimum_watch_seconds AS seconds FROM view_rules WHERE id=1').get().seconds,
+    });
+  }
+  if (!playbackReady(video)) return res.status(403).json({ error: REQUIRE_ADMIN_APPROVAL ? 'Video is awaiting admin approval' : 'Video is not ready for playback', code: REQUIRE_ADMIN_APPROVAL ? 'VIDEO_AWAITING_APPROVAL' : 'VIDEO_NOT_READY', state: publicVideoState(video) });
   res.json({ manifestUrl: `${PUBLIC_API_URL}/api/playback-manifest/${encodeURIComponent(video.id)}?token=${encodeURIComponent(token)}`, expiresAt: new Date(expiresAt * 1000).toISOString(), sessionId, viewToken, minWatchSeconds: store.db.prepare('SELECT minimum_watch_seconds AS seconds FROM view_rules WHERE id=1').get().seconds });
+});
+
+// Authorized progressive fallback while HLS is still processing. Range
+// forwarding lets ExoPlayer seek without downloading the complete MP4.
+app.get('/api/playback-media/:id', async (req, res) => {
+  const decoded = decodePlaybackToken(String(req.query.token || ''));
+  if (!decoded || decoded.videoId !== req.params.id) return res.status(401).send('Invalid or expired playback token');
+  const video = videoLifecycle(req.params.id);
+  if (!video || video.status === 'deleted' || video.approval_status === 'rejected' || video.copyright_status === 'rejected') return res.status(403).send('Playback is not available');
+  try {
+    const sourceUrl = bunny.hasTokenAuth()
+      ? bunny.getSignedDirectPlayUrl(req.params.id, decoded.exp)
+      : bunny.getDirectPlayUrl(req.params.id);
+    const upstream = await axios.get(sourceUrl, {
+      responseType: 'stream', timeout: 30000,
+      headers: req.headers.range ? { Range: req.headers.range } : {},
+      validateStatus: (status) => status >= 200 && status < 500,
+    });
+    if (upstream.status >= 400) return res.status(upstream.status).end();
+    res.status(upstream.status);
+    for (const header of ['content-length', 'content-range', 'accept-ranges', 'content-type']) {
+      if (upstream.headers[header]) res.setHeader(header, upstream.headers[header]);
+    }
+    res.setHeader('Cache-Control', 'private, no-store');
+    upstream.data.on('error', (error) => { if (!res.headersSent) res.status(502); res.destroy(error); });
+    req.on('close', () => { if (!res.writableEnded) upstream.data.destroy(); });
+    upstream.data.pipe(res);
+  } catch (error) {
+    console.error('[Playback media] Failed:', error.message);
+    if (!res.headersSent) res.status(502).send('Playback media unavailable');
+  }
 });
 
 app.get('/api/playback-manifest/:id', async (req, res) => {

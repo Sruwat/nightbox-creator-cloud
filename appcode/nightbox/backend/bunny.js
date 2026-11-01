@@ -292,6 +292,10 @@ function getSignedCdnUrl(url, expiresAt = Math.floor(Date.now() / 1000) + TOKEN_
 }
 
 function getDirectPlayUrl(videoId) { assertConfigured(); return `https://${CDN_HOST}/${STORAGE_PREFIX}/${videoId}.mp4`; }
+function getSignedDirectPlayUrl(videoId, expiresAt = Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS) {
+  const url = getDirectPlayUrl(videoId);
+  return appendSignedQuery(url, signCdnPath(new URL(url).pathname, expiresAt));
+}
 function getHlsUrl(videoId) {
   if (!CDN_HOST) return null;
   return `https://${CDN_HOST}/${STORAGE_PREFIX}/hls/${videoId}/master.m3u8`;
@@ -324,4 +328,4 @@ function getWatchUrl(videoId) {
 }
 function cleanupTempFile(filePath) { try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (error) { console.error('[Cleanup] Failed:', error.message); } }
 
-module.exports = { createVideo, uploadVideo, uploadVideoFromUrl, uploadCreatorFile, deleteCreatorFile, downloadVideoToFile, uploadHlsDirectory, verifyHls, signCdnPath, getSignedHlsUrl, getSignedCdnUrl, getVideo, deleteVideo, getEmbedUrl, getDirectPlayUrl, getHlsUrl, getCdnUrlIfAvailable, getWatchUrl, getCreatorFilePath, getCreatorFileUrl, cleanupTempFile, getLocalPath: (videoId) => STORAGE_DRIVER === 'local' ? localPath(videoId) : null, isLocalStorage: () => STORAGE_DRIVER === 'local', hasTokenAuth: () => Boolean(TOKEN_AUTH_KEY) };
+module.exports = { createVideo, uploadVideo, uploadVideoFromUrl, uploadCreatorFile, deleteCreatorFile, downloadVideoToFile, uploadHlsDirectory, verifyHls, signCdnPath, getSignedHlsUrl, getSignedCdnUrl, getVideo, deleteVideo, getEmbedUrl, getDirectPlayUrl, getSignedDirectPlayUrl, getHlsUrl, getCdnUrlIfAvailable, getWatchUrl, getCreatorFilePath, getCreatorFileUrl, cleanupTempFile, getLocalPath: (videoId) => STORAGE_DRIVER === 'local' ? localPath(videoId) : null, isLocalStorage: () => STORAGE_DRIVER === 'local', hasTokenAuth: () => Boolean(TOKEN_AUTH_KEY) };
