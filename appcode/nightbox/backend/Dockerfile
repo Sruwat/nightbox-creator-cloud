@@ -14,6 +14,7 @@ RUN apt-get update \
 
 COPY server.js database.js bunny.js transcoder.js ip-country.js ./
 COPY worker-agent.js ./
+COPY worker-manager.sh ./
 COPY upload-gateway.js ./
 COPY public ./public
 

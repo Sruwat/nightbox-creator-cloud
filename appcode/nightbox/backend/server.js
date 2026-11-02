@@ -366,6 +366,20 @@ app.post('/internal/workers/heartbeat', requireWorker, (req, res) => {
   res.json({ ok: true, serverTime: now });
 });
 
+// The Traffic VPS autoscaler uses this small authenticated view to decide
+// whether another bounded worker container is needed. It deliberately
+// exposes queue depth and worker load only to the worker control plane.
+app.post('/internal/workers/queue-status', requireWorker, (req, res) => {
+  const pending = store.db.prepare(`SELECT COUNT(*) AS count FROM video_jobs j
+    JOIN videos v ON v.id=j.video_id
+    WHERE j.status IN ('queued','retry','processing')
+      AND v.processing_status <> 'completed'`).get();
+  const workers = store.db.prepare(`SELECT id,status,concurrency,active_jobs AS activeJobs,
+      cpu_load AS cpuLoad,memory_ratio AS memoryRatio,disk_ratio AS diskRatio,last_seen_at AS lastSeenAt
+    FROM processing_worker_nodes ORDER BY id`).all();
+  res.json({ pending: Number(pending?.count || 0), workers });
+});
+
 app.post('/internal/workers/claim', requireWorker, (req, res) => {
   const workerId = String(req.body?.workerId || '').trim().slice(0, 120);
   if (!workerId) return res.status(400).json({ error: 'workerId is required' });
