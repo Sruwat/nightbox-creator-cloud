@@ -2046,6 +2046,80 @@ app.get('/api/admin/views', requireAdmin, (req, res) => {
   `).all();
   res.json({ views });
 });
+
+// Admin-only count adjustments are represented as auditable view sessions so
+// every existing analytics screen sees the same total. They never create
+// earnings automatically; normal qualified-view revenue remains tied to real
+// playback qualification or the existing per-session moderation endpoint.
+app.get('/api/admin/videos/:id/views-adjustments', requireAdmin, (req, res) => {
+  const video = store.db.prepare('SELECT id FROM videos WHERE id=? AND status<>\'deleted\'').get(req.params.id);
+  if (!video) return res.status(404).json({ error: 'Video not found' });
+  const adjustments = store.db.prepare(`
+    SELECT a.id,a.delta,a.reason,a.admin_user_id AS adminUserId,a.created_at AS createdAt,
+      COUNT(CASE WHEN s.counted=1 THEN 1 END) AS activeSessions
+    FROM admin_view_adjustments a
+    LEFT JOIN view_sessions s ON s.admin_adjustment_id=a.id
+    WHERE a.video_id=?
+    GROUP BY a.id
+    ORDER BY a.created_at DESC
+  `).all(req.params.id);
+  const totals = store.db.prepare(`
+    SELECT COUNT(*) AS total,
+      SUM(CASE WHEN s.counted=1 AND s.admin_adjustment_id IS NOT NULL THEN 1 ELSE 0 END) AS adjusted
+    FROM view_sessions s JOIN creator_links l ON l.id=s.link_id
+    WHERE l.video_id=? AND s.counted=1
+  `).get(req.params.id);
+  res.json({ videoId: req.params.id, totalViews: Number(totals?.total || 0), adjustedViews: Number(totals?.adjusted || 0), adjustments });
+});
+
+app.post('/api/admin/videos/:id/views-adjustment', requireAdmin, (req, res) => {
+  const video = store.db.prepare('SELECT id,owner_id AS ownerId FROM videos WHERE id=? AND status<>\'deleted\'').get(req.params.id);
+  if (!video) return res.status(404).json({ error: 'Video not found' });
+  const delta = Number(req.body?.delta);
+  const target = req.body?.target === undefined || req.body?.target === null || req.body?.target === '' ? null : Number(req.body.target);
+  const reason = String(req.body?.reason || '').trim().slice(0, 500);
+  if (!reason) return res.status(400).json({ error: 'A reason is required for every admin view adjustment' });
+  if (target !== null && (!Number.isSafeInteger(target) || target < 0)) return res.status(400).json({ error: 'target must be a non-negative whole number' });
+  if (target === null && (!Number.isSafeInteger(delta) || delta === 0 || Math.abs(delta) > 100000)) return res.status(400).json({ error: 'delta must be a non-zero whole number between -100000 and 100000' });
+
+  const link = store.db.prepare('SELECT id FROM creator_links WHERE video_id=? ORDER BY canonical DESC,created_at ASC LIMIT 1').get(video.id);
+  if (!link) return res.status(409).json({ error: 'This video has no creator link to attach views to' });
+  const current = Number(store.db.prepare('SELECT COUNT(*) AS total FROM view_sessions WHERE link_id=? AND counted=1').get(link.id).total || 0);
+  const natural = Number(store.db.prepare('SELECT COUNT(*) AS total FROM view_sessions WHERE link_id=? AND counted=1 AND admin_adjustment_id IS NULL').get(link.id).total || 0);
+  const appliedDelta = target === null ? delta : target - current;
+  if (appliedDelta === 0) return res.json({ videoId: video.id, totalViews: current, adjusted: 0, message: 'View count is already at the requested value' });
+  if (!Number.isSafeInteger(appliedDelta) || Math.abs(appliedDelta) > 100000) return res.status(400).json({ error: 'The requested adjustment must be between -100000 and 100000 views' });
+  if (target !== null && target < natural) return res.status(409).json({ error: `Target cannot be below the ${natural} real qualified views already recorded`, realViews: natural, totalViews: current });
+
+  const adjustmentId = store.id();
+  const timestamp = store.now();
+  store.db.exec('BEGIN IMMEDIATE');
+  try {
+    store.db.prepare('INSERT INTO admin_view_adjustments (id,video_id,admin_user_id,delta,reason,created_at) VALUES (?,?,?,?,?,?)').run(adjustmentId, video.id, req.user?.id || null, appliedDelta, reason, timestamp);
+    if (appliedDelta > 0) {
+      const insert = store.db.prepare(`INSERT INTO view_sessions (id,link_id,viewer_user_id,viewer_hash,ip_hash,view_token_hash,country,started_at,qualified_at,counted,admin_adjustment_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
+      for (let index = 0; index < appliedDelta; index += 1) {
+        const marker = `admin:${adjustmentId}:${index}`;
+        insert.run(store.id(), link.id, null, marker, marker, null, 'ZZ', timestamp, timestamp, 1, adjustmentId);
+      }
+    } else {
+      const sessions = store.db.prepare(`SELECT s.id FROM view_sessions s
+        WHERE s.link_id=? AND s.counted=1 AND s.admin_adjustment_id IS NOT NULL
+        ORDER BY s.qualified_at DESC LIMIT ?`).all(link.id, Math.abs(appliedDelta));
+      if (sessions.length < Math.abs(appliedDelta)) throw new Error('The requested reduction exceeds adjustable admin views');
+      const disable = store.db.prepare('UPDATE view_sessions SET counted=0 WHERE id=?');
+      for (const session of sessions) disable.run(session.id);
+    }
+    store.db.exec('COMMIT');
+  } catch (error) {
+    store.db.exec('ROLLBACK');
+    if (String(error.message).includes('exceeds adjustable')) return res.status(409).json({ error: error.message, totalViews: current });
+    throw error;
+  }
+  const totalViews = Number(store.db.prepare('SELECT COUNT(*) AS total FROM view_sessions WHERE link_id=? AND counted=1').get(link.id).total || 0);
+  res.json({ videoId: video.id, adjustmentId, adjusted: appliedDelta, totalViews, earningsAffected: false, reason });
+});
 app.get('/api/admin/traffic', requireAdmin, (req, res) => {
   const startDate = String(req.query.start || '');
   const endDate = String(req.query.end || '');

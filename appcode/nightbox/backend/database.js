@@ -175,6 +175,15 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_view_sessions_link ON view_sessions(link_id);
   CREATE INDEX IF NOT EXISTS idx_view_sessions_viewer ON view_sessions(viewer_hash, started_at);
+  CREATE TABLE IF NOT EXISTS admin_view_adjustments (
+    id TEXT PRIMARY KEY,
+    video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+    admin_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    delta INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_admin_view_adjustments_video ON admin_view_adjustments(video_id, created_at DESC);
   CREATE TABLE IF NOT EXISTS cpm_rates (
     country TEXT PRIMARY KEY,
     cpm_cents INTEGER NOT NULL CHECK (cpm_cents >= 0),
@@ -370,6 +379,7 @@ for (const statement of [
   'ALTER TABLE videos ADD COLUMN file_size INTEGER',
   'ALTER TABLE view_sessions ADD COLUMN viewer_user_id TEXT REFERENCES users(id) ON DELETE SET NULL',
   'ALTER TABLE view_sessions ADD COLUMN view_token_hash TEXT',
+  'ALTER TABLE view_sessions ADD COLUMN admin_adjustment_id TEXT REFERENCES admin_view_adjustments(id) ON DELETE SET NULL',
   'ALTER TABLE view_rules ADD COLUMN max_views_per_ip_24h INTEGER NOT NULL DEFAULT 5 CHECK (max_views_per_ip_24h >= 1)',
   'ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT \'active\'',
   'ALTER TABLE users ADD COLUMN google_sub TEXT',
