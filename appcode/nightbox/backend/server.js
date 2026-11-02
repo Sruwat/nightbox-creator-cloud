@@ -1219,7 +1219,7 @@ app.post('/api/creator/import-link', (req, res) => {
   // creator's dashboard and ledger.
   const link = store.createLink(source.id, owner.id);
   if (!link) return res.status(409).json({ error: 'This video does not have a reusable NightBox link yet' });
-  const sourceState = videoLifecycle(source.id);
+  const sourceState = finalizeVideoVisibility(source.id);
   const playable = playbackReady(sourceState);
   res.status(201).json({
     link: playable ? `${DOMAIN_URL}/l/${link.slug}` : null,
@@ -1257,9 +1257,10 @@ function publicVideoState(video) {
 }
 
 app.get('/api/videos/:id/status', (req, res) => {
-  const video = videoLifecycle(req.params.id);
+  let video = videoLifecycle(req.params.id);
   if (!video) return res.status(404).json({ error: 'Video not found' });
   if (!canManageVideo(req, video)) return res.status(401).json({ error: 'Authentication required' });
+  video = finalizeVideoVisibility(video.id);
   const playable = playbackReady(video);
   // A successful authenticated status poll is an acknowledgement from the
   // owning bot/dashboard. Reconcile the durable notification queue here so a
@@ -1387,7 +1388,7 @@ app.get('/api/playback-media/:id', async (req, res) => {
 app.get('/api/playback-manifest/:id', async (req, res) => {
   const decoded = decodePlaybackToken(String(req.query.token || ''));
   if (!decoded || decoded.videoId !== req.params.id) return res.status(401).send('Invalid or expired playback token');
-  const video = videoLifecycle(req.params.id);
+  const video = finalizeVideoVisibility(req.params.id);
   if (!playbackReady(video)) return res.status(403).send('Playback is not available');
   try {
     // Bunny rejects an unsigned manifest when Pull Zone token authentication
@@ -1625,7 +1626,7 @@ app.post('/api/links/:slug/view/start', async (req, res) => {
   const videoId = store.db.prepare('SELECT video_id AS videoId FROM creator_links WHERE id=?').get(link.id)?.videoId;
   const playback = ensureHlsForLegacyVideo(videoId, store.getVideoPlayback(videoId));
   if (!playback) return res.status(404).json({ error: 'Video not found' });
-  const lifecycle = videoLifecycle(videoId);
+  const lifecycle = finalizeVideoVisibility(videoId);
   if (!playbackReady(lifecycle)) return res.status(403).json({ error: 'Direct MP4 playback is disabled; request an authorized HLS playback token', code: 'PLAYBACK_TOKEN_REQUIRED', state: publicVideoState(lifecycle) });
   if (playback.playbackStatus === 'failed') {
     return res.status(409).json({ error: 'Video processing failed', code: 'VIDEO_PROCESSING_FAILED', playbackStatus: 'failed' });
@@ -2853,7 +2854,7 @@ app.get('/video/:id', async (req, res) => {
       dateUploaded: storedVideo.createdAt || null,
     };
     const originStreamUrl = `${PUBLIC_API_URL}/video/${videoId}/stream`;
-    const lifecycle = videoLifecycle(videoId);
+    const lifecycle = finalizeVideoVisibility(videoId);
     res.json({
       success: true,
       video: {
