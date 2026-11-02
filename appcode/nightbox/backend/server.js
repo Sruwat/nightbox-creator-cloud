@@ -233,7 +233,7 @@ function decodePlaybackToken(value) {
 function playbackReady(video) {
   return Boolean(video
     && video.processing_status === 'completed'
-    && video.copyright_status === 'approved'
+    && (!REQUIRE_ADMIN_APPROVAL || video.copyright_status === 'approved')
     && video.visibility === 'visible'
     && video.cdn_verified_at
     && (!REQUIRE_ADMIN_APPROVAL || video.approval_status === 'approved'));
@@ -273,9 +273,14 @@ function finalizeVideoVisibility(videoId) {
   const video = videoLifecycle(videoId);
   if (!video || video.processing_status !== 'completed' || !video.cdn_verified_at) return video;
   const approvalReady = !REQUIRE_ADMIN_APPROVAL || video.approval_status === 'approved';
-  if (approvalReady && video.copyright_status === 'approved' && video.visibility !== 'visible') {
+  const copyrightReady = !REQUIRE_ADMIN_APPROVAL || video.copyright_status === 'approved';
+  const needsAutoNormalization = !REQUIRE_ADMIN_APPROVAL && (video.approval_status !== 'approved' || video.copyright_status !== 'approved');
+  if (approvalReady && copyrightReady && (video.visibility !== 'visible' || needsAutoNormalization)) {
     store.db.prepare("UPDATE videos SET approval_status=CASE WHEN ? THEN 'approved' ELSE approval_status END,visibility='visible',approved_at=COALESCE(approved_at,?),processing_stage='completed' WHERE id=?")
       .run(!REQUIRE_ADMIN_APPROVAL, store.now(), videoId);
+    if (!REQUIRE_ADMIN_APPROVAL && video.copyright_status !== 'approved') {
+      store.db.prepare("UPDATE videos SET copyright_status='approved' WHERE id=?").run(videoId);
+    }
     notifyVideo(videoId, 'video_ready', { watchUrl: bunny.getWatchUrl(videoId) });
   }
   return videoLifecycle(videoId);
@@ -1295,10 +1300,14 @@ app.post('/api/creator/video-notifications/:id/ack', (req, res) => {
 });
 
 app.post('/api/videos/:id/playback-token', async (req, res) => {
-  const video = videoLifecycle(req.params.id);
+  let video = videoLifecycle(req.params.id);
   if (!video || video.status === 'deleted') return res.status(404).json({ error: 'Video not found' });
   if (video.processing_status === 'failed') return res.status(409).json({ error: video.processingError || video.playbackError || 'Video processing failed', code: 'VIDEO_PROCESSING_FAILED', state: 'failed' });
   if (video.approval_status === 'rejected' || video.copyright_status === 'rejected') return res.status(403).json({ error: video.rejection_reason || 'Video was rejected', code: 'VIDEO_REJECTED', state: 'rejected' });
+  // Auto-publish mode must also finalize the legacy copyright/visibility gates.
+  // Without this refresh, old completed videos remain hidden forever even
+  // though HLS and CDN verification have already succeeded.
+  video = finalizeVideoVisibility(video.id);
   if (await viewerIsBlocked(req)) return res.status(403).json({ error: 'Viewer did not pass traffic quality checks', code: 'VIEWER_BLOCKED' });
   // Bunny token authentication is optional for the current production Pull
   // Zone. When it is enabled, the manifest proxy signs every CDN URL. When it
