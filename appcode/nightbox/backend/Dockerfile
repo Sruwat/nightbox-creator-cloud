@@ -13,6 +13,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY server.js database.js bunny.js transcoder.js ip-country.js ./
+COPY worker-agent.js ./
 COPY public ./public
 
 RUN mkdir -p /app/data /app/temp

@@ -23,6 +23,7 @@ const rateLimit = require('express-rate-limit');
 const { OAuth2Client } = require('google-auth-library');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const crypto = require('crypto');
 const dns = require('dns').promises;
 const net = require('net');
@@ -53,6 +54,9 @@ const HLS_TRANSCODE_ENABLED = process.env.ENABLE_HLS_TRANSCODE !== 'false' && Bo
 // Admin approval is optional. Keep it enabled only when explicitly requested;
 // otherwise a completed, copyright-approved HLS asset becomes visible automatically.
 const REQUIRE_ADMIN_APPROVAL = String(process.env.REQUIRE_ADMIN_APPROVAL || 'false').toLowerCase() === 'true';
+const DISTRIBUTED_WORKER_MODE = String(process.env.DISTRIBUTED_WORKER_MODE || 'false').toLowerCase() === 'true';
+const WORKER_SHARED_SECRET = String(process.env.WORKER_SHARED_SECRET || '').trim();
+const WORKER_MAX_JOB_ATTEMPTS = Math.max(1, Number(process.env.WORKER_MAX_JOB_ATTEMPTS || 3));
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || crypto.randomBytes(32).toString('hex');
 // Conversion bots can identify a creator by Telegram's verified sender ID.
 // This is deliberately separate from creator API keys: the shared secret
@@ -319,6 +323,147 @@ app.use(cors({
 
 app.use('/api/webhooks/razorpay', express.raw({ type: 'application/json', limit: '1mb' }));
 app.use(express.json({ limit: '1mb' }));
+
+function workerAuthorized(req) {
+  if (!WORKER_SHARED_SECRET) return false;
+  const supplied = String(req.headers['x-worker-key'] || '');
+  const expected = Buffer.from(WORKER_SHARED_SECRET);
+  const actual = Buffer.from(supplied);
+  return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+}
+
+function requireWorker(req, res, next) {
+  if (!workerAuthorized(req)) return res.status(401).json({ error: 'Worker authorization required' });
+  next();
+}
+
+function workerLoadAllowsClaim(worker) {
+  const cpu = Number(worker?.cpuLoad || 0);
+  const memory = Number(worker?.memoryRatio || 0);
+  const disk = Number(worker?.diskRatio || 0);
+  const concurrency = Math.max(1, Number(worker?.concurrency || 1));
+  const active = Math.max(0, Number(worker?.activeJobs || 0));
+  return cpu < 0.9 && memory < 0.9 && disk < 0.9 && active < concurrency;
+}
+
+// Distributed workers use the primary only as a durable coordinator. The
+// worker never receives creator credentials; it receives a short-lived source
+// URL and reports state using the shared worker key.
+app.post('/internal/workers/heartbeat', requireWorker, (req, res) => {
+  const workerId = String(req.body?.workerId || '').trim().slice(0, 120);
+  if (!workerId) return res.status(400).json({ error: 'workerId is required' });
+  const now = store.now();
+  store.db.prepare(`INSERT INTO processing_worker_nodes
+    (id,status,concurrency,active_jobs,cpu_load,memory_ratio,disk_ratio,last_seen_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(id) DO UPDATE SET status=excluded.status,concurrency=excluded.concurrency,
+      active_jobs=excluded.active_jobs,cpu_load=excluded.cpu_load,memory_ratio=excluded.memory_ratio,
+      disk_ratio=excluded.disk_ratio,last_seen_at=excluded.last_seen_at,updated_at=excluded.updated_at`)
+    .run(workerId, 'online', Math.max(1, Number(req.body?.concurrency || 1)), Math.max(0, Number(req.body?.activeJobs || 0)),
+      Math.max(0, Number(req.body?.cpuLoad || 0)), Math.max(0, Number(req.body?.memoryRatio || 0)),
+      Math.max(0, Number(req.body?.diskRatio || 0)), now, now);
+  res.json({ ok: true, serverTime: now });
+});
+
+app.post('/internal/workers/claim', requireWorker, (req, res) => {
+  const workerId = String(req.body?.workerId || '').trim().slice(0, 120);
+  if (!workerId) return res.status(400).json({ error: 'workerId is required' });
+  const worker = {
+    concurrency: Number(req.body?.concurrency || 1),
+    activeJobs: Number(req.body?.activeJobs || 0),
+    cpuLoad: Number(req.body?.cpuLoad || 0),
+    memoryRatio: Number(req.body?.memoryRatio || 0),
+    diskRatio: Number(req.body?.diskRatio || 0),
+  };
+  if (!workerLoadAllowsClaim(worker)) return res.status(204).end();
+
+  const now = store.now();
+  store.db.exec('BEGIN IMMEDIATE');
+  try {
+    // Fairness is based first on active jobs per creator, then on the last
+    // assignment timestamp. This gives every creator a turn during bursts.
+    const job = store.db.prepare(`
+      SELECT j.video_id AS videoId, j.attempts, v.title, v.owner_id AS ownerId,
+        COALESCE((SELECT COUNT(*) FROM video_jobs aj JOIN videos av ON av.id=aj.video_id
+          WHERE av.owner_id IS v.owner_id AND aj.status='processing'), 0) AS activeForCreator,
+        COALESCE(f.last_assigned_at, '') AS lastAssignedAt
+      FROM video_jobs j
+      JOIN videos v ON v.id=j.video_id
+      LEFT JOIN processing_fairness f ON f.creator_id=COALESCE(v.owner_id, 'unassigned')
+      WHERE j.status IN ('queued','retry')
+        AND v.status <> 'deleted'
+        AND v.processing_status <> 'completed'
+        AND (j.next_attempt_at IS NULL OR j.next_attempt_at <= ?)
+        AND (j.locked_at IS NULL OR j.locked_at < datetime('now','-10 minutes'))
+      ORDER BY activeForCreator ASC, lastAssignedAt ASC, j.updated_at ASC
+      LIMIT 1`).get(now);
+    if (!job) {
+      store.db.exec('COMMIT');
+      return res.status(204).end();
+    }
+    const creatorKey = job.ownerId || 'unassigned';
+    const attempts = Number(job.attempts || 0) + 1;
+    store.db.prepare(`UPDATE video_jobs SET status='processing',attempts=?,claimed_by=?,locked_at=?,updated_at=? WHERE video_id=?`).run(attempts, workerId, now, now, job.videoId);
+    store.db.prepare(`INSERT INTO processing_fairness (creator_id,last_assigned_at) VALUES (?,?) ON CONFLICT(creator_id) DO UPDATE SET last_assigned_at=excluded.last_assigned_at`).run(creatorKey, now);
+    store.db.prepare(`UPDATE videos SET processing_status='transcoding',processing_stage='queued',processing_started_at=COALESCE(processing_started_at,?),processing_error=NULL WHERE id=?`).run(now, job.videoId);
+    store.db.exec('COMMIT');
+
+    const expiresAt = Math.floor(Date.now() / 1000) + 1800;
+    const sourceUrl = bunny.hasTokenAuth()
+      ? bunny.getSignedDirectPlayUrl(job.videoId, expiresAt)
+      : bunny.getDirectPlayUrl(job.videoId);
+    return res.json({ job: { videoId: job.videoId, title: job.title, attempts, sourceUrl, sourceExpiresAt: new Date(expiresAt * 1000).toISOString() } });
+  } catch (error) {
+    try { store.db.exec('ROLLBACK'); } catch (_) { /* no-op */ }
+    console.error('[Worker claim] Failed:', error.message);
+    return res.status(500).json({ error: 'Unable to claim processing job' });
+  }
+});
+
+app.post('/internal/workers/jobs/:id/progress', requireWorker, (req, res) => {
+  const videoId = String(req.params.id || '');
+  const workerId = String(req.body?.workerId || '').trim();
+  const job = store.db.prepare('SELECT claimed_by,status FROM video_jobs WHERE video_id=?').get(videoId);
+  if (!job || job.claimed_by !== workerId || job.status !== 'processing') return res.status(409).json({ error: 'Job is not owned by this worker' });
+  const stage = String(req.body?.stage || 'transcoding').slice(0, 40);
+  const progress = Math.max(0, Math.min(99, Number(req.body?.progress || 0)));
+  updateProcessing(videoId, stage, progress);
+  store.db.prepare('UPDATE video_jobs SET updated_at=? WHERE video_id=?').run(store.now(), videoId);
+  res.json({ ok: true });
+});
+
+app.post('/internal/workers/jobs/:id/complete', requireWorker, (req, res) => {
+  const videoId = String(req.params.id || '');
+  const workerId = String(req.body?.workerId || '').trim();
+  const job = store.db.prepare('SELECT claimed_by,status FROM video_jobs WHERE video_id=?').get(videoId);
+  if (!job || job.claimed_by !== workerId || job.status !== 'processing') return res.status(409).json({ error: 'Job is not owned by this worker' });
+  const now = store.now();
+  const hlsUrl = bunny.getHlsUrl(videoId);
+  store.updateVideoPlayback(videoId, 'ready', hlsUrl, null);
+  store.db.prepare("UPDATE videos SET processing_status='completed',processing_stage='completed',processing_progress=100,cdn_verified_at=?,hls_ready_at=? WHERE id=?").run(now, now, videoId);
+  store.db.prepare("UPDATE video_jobs SET status='completed',last_error=NULL,locked_at=NULL,claimed_by=NULL,updated_at=? WHERE video_id=?").run(now, videoId);
+  notifyVideo(videoId, 'hls_ready', { videoId });
+  finalizeVideoVisibility(videoId);
+  res.json({ ok: true, videoId, hlsUrl });
+});
+
+app.post('/internal/workers/jobs/:id/fail', requireWorker, (req, res) => {
+  const videoId = String(req.params.id || '');
+  const workerId = String(req.body?.workerId || '').trim();
+  const job = store.db.prepare('SELECT claimed_by,status,attempts FROM video_jobs WHERE video_id=?').get(videoId);
+  if (!job || job.claimed_by !== workerId || job.status !== 'processing') return res.status(409).json({ error: 'Job is not owned by this worker' });
+  const message = String(req.body?.error || 'Worker processing failed').slice(0, 2000);
+  const now = store.now();
+  if (Number(job.attempts || 0) < WORKER_MAX_JOB_ATTEMPTS) {
+    store.db.prepare("UPDATE video_jobs SET status='retry',last_error=?,next_attempt_at=datetime('now','+30 seconds'),locked_at=NULL,claimed_by=NULL,updated_at=? WHERE video_id=?").run(message, now, videoId);
+    store.db.prepare("UPDATE videos SET processing_status='queued',processing_stage='queued',processing_error=? WHERE id=?").run(message, videoId);
+    return res.json({ ok: true, retrying: true });
+  }
+  store.db.prepare("UPDATE video_jobs SET status='failed',last_error=?,locked_at=NULL,claimed_by=NULL,updated_at=? WHERE video_id=?").run(message, now, videoId);
+  store.db.prepare("UPDATE videos SET processing_status='failed',processing_stage='failed',processing_error=? WHERE id=?").run(message, videoId);
+  notifyVideo(videoId, 'processing_failed', { videoId, error: message });
+  res.json({ ok: true, retrying: false });
+});
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 app.get(['/ads.txt', '/app-ads.txt'], (_req, res) => {
@@ -1174,7 +1319,21 @@ app.get('/api/playback-manifest/:id', async (req, res) => {
 // when first requested, then expose the CDN HLS playlist after it is complete.
 const queuedTranscodeIds = new Set();
 
+function creatorQueueKey(videoId) {
+  const owner = store.db.prepare('SELECT owner_id AS ownerId FROM videos WHERE id=?').get(videoId);
+  return owner?.ownerId || 'unassigned';
+}
+
 function enqueueTrackedTranscode(job) {
+  if (DISTRIBUTED_WORKER_MODE) {
+    const now = store.now();
+    store.db.prepare(`UPDATE video_jobs
+      SET status=CASE WHEN status='completed' THEN status ELSE 'queued' END,
+          locked_at=NULL,claimed_by=NULL,next_attempt_at=NULL,updated_at=?
+      WHERE video_id=?`).run(now, job.videoId);
+    store.db.prepare("UPDATE videos SET processing_status=CASE WHEN processing_status='completed' THEN processing_status ELSE 'queued' END,processing_stage=CASE WHEN processing_status='completed' THEN processing_stage ELSE 'queued' END WHERE id=?").run(job.videoId);
+    return true;
+  }
   if (queuedTranscodeIds.has(job.videoId)) {
     if (job.priority !== 'background') transcoder.promote(job.videoId);
     return false;
@@ -1204,6 +1363,7 @@ function queueVideoProcessing(videoId, priority = 'background') {
     : path.join(TEMP_DIR, `transcode-${videoId}.mp4`);
   const job = {
     videoId,
+    creatorKey: creatorQueueKey(videoId),
     priority,
     sourcePath: BUNNY_LOCAL_STORAGE ? sourcePath : null,
     preserveSource: BUNNY_LOCAL_STORAGE,
@@ -1291,6 +1451,7 @@ function ensureHlsForLegacyVideo(videoId, playback) {
       : path.join(TEMP_DIR, `transcode-${videoId}.mp4`);
     enqueueTrackedTranscode({
       videoId,
+      creatorKey: creatorQueueKey(videoId),
       priority: 'urgent',
       preserveSource: BUNNY_LOCAL_STORAGE,
       prepareSource: BUNNY_LOCAL_STORAGE
@@ -2301,6 +2462,7 @@ app.post('/upload-file', (req, res, next) => {
       handedToTranscoder = true;
       enqueueTrackedTranscode({
         videoId,
+        creatorKey: owner?.id || 'unassigned',
         sourcePath: filePath,
         uploadHlsDirectory: bunny.uploadHlsDirectory,
         getHlsUrl: bunny.getHlsUrl,
@@ -2381,6 +2543,7 @@ app.post('/upload-from-url', async (req, res) => {
       const sourcePath = path.join(TEMP_DIR, `transcode-${videoId}.mp4`);
       enqueueTrackedTranscode({
         videoId,
+        creatorKey: owner?.id || 'unassigned',
         prepareSource: () => bunny.downloadVideoToFile(videoId, sourcePath).then(() => sourcePath),
         uploadHlsDirectory: bunny.uploadHlsDirectory,
         getHlsUrl: bunny.getHlsUrl,

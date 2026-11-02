@@ -7,8 +7,48 @@ const FFMPEG_BIN = process.env.FFMPEG_BIN || 'ffmpeg';
 const MAX_CONCURRENT = Math.max(1, Number(process.env.TRANSCODE_CONCURRENCY || 1));
 const TEMP_ROOT = process.env.HLS_TEMP_DIR || path.join(__dirname, 'temp');
 let active = 0;
-const urgentQueue = [];
-const backgroundQueue = [];
+const queues = new Map();
+const creatorOrder = [];
+let cursor = 0;
+
+function queueFor(creatorKey) {
+  const key = String(creatorKey || 'unassigned');
+  if (!queues.has(key)) {
+    queues.set(key, { urgent: [], background: [] });
+    creatorOrder.push(key);
+  }
+  return queues.get(key);
+}
+
+// Round-robin by creator prevents one creator's bulk upload from occupying
+// every worker while preserving urgent jobs within each creator's turn.
+function nextJob() {
+  if (!creatorOrder.length) return null;
+  for (let offset = 0; offset < creatorOrder.length; offset += 1) {
+    const index = (cursor + offset) % creatorOrder.length;
+    const key = creatorOrder[index];
+    const bucket = queues.get(key);
+    const job = bucket?.urgent.shift() || bucket?.background.shift();
+    if (job) {
+      cursor = (index + 1) % creatorOrder.length;
+      return job;
+    }
+  }
+  return null;
+}
+
+function pruneEmptyQueues() {
+  for (let index = creatorOrder.length - 1; index >= 0; index -= 1) {
+    const key = creatorOrder[index];
+    const bucket = queues.get(key);
+    if (bucket && !bucket.urgent.length && !bucket.background.length) {
+      queues.delete(key);
+      creatorOrder.splice(index, 1);
+      if (cursor > index) cursor -= 1;
+      if (cursor >= creatorOrder.length) cursor = 0;
+    }
+  }
+}
 
 function probeDuration(sourcePath) {
   return new Promise((resolve) => {
@@ -96,20 +136,30 @@ async function processOne(job) {
 }
 
 async function drain() {
-  if (active >= MAX_CONCURRENT || (!urgentQueue.length && !backgroundQueue.length)) return;
+  if (active >= MAX_CONCURRENT) return;
+  const job = nextJob();
+  if (!job) {
+    pruneEmptyQueues();
+    return;
+  }
   active += 1;
-  const job = urgentQueue.shift() || backgroundQueue.shift();
   try { await processOne(job); } finally { active -= 1; void drain(); }
 }
 
 function enqueue(job) {
-  (job.priority === 'background' ? backgroundQueue : urgentQueue).push(job);
+  const bucket = queueFor(job.creatorKey);
+  (job.priority === 'background' ? bucket.background : bucket.urgent).push(job);
   void drain();
 }
 
 function promote(videoId) {
-  const index = backgroundQueue.findIndex((job) => job.videoId === videoId);
-  if (index >= 0) urgentQueue.push(...backgroundQueue.splice(index, 1));
+  for (const bucket of queues.values()) {
+    const index = bucket.background.findIndex((job) => job.videoId === videoId);
+    if (index >= 0) {
+      bucket.urgent.push(...bucket.background.splice(index, 1));
+      return;
+    }
+  }
 }
 
 module.exports = { enqueue, promote };

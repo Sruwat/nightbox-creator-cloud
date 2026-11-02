@@ -59,6 +59,21 @@ db.exec(`
     locked_at TEXT,
     updated_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS processing_worker_nodes (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'online',
+    concurrency INTEGER NOT NULL DEFAULT 1,
+    active_jobs INTEGER NOT NULL DEFAULT 0,
+    cpu_load REAL NOT NULL DEFAULT 0,
+    memory_ratio REAL NOT NULL DEFAULT 0,
+    disk_ratio REAL NOT NULL DEFAULT 0,
+    last_seen_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS processing_fairness (
+    creator_id TEXT PRIMARY KEY,
+    last_assigned_at TEXT NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS video_notifications (
     id TEXT PRIMARY KEY,
     video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
@@ -378,6 +393,7 @@ for (const statement of [
   'ALTER TABLE videos ADD COLUMN rejection_reason TEXT',
   'ALTER TABLE videos ADD COLUMN thumbnail_url TEXT',
   'ALTER TABLE withdrawal_requests ADD COLUMN payout_account TEXT',
+  'ALTER TABLE video_jobs ADD COLUMN claimed_by TEXT',
 ]) {
   try { db.exec(statement); } catch (error) {
     if (!String(error.message).includes('duplicate column name')) throw error;
