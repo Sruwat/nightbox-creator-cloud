@@ -184,6 +184,15 @@ db.exec(`
     created_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_admin_view_adjustments_video ON admin_view_adjustments(video_id, created_at DESC);
+  CREATE TABLE IF NOT EXISTS admin_earning_adjustments (
+    id TEXT PRIMARY KEY,
+    creator_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    admin_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    amount_micros INTEGER NOT NULL CHECK (amount_micros <> 0),
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_admin_earning_adjustments_creator ON admin_earning_adjustments(creator_id, created_at DESC);
   CREATE TABLE IF NOT EXISTS cpm_rates (
     country TEXT PRIMARY KEY,
     cpm_cents INTEGER NOT NULL CHECK (cpm_cents >= 0),

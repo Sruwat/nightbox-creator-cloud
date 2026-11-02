@@ -1698,10 +1698,11 @@ app.post('/api/views/:id/qualify', (req, res) => {
 app.get('/api/creator/analytics', requireUser, (req, res) => {
   const summary = store.db.prepare(`SELECT COUNT(s.id) AS views, COALESCE(SUM(e.amount_micros),0) AS earningsMicros FROM view_sessions s JOIN creator_links l ON l.id=s.link_id LEFT JOIN earnings e ON e.view_id=s.id WHERE l.creator_id = ? AND s.counted = 1`).get(req.user.id);
   const referralSummary = store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS earningsMicros FROM referral_earnings WHERE source_creator_id=?').get(req.user.id);
+  const adjustmentSummary = store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS earningsMicros FROM admin_earning_adjustments WHERE creator_id=?').get(req.user.id);
   const countries = store.db.prepare(`SELECT s.country, COUNT(s.id) AS views, COALESCE(SUM(e.amount_micros),0) AS earningsMicros, COALESCE(MAX(e.cpm_cents),0) AS cpmCents FROM view_sessions s JOIN creator_links l ON l.id=s.link_id LEFT JOIN earnings e ON e.view_id=s.id WHERE l.creator_id = ? AND s.counted = 1 GROUP BY s.country ORDER BY views DESC`).all(req.user.id);
   const rates = store.db.prepare(`SELECT country,cpm_cents AS cpmCents FROM cpm_rates ORDER BY CASE WHEN country='ZZ' THEN 1 ELSE 0 END,country`).all();
   res.json({
-    summary: { views: Number(summary?.views || 0), earningsMicros: Number(summary?.earningsMicros || 0) + Number(referralSummary?.earningsMicros || 0) },
+    summary: { views: Number(summary?.views || 0), earningsMicros: Number(summary?.earningsMicros || 0) + Number(referralSummary?.earningsMicros || 0) + Number(adjustmentSummary?.earningsMicros || 0) },
     countries: countries.map((row) => ({ ...row, views: Number(row.views || 0), earningsMicros: Number(row.earningsMicros || 0), cpmCents: Number(row.cpmCents || 0) })),
     rates,
   });
@@ -1722,11 +1723,16 @@ app.get('/api/creator/overview', requireUser, (req, res) => {
   `).all(req.user.id);
   const referralCutoff = req.query.range === 'all' ? '' : "AND DATE(created_at)>=DATE('now','-6 days')";
   const referralDaily = store.db.prepare(`SELECT DATE(created_at) AS date, COALESCE(SUM(amount_micros),0) AS earningsMicros FROM referral_earnings WHERE source_creator_id=? ${referralCutoff} GROUP BY DATE(created_at)`).all(req.user.id);
+  const adjustmentDaily = store.db.prepare(`SELECT DATE(created_at) AS date, COALESCE(SUM(amount_micros),0) AS earningsMicros FROM admin_earning_adjustments WHERE creator_id=? ${referralCutoff} GROUP BY DATE(created_at)`).all(req.user.id);
   const byDate = new Map(referralDaily.map(row => [row.date, Number(row.earningsMicros || 0)]));
   const merged = new Map(dailyActivity.map(row => [row.date, { ...row, views: Number(row.views || 0), earningsMicros: Number(row.earningsMicros || 0) }]));
   for (const row of referralDaily) {
     if (!merged.has(row.date)) merged.set(row.date, { date: row.date, views: 0, earningsMicros: 0 });
     merged.get(row.date).earningsMicros += byDate.get(row.date) || 0;
+  }
+  for (const row of adjustmentDaily) {
+    if (!merged.has(row.date)) merged.set(row.date, { date: row.date, views: 0, earningsMicros: 0 });
+    merged.get(row.date).earningsMicros += Number(row.earningsMicros || 0);
   }
   res.json({ dailyActivity: [...merged.values()].sort((a, b) => a.date.localeCompare(b.date)) });
 });
@@ -1766,9 +1772,25 @@ app.get('/api/cpm', (_req, res) => {
 
 function creatorBalance(creatorId) {
   const earned = Number(store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS amount FROM earnings WHERE creator_id=?').get(creatorId).amount)
-    + Number(store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS amount FROM referral_earnings WHERE source_creator_id=?').get(creatorId).amount);
+    + Number(store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS amount FROM referral_earnings WHERE source_creator_id=?').get(creatorId).amount)
+    + Number(store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS amount FROM admin_earning_adjustments WHERE creator_id=?').get(creatorId).amount);
   const reserved = store.db.prepare("SELECT COALESCE(SUM(amount_micros),0) AS amount FROM withdrawal_requests WHERE creator_id=? AND status IN ('pending','approved','paid')").get(creatorId).amount;
   return Math.max(0, earned - reserved);
+}
+
+function creatorEarningsTotal(creatorId, dateWhere = null) {
+  const directSql = dateWhere
+    ? `SELECT COALESCE(SUM(amount_micros),0) AS amount FROM earnings WHERE creator_id=? AND ${dateWhere}`
+    : 'SELECT COALESCE(SUM(amount_micros),0) AS amount FROM earnings WHERE creator_id=?';
+  const referralSql = dateWhere
+    ? `SELECT COALESCE(SUM(amount_micros),0) AS amount FROM referral_earnings WHERE source_creator_id=? AND ${dateWhere}`
+    : 'SELECT COALESCE(SUM(amount_micros),0) AS amount FROM referral_earnings WHERE source_creator_id=?';
+  const adjustmentSql = dateWhere
+    ? `SELECT COALESCE(SUM(amount_micros),0) AS amount FROM admin_earning_adjustments WHERE creator_id=? AND ${dateWhere}`
+    : 'SELECT COALESCE(SUM(amount_micros),0) AS amount FROM admin_earning_adjustments WHERE creator_id=?';
+  return Number(store.db.prepare(directSql).get(creatorId).amount || 0)
+    + Number(store.db.prepare(referralSql).get(creatorId).amount || 0)
+    + Number(store.db.prepare(adjustmentSql).get(creatorId).amount || 0);
 }
 
 function validPayoutAccount(method, account) {
@@ -1798,6 +1820,36 @@ app.post('/api/creator/withdrawals', requireUser, (req, res) => {
 
 app.get('/api/admin/cpm', requireAdmin, (req, res) => res.json({ rates: store.db.prepare('SELECT country,cpm_cents AS cpmCents,updated_at AS updatedAt FROM cpm_rates ORDER BY country').all() }));
 app.get('/api/admin/referrals', requireAdmin, (req, res) => res.json({ referrals: store.db.prepare(`SELECT r.id,r.video_id AS videoId,r.view_id AS viewId,r.percentage,r.amount_micros AS amountMicros,r.country,r.created_at AS createdAt,source.email AS sourceEmail,importing.email AS importingEmail FROM referral_earnings r JOIN users source ON source.id=r.source_creator_id JOIN users importing ON importing.id=r.importing_creator_id ORDER BY r.created_at DESC LIMIT 500`).all() }));
+
+app.get('/api/admin/creators/:id/earning-adjustments', requireAdmin, (req, res) => {
+  const creator = store.db.prepare("SELECT id,email FROM users WHERE id=? AND role='creator'").get(req.params.id);
+  if (!creator) return res.status(404).json({ error: 'Creator not found' });
+  const adjustments = store.db.prepare(`SELECT a.id,a.amount_micros AS amountMicros,a.reason,a.created_at AS createdAt,
+      a.admin_user_id AS adminUserId,u.email AS adminEmail
+    FROM admin_earning_adjustments a LEFT JOIN users u ON u.id=a.admin_user_id
+    WHERE a.creator_id=? ORDER BY a.created_at DESC`).all(creator.id);
+  res.json({ creator, totalAdjustmentMicros: Number(store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS total FROM admin_earning_adjustments WHERE creator_id=?').get(creator.id).total || 0), adjustments });
+});
+
+app.post('/api/admin/creators/:id/earning-adjustment', requireAdmin, (req, res) => {
+  const creator = store.db.prepare("SELECT id,email FROM users WHERE id=? AND role='creator'").get(req.params.id);
+  if (!creator) return res.status(404).json({ error: 'Creator not found' });
+  const amountMicros = Number(req.body?.amountMicros ?? req.body?.deltaMicros);
+  const reason = String(req.body?.reason || '').trim().slice(0, 500);
+  if (!Number.isSafeInteger(amountMicros) || amountMicros === 0 || Math.abs(amountMicros) > 1_000_000_000_000) {
+    return res.status(400).json({ error: 'amountMicros must be a non-zero whole number between -1000000000000 and 1000000000000' });
+  }
+  if (!reason) return res.status(400).json({ error: 'A reason is required for every earning adjustment' });
+  const id = store.id();
+  const createdAt = store.now();
+  store.db.prepare('INSERT INTO admin_earning_adjustments (id,creator_id,admin_user_id,amount_micros,reason,created_at) VALUES (?,?,?,?,?,?)')
+    .run(id, creator.id, req.user?.id || null, amountMicros, reason, createdAt);
+  const totalAdjustmentMicros = Number(store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS total FROM admin_earning_adjustments WHERE creator_id=?').get(creator.id).total || 0);
+  const totalEarnedMicros = creatorEarningsTotal(creator.id);
+  const availableMicros = creatorBalance(creator.id);
+  res.status(201).json({ adjustment: { id, creatorId: creator.id, amountMicros, reason, createdAt }, totalAdjustmentMicros, totalEarnedMicros, availableMicros });
+});
+
 app.put('/api/admin/cpm/:country', requireAdmin, (req, res) => {
   const country = String(req.params.country).toUpperCase();
   const cpmCents = Number(req.body?.cpmCents);
@@ -1820,6 +1872,7 @@ app.get('/api/admin/users', requireAdmin, (req, res) => res.json({ users: store.
   CASE WHEN u.role='creator' THEN
     COALESCE((SELECT SUM(e.amount_micros) FROM earnings e WHERE e.creator_id=u.id AND DATE(e.created_at)=DATE('now')),0)
     + COALESCE((SELECT SUM(r.amount_micros) FROM referral_earnings r WHERE r.source_creator_id=u.id AND DATE(r.created_at)=DATE('now')),0)
+    + COALESCE((SELECT SUM(a.amount_micros) FROM admin_earning_adjustments a WHERE a.creator_id=u.id AND DATE(a.created_at)=DATE('now')),0)
   ELSE 0 END AS todayEarningsMicros,
   CASE WHEN u.role='creator' THEN COALESCE((SELECT COUNT(DISTINCT s.viewer_hash) FROM view_sessions s JOIN creator_links l ON l.id=s.link_id WHERE l.creator_id=u.id AND s.counted=1 AND DATE(s.qualified_at)=DATE('now')),0) ELSE 0 END AS todayUsers
   FROM users u LEFT JOIN creator_storage_limits l ON l.creator_id=u.id ORDER BY u.created_at DESC`).all() }));
@@ -1833,6 +1886,7 @@ const ACCOUNT_ACTIVITY_QUERIES = {
   payments: 'SELECT id,provider,amount_minor AS amountMinor,currency,status,created_at AS createdAt FROM payments WHERE user_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?',
   botEvents: 'SELECT id,bot_name AS botName,event_type AS eventType,video_id AS videoId,status,error,created_at AS createdAt FROM bot_events WHERE user_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?',
   apiKeys: 'SELECT id,key_prefix AS prefix,created_at AS createdAt,last_used_at AS lastUsedAt,revoked_at AS revokedAt FROM creator_api_keys WHERE user_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+  earningAdjustments: 'SELECT a.id,a.amount_micros AS amountMicros,a.reason,a.created_at AS createdAt,a.admin_user_id AS adminUserId,u.email AS adminEmail FROM admin_earning_adjustments a LEFT JOIN users u ON u.id=a.admin_user_id WHERE a.creator_id=? ORDER BY a.created_at DESC LIMIT ? OFFSET ?',
   viewedVideos: 'SELECT s.id,v.title AS videoTitle,s.country,s.started_at AS startedAt,s.qualified_at AS qualifiedAt,s.counted FROM view_sessions s JOIN creator_links l ON l.id=s.link_id JOIN videos v ON v.id=l.video_id WHERE s.viewer_user_id=? ORDER BY s.started_at DESC LIMIT ? OFFSET ?',
 };
 function accountActivity(section, id, limit = 100, offset = 0) {
@@ -1860,8 +1914,7 @@ app.get('/api/admin/users/:id/details', requireAdmin, (req, res) => {
     payments: count('SELECT COUNT(*) AS total FROM payments WHERE user_id=?'),
     botEvents: count('SELECT COUNT(*) AS total FROM bot_events WHERE user_id=?'),
     apiKeys: count('SELECT COUNT(*) AS total FROM creator_api_keys WHERE user_id=?'),
-    earningsMicros: Number(store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS total FROM earnings WHERE creator_id=?').get(id).total || 0)
-      + Number(store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS total FROM referral_earnings WHERE source_creator_id=?').get(id).total || 0),
+    earningsMicros: creatorEarningsTotal(id),
     storage: account.role === 'creator' ? creatorStorageUsage(id) : null,
   };
   const payoutTotals = store.db.prepare("SELECT COALESCE(SUM(CASE WHEN status='paid' THEN amount_micros ELSE 0 END),0) AS paid,COALESCE(SUM(CASE WHEN status IN ('pending','approved') THEN amount_micros ELSE 0 END),0) AS pending FROM withdrawal_requests WHERE creator_id=?").get(id);
@@ -1869,8 +1922,7 @@ app.get('/api/admin/users/:id/details', requireAdmin, (req, res) => {
   summary.pendingMicros = Number(payoutTotals.pending || 0);
   summary.availableMicros = Math.max(0, summary.earningsMicros - summary.paidMicros - summary.pendingMicros);
   const todayEarningsMicros = account.role === 'creator'
-    ? Number(store.db.prepare("SELECT COALESCE(SUM(amount_micros),0) AS total FROM earnings WHERE creator_id=? AND DATE(created_at)=DATE('now')").get(id).total || 0)
-      + Number(store.db.prepare("SELECT COALESCE(SUM(amount_micros),0) AS total FROM referral_earnings WHERE source_creator_id=? AND DATE(created_at)=DATE('now')").get(id).total || 0)
+    ? creatorEarningsTotal(id, "DATE(created_at)=DATE('now')")
     : 0;
   const todayUsers = account.role === 'creator'
     ? count("SELECT COUNT(DISTINCT s.viewer_hash) AS total FROM view_sessions s JOIN creator_links l ON l.id=s.link_id WHERE l.creator_id=? AND s.counted=1 AND DATE(s.qualified_at)=DATE('now')")
@@ -1892,15 +1944,14 @@ app.get('/api/admin/creators/:id', requireAdmin, (req, res) => {
     FROM users u LEFT JOIN creator_storage_limits l ON l.creator_id=u.id WHERE u.id=? AND u.role='creator'`).get(req.params.id);
   if (!creator) return res.status(404).json({ error: 'Creator not found' });
   const ranges = { today: "DATE('now','-1 day')", yesterday: "DATE('now','-2 day')", week: "DATE('now','-7 day')", month: "DATE('now','-30 day')" };
-  const earningsFor = (where) => Number(store.db.prepare(`SELECT COALESCE(SUM(amount_micros),0) AS amount FROM earnings WHERE creator_id=? AND ${where}`).get(creator.id).amount)
-    + Number(store.db.prepare(`SELECT COALESCE(SUM(amount_micros),0) AS amount FROM referral_earnings WHERE source_creator_id=? AND ${where}`).get(creator.id).amount);
+  const earningsFor = (where) => creatorEarningsTotal(creator.id, where);
   const viewsFor = (where) => Number(store.db.prepare(`SELECT COUNT(*) AS count FROM view_sessions s JOIN creator_links l ON l.id=s.link_id WHERE l.creator_id=? AND s.counted=1 AND ${where}`).get(creator.id).count);
   const usersFor = (where) => Number(store.db.prepare(`SELECT COUNT(DISTINCT s.viewer_hash) AS count FROM view_sessions s JOIN creator_links l ON l.id=s.link_id WHERE l.creator_id=? AND s.counted=1 AND ${where}`).get(creator.id).count);
   const lifetimeViews = viewsFor('1=1');
   const minimumSeconds = Number(store.db.prepare('SELECT minimum_watch_seconds AS value FROM view_rules WHERE id=1').get()?.value || 5);
   const earningsLifetime = earningsFor('1=1');
   const paid = Number(store.db.prepare("SELECT COALESCE(SUM(amount_micros),0) AS amount FROM withdrawal_requests WHERE creator_id=? AND status='paid'").get(creator.id).amount);
-  const available = Math.max(0, earningsLifetime - Number(store.db.prepare("SELECT COALESCE(SUM(amount_micros),0) AS amount FROM withdrawal_requests WHERE creator_id=? AND status IN ('pending','approved','paid')").get(creator.id).amount));
+  const available = creatorBalance(creator.id);
   const files = store.db.prepare("SELECT id,original_name AS name,size_bytes AS sizeBytes,created_at AS createdAt,'file' AS status FROM creator_files WHERE owner_id=? UNION ALL SELECT id,title AS name,COALESCE(file_size,0) AS sizeBytes,created_at AS createdAt,status FROM videos WHERE owner_id=? AND status <> 'deleted' ORDER BY createdAt DESC LIMIT 12").all(creator.id, creator.id);
   const payouts = store.db.prepare("SELECT id,amount_micros AS amountMicros,currency,method,status,requested_at AS requestedAt,paid_at AS paidAt FROM withdrawal_requests WHERE creator_id=? ORDER BY requested_at DESC LIMIT 12").all(creator.id);
   const views = { today: viewsFor(`DATE(s.qualified_at) >= ${ranges.today}`), week: viewsFor(`DATE(s.qualified_at) >= ${ranges.week}`), month: viewsFor(`DATE(s.qualified_at) >= ${ranges.month}`), lifetime: lifetimeViews };
@@ -2008,7 +2059,8 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
   const qualifiedViews = store.db.prepare(`SELECT COUNT(*) AS count FROM view_sessions s WHERE s.counted=1 AND s.qualified_at IS NOT NULL${dateFilter}`).get(...dateParams).count;
   const directEarningsMicros = store.db.prepare(`SELECT COALESCE(SUM(e.amount_micros),0) AS amount FROM earnings e${startDate ? ' WHERE DATE(e.created_at) BETWEEN ? AND ?' : ''}`).get(...dateParams).amount;
   const referralEarningsMicros = store.db.prepare(`SELECT COALESCE(SUM(r.amount_micros),0) AS amount FROM referral_earnings r${startDate ? ' WHERE DATE(r.created_at) BETWEEN ? AND ?' : ''}`).get(...dateParams).amount;
-  const earningsMicros = Number(directEarningsMicros || 0) + Number(referralEarningsMicros || 0);
+  const adjustmentEarningsMicros = store.db.prepare(`SELECT COALESCE(SUM(a.amount_micros),0) AS amount FROM admin_earning_adjustments a${startDate ? ' WHERE DATE(a.created_at) BETWEEN ? AND ?' : ''}`).get(...dateParams).amount;
+  const earningsMicros = Number(directEarningsMicros || 0) + Number(referralEarningsMicros || 0) + Number(adjustmentEarningsMicros || 0);
   const pendingWithdrawals = store.db.prepare("SELECT COUNT(*) AS count FROM withdrawal_requests WHERE status='pending'").get().count;
   const dailyActivityRows = store.db.prepare(`
     SELECT DATE(s.qualified_at) AS date, COUNT(s.id) AS qualifiedViews,
@@ -2020,8 +2072,13 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
     GROUP BY DATE(s.qualified_at) ORDER BY DATE(s.qualified_at) DESC
   `).all(...dateParams);
   const referralDaily = store.db.prepare(`SELECT DATE(created_at) AS date, COALESCE(SUM(amount_micros),0) AS earningsMicros FROM referral_earnings${startDate ? ' WHERE DATE(created_at) BETWEEN ? AND ?' : ''} GROUP BY DATE(created_at)`).all(...dateParams);
+  const adjustmentDaily = store.db.prepare(`SELECT DATE(created_at) AS date, COALESCE(SUM(amount_micros),0) AS earningsMicros FROM admin_earning_adjustments${startDate ? ' WHERE DATE(created_at) BETWEEN ? AND ?' : ''} GROUP BY DATE(created_at)`).all(...dateParams);
   const dailyByDate = new Map(dailyActivityRows.map(row => [row.date, row]));
   for (const row of referralDaily) {
+    if (!dailyByDate.has(row.date)) dailyByDate.set(row.date, { date: row.date, qualifiedViews: 0, earningsMicros: 0, activeCreators: 0 });
+    dailyByDate.get(row.date).earningsMicros = Number(dailyByDate.get(row.date).earningsMicros || 0) + Number(row.earningsMicros || 0);
+  }
+  for (const row of adjustmentDaily) {
     if (!dailyByDate.has(row.date)) dailyByDate.set(row.date, { date: row.date, qualifiedViews: 0, earningsMicros: 0, activeCreators: 0 });
     dailyByDate.get(row.date).earningsMicros = Number(dailyByDate.get(row.date).earningsMicros || 0) + Number(row.earningsMicros || 0);
   }
@@ -2030,8 +2087,11 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
     SELECT u.id,u.email,u.created_at AS createdAt,
       (SELECT COUNT(*) FROM videos v WHERE v.owner_id=u.id) AS videos,
       (SELECT COUNT(*) FROM view_sessions s JOIN creator_links l ON l.id=s.link_id WHERE l.creator_id=u.id AND s.counted=1) AS qualifiedViews,
-      (SELECT COALESCE(SUM(e.amount_micros),0) FROM earnings e WHERE e.creator_id=u.id AND DATE(e.created_at)=DATE('now')) AS todayEarningsMicros,
-      (SELECT COALESCE(SUM(e.amount_micros),0) FROM earnings e WHERE e.creator_id=u.id) + (SELECT COALESCE(SUM(r.amount_micros),0) FROM referral_earnings r WHERE r.source_creator_id=u.id) AS earningsMicros
+      (SELECT COALESCE(SUM(e.amount_micros),0) FROM earnings e WHERE e.creator_id=u.id AND DATE(e.created_at)=DATE('now'))
+        + (SELECT COALESCE(SUM(a.amount_micros),0) FROM admin_earning_adjustments a WHERE a.creator_id=u.id AND DATE(a.created_at)=DATE('now')) AS todayEarningsMicros,
+      (SELECT COALESCE(SUM(e.amount_micros),0) FROM earnings e WHERE e.creator_id=u.id)
+        + (SELECT COALESCE(SUM(r.amount_micros),0) FROM referral_earnings r WHERE r.source_creator_id=u.id)
+        + (SELECT COALESCE(SUM(a.amount_micros),0) FROM admin_earning_adjustments a WHERE a.creator_id=u.id) AS earningsMicros
     FROM users u WHERE u.role='creator' ORDER BY u.created_at DESC LIMIT 20
   `).all();
   res.json({ users, creators, videos, qualifiedViews, earningsMicros, pendingWithdrawals, dailyActivity, recentCreators, updatedAt: store.now() });
@@ -2378,8 +2438,7 @@ app.put('/api/admin/withdrawals/:id', requireAdmin, (req, res) => {
   if (editable && (!Number.isSafeInteger(amountMicros) || amountMicros < minimumMicros || !method)) return res.status(400).json({ error: 'Provide a valid payout amount above the configured minimum and payout method' });
   if (editable && (hasPayoutAccount || hasMethod || status === 'approved' || status === 'paid') && !validPayoutAccount(method, payoutAccount || '')) return res.status(400).json({ error: 'Provide a valid payout account before approving or paying this request' });
   if (editable && ['pending', 'approved'].includes(status)) {
-    const earned = Number(store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS amount FROM earnings WHERE creator_id=?').get(current.creatorId).amount)
-      + Number(store.db.prepare('SELECT COALESCE(SUM(amount_micros),0) AS amount FROM referral_earnings WHERE source_creator_id=?').get(current.creatorId).amount);
+    const earned = creatorEarningsTotal(current.creatorId);
     const reservedOther = Number(store.db.prepare("SELECT COALESCE(SUM(amount_micros),0) AS amount FROM withdrawal_requests WHERE creator_id=? AND status IN ('pending','approved','paid') AND id<>?").get(current.creatorId, current.id).amount);
     if (amountMicros > Math.max(0, earned - reservedOther)) return res.status(409).json({ error: 'Withdrawal exceeds the available creator balance', balanceMicros: Math.max(0, earned - reservedOther) });
   }
