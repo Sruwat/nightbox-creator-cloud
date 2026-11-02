@@ -83,16 +83,26 @@ idle_worker_id() {
 import json, sys
 payload = json.load(open(sys.argv[1]))
 prefix = sys.argv[2]
+running = set()
+import subprocess
+for line in subprocess.check_output(['docker', 'ps', '--filter', f'name=^/{prefix}-', '--format', '{{.Names}}'], text=True).splitlines():
+    if line.startswith(prefix + '-'):
+        running.add(line.removeprefix(prefix + '-'))
 for worker in sorted(payload.get('workers') or [], key=lambda item: str(item.get('id', '')), reverse=True):
     worker_id = str(worker.get('id') or '')
-    if worker_id.startswith('traffic-worker-') and int(worker.get('activeJobs') or 0) == 0:
-        print(worker_id.removeprefix('traffic-worker-'))
+    short_id = worker_id.removeprefix('traffic-worker-')
+    if short_id in running and int(worker.get('activeJobs') or 0) == 0:
+        print(short_id)
         break
 PY
 }
 
 stop_idle_worker() {
   local name="$1"
+  if ! docker ps --filter "name=^/${name}$" --format '{{.Names}}' | grep -qx "$name"; then
+    echo "[NightBox autoscaler] skipped missing container $name"
+    return 1
+  fi
   docker stop -t "$IDLE_DRAIN_SECONDS" "$name" >/dev/null || true
   docker rm "$name" >/dev/null || true
   echo "[NightBox autoscaler] stopped $name"
@@ -117,7 +127,7 @@ scale_once() {
   while [ "$current" -gt "$desired" ]; do
     id="$(idle_worker_id || true)"
     [ -n "$id" ] || break
-    stop_idle_worker "${PREFIX}-${id}"
+    stop_idle_worker "${PREFIX}-${id}" || break
     current=$((current - 1))
   done
 }
