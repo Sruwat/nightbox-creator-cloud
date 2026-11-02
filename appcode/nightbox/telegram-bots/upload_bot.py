@@ -245,19 +245,73 @@ async def upload_to_backend(file_path, file_name, title, chat_id):
 
 
 async def deliver_approved_link(client, source_message, video_id, chat_id, caption, status_message):
-    """Publish the stable watch link immediately after source upload."""
+    """Publish the stable watch link and keep monitoring its processing state."""
     try:
         watch_url = f"{PUBLIC_WATCH_URL}/watch/{video_id}"
         final_caption = build_upload_caption(source_message, watch_url)
-        try:
-            await status_message.delete()
-        except Exception:
-            pass
         await source_message.copy(chat_id=chat_id, caption=final_caption or watch_url)
+        await status_message.edit_text(
+            "⏳ **Video is processing**\n\n"
+            "Your watch link is ready. The video will switch to fast streaming automatically after processing."
+        )
+        asyncio.create_task(monitor_video_status(video_id, chat_id, status_message))
     except Exception as error:
         logger.exception("Immediate link delivery failed: %s", error)
         try:
             await status_message.edit_text("❌ Upload completed, but the link could not be sent. Please try again.")
+        except Exception:
+            pass
+
+
+async def monitor_video_status(video_id, chat_id, status_message, timeout_seconds=3600):
+    """Poll the authenticated status endpoint and update the user message."""
+    deadline = time.time() + timeout_seconds
+    last_update = None
+    headers = bot_headers(chat_id)
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+            while time.time() < deadline:
+                async with session.get(
+                    f"{BACKEND_URL}/api/videos/{video_id}/status",
+                    headers=headers,
+                ) as response:
+                    data = await response.json(content_type=None)
+                if response.status in {401, 403}:
+                    raise RuntimeError("Bot authorization was rejected while checking video status")
+                if response.status >= 500:
+                    await asyncio.sleep(5)
+                    continue
+                if response.status >= 400:
+                    raise RuntimeError(f"Status check failed (HTTP {response.status})")
+
+                state = data.get("state")
+                if state == "ready" and data.get("playable"):
+                    await status_message.edit_text("✅ **Video is ready**\n\nYour watch link is ready to play.")
+                    return
+                if state in {"failed", "rejected"}:
+                    reason = (data.get("video") or {}).get("processingError") or (data.get("video") or {}).get("rejectionReason")
+                    await status_message.edit_text(
+                        "❌ **Video could not be prepared**\n\nPlease try again." + (f"\nReason: {reason}" if reason else "")
+                    )
+                    return
+
+                stage = data.get("stage") or "Preparing video"
+                progress = max(0, min(99, int(data.get("progress") or 0)))
+                update = f"⏳ **Video is processing**\n\nStage: {stage}\nProgress: {progress}%"
+                if update != last_update:
+                    try:
+                        await status_message.edit_text(update)
+                        last_update = update
+                    except Exception:
+                        pass
+                await asyncio.sleep(5)
+        await status_message.edit_text("⏳ **Video is taking longer than usual**\n\nYour watch link remains active; please try again shortly.")
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("Video status monitor failed for %s", video_id)
+        try:
+            await status_message.edit_text("⚠️ **Upload complete**\n\nYour watch link is active. Status refresh is temporarily unavailable.")
         except Exception:
             pass
 @app.on_message(filters.command("start"))

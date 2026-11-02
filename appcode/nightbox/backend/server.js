@@ -1256,6 +1256,14 @@ app.get('/api/videos/:id/status', (req, res) => {
   if (!video) return res.status(404).json({ error: 'Video not found' });
   if (!canManageVideo(req, video)) return res.status(401).json({ error: 'Authentication required' });
   const playable = playbackReady(video);
+  // A successful authenticated status poll is an acknowledgement from the
+  // owning bot/dashboard. Reconcile the durable notification queue here so a
+  // completed or failed job cannot remain indefinitely in "undelivered" state
+  // when the client uses status polling instead of push notifications.
+  if (['ready', 'failed', 'rejected'].includes(publicVideoState(video))) {
+    store.db.prepare(`UPDATE video_notifications SET delivered_at=?
+      WHERE video_id=? AND owner_id=? AND delivered_at IS NULL`).run(store.now(), video.id, video.ownerId);
+  }
   res.json({
     videoId: video.id,
     state: publicVideoState(video),

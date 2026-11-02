@@ -38,6 +38,7 @@ TOKEN = os.getenv(f"TELEGRAM_BOT_TOKEN_{KIND}") or os.getenv("TELEGRAM_BOT_TOKEN
 API_ID = os.getenv("TELEGRAM_API_ID")
 API_HASH = os.getenv("TELEGRAM_API_HASH")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:3000").rstrip("/")
+PUBLIC_WATCH_URL = os.getenv("PUBLIC_WATCH_URL", "https://nightbox.in").rstrip("/")
 CREATOR_API_KEY = os.getenv("CREATOR_API_KEY", "")
 REQUIRE_CONNECT = os.getenv("TELEGRAM_REQUIRE_CONNECT", "true").lower() == "true"
 NIGHTBOX_BOT_INTEGRATION_KEY = os.getenv("NIGHTBOX_BOT_INTEGRATION_KEY", "")
@@ -77,6 +78,42 @@ def telegram_user_id(message):
     sender = getattr(message, "from_user", None)
     value = getattr(sender, "id", None)
     return str(value) if value is not None else ""
+
+
+async def wait_for_ready(video_id, chat_id, status_message, timeout_seconds=3600):
+    """Poll processing status so URL-based bots never stop at a generic message."""
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    headers_value = headers(chat_id)
+    last_update = None
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+        while asyncio.get_running_loop().time() < deadline:
+            async with session.get(f"{BACKEND_URL}/api/videos/{video_id}/status", headers=headers_value) as response:
+                data = await response.json(content_type=None)
+            if response.status in {401, 403}:
+                raise RuntimeError("Creator authorization was rejected while checking video status")
+            if response.status >= 500:
+                await asyncio.sleep(5)
+                continue
+            if response.status >= 400:
+                raise RuntimeError(f"Status check failed (HTTP {response.status})")
+            state = data.get("state")
+            if state == "ready" and data.get("playable"):
+                return data.get("watchUrl") or f"{PUBLIC_WATCH_URL}/watch/{video_id}"
+            if state in {"failed", "rejected"}:
+                video = data.get("video") or {}
+                reason = video.get("processingError") or video.get("rejectionReason") or "processing failed"
+                raise RuntimeError(reason)
+            stage = data.get("stage") or "Preparing video"
+            progress = max(0, min(99, int(data.get("progress") or 0)))
+            update = f"⏳ **Video is processing**\n\nStage: {stage}\nProgress: {progress}%"
+            if update != last_update:
+                try:
+                    await status_message.edit_text(update)
+                    last_update = update
+                except Exception:
+                    pass
+            await asyncio.sleep(5)
+    raise RuntimeError("Video is taking longer than usual; please try again shortly")
 
 
 async def link_telegram_creator(session, message, key):
@@ -362,9 +399,11 @@ async def remote_upload(_, message):
                     data = await response.json(content_type=None)
                     if response.status >= 300:
                         raise RuntimeError(data.get("error", f"HTTP {response.status}"))
-                # Upload responses intentionally do not expose a playable URL
-                # until HLS/CDN verification and admin approval are complete.
-                results.append("✅ Video received. Your video link will appear shortly.")
+                video_id = data.get("videoId")
+                if not video_id:
+                    raise RuntimeError("Backend did not return a video ID")
+                watch_url = await wait_for_ready(video_id, message.chat.id, progress)
+                results.append(f"✅ Video ready\n{watch_url}")
             except Exception as error:
                 log.exception("service upload failed")
                 results.append(f"❌ {index}. We could not prepare this video. Please try again.")
