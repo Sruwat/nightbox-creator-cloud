@@ -126,7 +126,7 @@ async function processOne(job) {
     if (job.onStage) await job.onStage('cdn_verifying', 95);
     if (job.verifyHls) await job.verifyHls(job.videoId);
     if (job.onProgress) await job.onProgress(100);
-    await job.onReady(job.getHlsUrl(job.videoId));
+    await job.onReady(job.getHlsUrl(job.videoId), outputDir);
   } catch (error) {
     await job.onError(error);
   } finally {

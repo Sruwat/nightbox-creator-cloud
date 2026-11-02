@@ -24,6 +24,7 @@ const { OAuth2Client } = require('google-auth-library');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { spawn } = require('node:child_process');
 const crypto = require('crypto');
 const dns = require('dns').promises;
 const net = require('net');
@@ -432,11 +433,26 @@ app.post('/internal/workers/jobs/:id/progress', requireWorker, (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/internal/workers/jobs/:id/complete', requireWorker, (req, res) => {
-  const videoId = String(req.params.id || '');
-  const workerId = String(req.body?.workerId || '').trim();
-  const job = store.db.prepare('SELECT claimed_by,status FROM video_jobs WHERE video_id=?').get(videoId);
-  if (!job || job.claimed_by !== workerId || job.status !== 'processing') return res.status(409).json({ error: 'Job is not owned by this worker' });
+function runTar(args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('tar', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.on('error', reject);
+    child.on('close', (code) => code === 0 ? resolve(stdout) : reject(new Error(stderr.trim() || `tar exited with code ${code}`)));
+  });
+}
+
+function archiveEntriesAreSafe(list) {
+  return String(list).split(/\r?\n/).filter(Boolean).every((entry) => {
+    const normalized = entry.replace(/\\/g, '/');
+    return !normalized.startsWith('/') && !normalized.split('/').includes('..');
+  });
+}
+
+async function markWorkerCompleted(videoId) {
   const now = store.now();
   const hlsUrl = bunny.getHlsUrl(videoId);
   store.updateVideoPlayback(videoId, 'ready', hlsUrl, null);
@@ -444,7 +460,57 @@ app.post('/internal/workers/jobs/:id/complete', requireWorker, (req, res) => {
   store.db.prepare("UPDATE video_jobs SET status='completed',last_error=NULL,locked_at=NULL,claimed_by=NULL,updated_at=? WHERE video_id=?").run(now, videoId);
   notifyVideo(videoId, 'hls_ready', { videoId });
   finalizeVideoVisibility(videoId);
-  res.json({ ok: true, videoId, hlsUrl });
+  return hlsUrl;
+}
+
+// Workers keep Bunny credentials off the Traffic VPS. They send a validated
+// tar.gz HLS handoff to the primary, which performs Bunny upload and verify.
+app.post('/internal/workers/jobs/:id/hls-archive', requireWorker, async (req, res) => {
+  const videoId = String(req.params.id || '');
+  const workerId = String(req.headers['x-worker-id'] || req.body?.workerId || '').trim();
+  const job = store.db.prepare('SELECT claimed_by,status FROM video_jobs WHERE video_id=?').get(videoId);
+  if (!job || job.claimed_by !== workerId || job.status !== 'processing') return res.status(409).json({ error: 'Job is not owned by this worker' });
+  const advertisedSize = Number(req.headers['content-length'] || 0);
+  if (advertisedSize > 2 * 1024 * 1024 * 1024) return res.status(413).json({ error: 'HLS handoff exceeds the 2GB limit' });
+  const archivePath = path.join(TEMP_DIR, `worker-handoff-${videoId}.tar.gz`);
+  const extractDir = path.join(TEMP_DIR, `worker-handoff-${videoId}`);
+  try {
+    await fs.promises.mkdir(TEMP_DIR, { recursive: true });
+    await fs.promises.rm(extractDir, { recursive: true, force: true });
+    await fs.promises.rm(archivePath, { force: true });
+    await new Promise((resolve, reject) => {
+      const writer = fs.createWriteStream(archivePath);
+      req.pipe(writer);
+      writer.on('finish', resolve);
+      writer.on('error', reject);
+      req.on('error', reject);
+    });
+    const entries = await runTar(['-tzf', archivePath]);
+    if (!archiveEntriesAreSafe(entries)) throw new Error('Unsafe HLS archive path');
+    await fs.promises.mkdir(extractDir, { recursive: true });
+    await runTar(['-xzf', archivePath, '-C', extractDir, '--no-same-owner', '--no-same-permissions']);
+    const hlsFiles = fs.readdirSync(extractDir).filter((name) => /\.(m3u8|ts)$/i.test(name));
+    if (!hlsFiles.some((name) => name === 'master.m3u8')) throw new Error('HLS archive does not contain master.m3u8');
+    await bunny.uploadHlsDirectory(videoId, extractDir, (ratio) => { updateProcessing(videoId, 'cdn_upload', 72 + Math.round(ratio * 18)); });
+    updateProcessing(videoId, 'cdn_verifying', 95);
+    await bunny.verifyHls(videoId);
+    const hlsUrl = await markWorkerCompleted(videoId);
+    res.json({ ok: true, videoId, hlsUrl });
+  } catch (error) {
+    console.error('[Worker HLS handoff] Failed:', error.message);
+    res.status(502).json({ error: 'HLS handoff failed' });
+  } finally {
+    await fs.promises.rm(archivePath, { force: true }).catch(() => {});
+    await fs.promises.rm(extractDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+app.post('/internal/workers/jobs/:id/complete', requireWorker, (req, res) => {
+  const videoId = String(req.params.id || '');
+  const workerId = String(req.body?.workerId || '').trim();
+  const job = store.db.prepare('SELECT claimed_by,status FROM video_jobs WHERE video_id=?').get(videoId);
+  if (!job || job.claimed_by !== workerId || job.status !== 'processing') return res.status(409).json({ error: 'Job is not owned by this worker' });
+  Promise.resolve(markWorkerCompleted(videoId)).then((hlsUrl) => res.json({ ok: true, videoId, hlsUrl })).catch(() => res.status(500).json({ error: 'Unable to finalize job' }));
 });
 
 app.post('/internal/workers/jobs/:id/fail', requireWorker, (req, res) => {

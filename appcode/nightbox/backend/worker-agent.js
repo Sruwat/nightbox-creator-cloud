@@ -10,8 +10,8 @@ const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { spawn } = require('node:child_process');
 const axios = require('axios');
-const bunny = require('./bunny');
 const transcoder = require('./transcoder');
 
 const COORDINATOR_URL = String(process.env.WORKER_COORDINATOR_URL || '').replace(/\/$/, '');
@@ -42,17 +42,44 @@ function metrics() {
   };
 }
 
-async function coordinator(method, route, body) {
+async function coordinator(method, route, body, extraHeaders = {}) {
   const response = await axios({
     method,
     url: `${COORDINATOR_URL}${route}`,
     data: body,
     timeout: 30000,
     validateStatus: () => true,
-    headers: { 'X-Worker-Key': WORKER_KEY, 'Content-Type': 'application/json' },
+    headers: { 'X-Worker-Key': WORKER_KEY, 'Content-Type': 'application/json', ...extraHeaders },
   });
   if (response.status >= 400) throw new Error(`Coordinator ${route} returned ${response.status}`);
   return response;
+}
+
+function createHlsArchive(directory, archivePath) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('tar', ['-czf', archivePath, '-C', directory, '.'], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.on('error', reject);
+    child.on('close', (code) => code === 0 ? resolve() : reject(new Error(stderr.trim() || `tar exited with code ${code}`)));
+  });
+}
+
+async function sendHlsArchive(videoId, workerId, directory) {
+  const archivePath = path.join(TEMP_ROOT, `${videoId}.tar.gz`);
+  try {
+    await createHlsArchive(directory, archivePath);
+    const stream = fs.createReadStream(archivePath);
+    const response = await axios.post(`${COORDINATOR_URL}/internal/workers/jobs/${encodeURIComponent(videoId)}/hls-archive`, stream, {
+      timeout: 1_800_000,
+      maxContentLength: 2 * 1024 * 1024 * 1024,
+      maxBodyLength: 2 * 1024 * 1024 * 1024,
+      headers: { 'X-Worker-Key': WORKER_KEY, 'X-Worker-Id': workerId, 'Content-Type': 'application/gzip', 'Content-Length': fs.statSync(archivePath).size },
+    });
+    if (response.status >= 400) throw new Error(`HLS handoff returned ${response.status}`);
+  } finally {
+    await fs.promises.rm(archivePath, { force: true }).catch(() => {});
+  }
 }
 
 async function heartbeat() {
@@ -91,15 +118,20 @@ async function runJob(job) {
       creatorKey: job.ownerId || 'unassigned',
       sourcePath,
       preserveSource: false,
-      uploadHlsDirectory: bunny.uploadHlsDirectory,
-      getHlsUrl: bunny.getHlsUrl,
-      verifyHls: bunny.verifyHls,
+      // The Traffic VPS never receives Bunny credentials. HLS is handed back
+      // to the primary after FFmpeg finishes, where Bunny upload/verification
+      // is performed by the source-of-truth backend.
+      uploadHlsDirectory: async () => {},
+      getHlsUrl: () => null,
+      verifyHls: async () => {},
       onStage: (stage, progress = 0) => { void report(stage, progress); },
       onProgress: (progress) => { void report('transcoding', progress); },
-      onReady: async () => {
+      onReady: async (_hlsUrl, outputDir) => {
         try {
           await report('completed', 100);
-          await coordinator('POST', `/internal/workers/jobs/${encodeURIComponent(job.videoId)}/complete`, { workerId: WORKER_ID });
+          await sendHlsArchive(job.videoId, WORKER_ID, outputDir);
+        } catch (error) {
+          await coordinator('POST', `/internal/workers/jobs/${encodeURIComponent(job.videoId)}/fail`, { workerId: WORKER_ID, error: String(error?.message || error) });
         } finally { resolve(); }
       },
       onError: async (error) => {
