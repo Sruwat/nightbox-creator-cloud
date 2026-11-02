@@ -28,6 +28,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.MediaType.Companion.toMediaType
 import org.json.JSONObject
 import simple.shayaribygenz.UiExtensions.applyPressScale
 import simple.shayaribygenz.UiExtensions.startBreathingPulse
@@ -66,6 +68,16 @@ class FileInfoActivity : AppCompatActivity() {
 
     private var videoDurationSec: Int = 0
     private var videoSizeBytes: Long = 0L
+
+    // Prefetched while the File Info screen/ads are visible. This only gets a
+    // short-lived playback authorization; media bytes are not downloaded here.
+    private var prefetchedManifestUrl: String? = null
+    private var prefetchedMediaUrl: String? = null
+    private var prefetchedMediaType: String? = null
+    private var prefetchedSessionId: String? = null
+    private var prefetchedViewToken: String? = null
+    private var prefetchedDownloadUrl: String? = null
+    private var prefetchedMinWatchSeconds: Int = 5
 
     private val apiClient get() = NetworkClient.client
 
@@ -151,6 +163,47 @@ class FileInfoActivity : AppCompatActivity() {
             showAdFailedOrOfflineState(isOffline = true)
         } else {
             startAdPreparationFlow()
+            // Start authorization immediately so the player can open without
+            // waiting for another network round-trip after the ad finishes.
+            preloadPlaybackAuthorization()
+        }
+    }
+
+    /**
+     * Prepares only the short-lived playback response. ExoPlayer is not
+     * created on this screen, so no MP4/HLS bytes are buffered or downloaded.
+     */
+    private fun preloadPlaybackAuthorization() {
+        val vid = videoId ?: return
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val body = JSONObject().apply {
+                    linkSlug?.takeIf { it.isNotBlank() }?.let {
+                        put("linkSlug", it)
+                        put("slug", it)
+                    }
+                }.toString().toRequestBody("application/json".toMediaType())
+                val request = Request.Builder()
+                    .url("${BuildConfig.BACKEND_URL}/api/videos/${Uri.encode(vid)}/playback-token")
+                    .post(body)
+                    .build()
+                apiClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@use
+                    val payload = JSONObject(response.body?.string().orEmpty())
+                    withContext(Dispatchers.Main) {
+                        prefetchedManifestUrl = payload.optString("manifestUrl").takeIf { it.isNotBlank() }
+                        prefetchedMediaUrl = payload.optString("mediaUrl").takeIf { it.isNotBlank() }
+                        prefetchedMediaType = payload.optString("mediaType").takeIf { it.isNotBlank() }
+                        prefetchedSessionId = payload.optString("sessionId").takeIf { it.isNotBlank() }
+                        prefetchedViewToken = payload.optString("viewToken").takeIf { it.isNotBlank() }
+                        prefetchedMinWatchSeconds = payload.optInt("minWatchSeconds", 5).coerceAtLeast(1)
+                        prefetchedDownloadUrl = payload.optString("downloadUrl")
+                            .takeIf { it.startsWith("https://") }
+                    }
+                }
+            } catch (error: Exception) {
+                Log.d("FileInfoActivity", "Playback prefetch unavailable; player will authorize on open", error)
+            }
         }
     }
 
@@ -403,6 +456,13 @@ class FileInfoActivity : AppCompatActivity() {
             putExtra("video_title", videoTitle)
             if (videoDurationSec > 0) putExtra("video_duration_sec", videoDurationSec)
             if (videoSizeBytes > 0L) putExtra("video_size_bytes", videoSizeBytes)
+            prefetchedManifestUrl?.let { putExtra("prefetched_manifest_url", it) }
+            prefetchedMediaUrl?.let { putExtra("prefetched_media_url", it) }
+            prefetchedMediaType?.let { putExtra("prefetched_media_type", it) }
+            prefetchedSessionId?.let { putExtra("prefetched_session_id", it) }
+            prefetchedViewToken?.let { putExtra("prefetched_view_token", it) }
+            prefetchedDownloadUrl?.let { putExtra("prefetched_download_url", it) }
+            putExtra("prefetched_min_watch_seconds", prefetchedMinWatchSeconds)
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         startActivity(intent)

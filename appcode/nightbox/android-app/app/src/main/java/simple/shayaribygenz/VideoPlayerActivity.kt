@@ -50,6 +50,7 @@ import com.google.android.gms.ads.AdView
 import com.google.android.gms.ads.LoadAdError
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -115,9 +116,14 @@ class VideoPlayerActivity : AppCompatActivity() {
     private var viewSessionId: String? = null
     private var viewToken: String? = null
     private var viewQualified = false
+    private var viewQualificationInFlight = false
+    private var viewQualificationAttempts = 0
+    private var minimumWatchSeconds = 5
+    private var viewQualificationJob: Job? = null
     private var linkSlug: String? = null
     private var remoteHlsUrl: String? = null
     private var remoteProgressiveUrl: String? = null
+    private var prefetchedMediaType: String? = null
     private var downloadUrl: String? = null
     private var durationUpdateRunnable: Runnable? = null
     private var shouldResumePlayback = false
@@ -166,7 +172,7 @@ class VideoPlayerActivity : AppCompatActivity() {
         setContentView(R.layout.activity_video_player)
 
         restoredPositionMs = savedInstanceState?.getLong("player_position_ms", 0L) ?: 0L
-        restoredPlayWhenReady = savedInstanceState?.getBoolean("player_play_when_ready", false) ?: false
+        restoredPlayWhenReady = savedInstanceState?.getBoolean("player_play_when_ready", true) ?: true
 
         // Bind views
         playerView = findViewById(R.id.playerView)
@@ -197,6 +203,16 @@ class VideoPlayerActivity : AppCompatActivity() {
         linkSlug = intent?.getStringExtra("link_slug") ?: intent?.data?.getQueryParameter("link")
         localVideoUri = intent?.getStringExtra("local_video_uri") ?: intent?.getStringExtra("local_path")
         val videoTitle = intent?.getStringExtra("video_title")
+
+        // FileInfoActivity prefetches authorization while ads are visible.
+        // Reuse it so opening the player does not wait for a second request.
+        remoteHlsUrl = intent?.getStringExtra("prefetched_manifest_url")
+        remoteProgressiveUrl = intent?.getStringExtra("prefetched_media_url")
+        prefetchedMediaType = intent?.getStringExtra("prefetched_media_type")
+        viewSessionId = intent?.getStringExtra("prefetched_session_id")
+        viewToken = intent?.getStringExtra("prefetched_view_token")
+        downloadUrl = intent?.getStringExtra("prefetched_download_url")
+        minimumWatchSeconds = intent?.getIntExtra("prefetched_min_watch_seconds", 5)?.coerceAtLeast(1) ?: 5
 
         // Always refresh playback metadata: a link may have switched from a
         // legacy MP4 to the CDN HLS playlist since FileInfoActivity opened.
@@ -395,7 +411,11 @@ class VideoPlayerActivity : AppCompatActivity() {
             // Local files always use ExoPlayer
             initExoPlayerLocal()
         } else {
-            requestPlaybackTokenAndInitialize()
+            if (remoteHlsUrl != null || remoteProgressiveUrl != null) {
+                initExoPlayerHls(isProgressive = prefetchedMediaType == "progressive" || remoteHlsUrl == null)
+            } else {
+                requestPlaybackTokenAndInitialize()
+            }
         }
     }
 
@@ -478,10 +498,14 @@ class VideoPlayerActivity : AppCompatActivity() {
                     val mediaType = payload.optString("mediaType")
                     withContext(Dispatchers.Main) {
                         processingRetryCount = 0
+                        viewQualificationAttempts = 0
+                        viewQualificationInFlight = false
+                        viewQualified = false
                         remoteHlsUrl = manifest
                         remoteProgressiveUrl = progressive
                         viewSessionId = sId
                         viewToken = vToken
+                        minimumWatchSeconds = payload.optInt("minWatchSeconds", 5).coerceAtLeast(1)
                         viewQualified = false
                         tokenTitle?.let { resolvedVideoTitle = formatCleanTitle(it) }
                         tokenDownloadUrl?.let { downloadUrl = it }
@@ -613,9 +637,9 @@ class VideoPlayerActivity : AppCompatActivity() {
         playerView.player = player
         player?.setMediaSource(mediaSource)
         player?.prepare()
-        // Prepare the bounded HLS buffer without autoplay. Playback starts only
-        // when the user presses the player play button.
-        player?.playWhenReady = false
+        // Prepare a bounded buffer and start immediately, like YouTube. This
+        // is streaming only; no full MP4 is downloaded.
+        player?.playWhenReady = true
 
         // Listen for errors and playback states
         player?.addListener(object : Player.Listener {
@@ -656,6 +680,16 @@ class VideoPlayerActivity : AppCompatActivity() {
                         videoPlaybackEnded = true
                     }
                     Player.STATE_IDLE -> { /* Idle */ }
+                }
+            }
+
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int
+            ) {
+                if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                    player?.playWhenReady = true
                 }
             }
 
@@ -748,9 +782,14 @@ class VideoPlayerActivity : AppCompatActivity() {
     }
 
     private fun qualifyAfterFiveSeconds() {
-        lifecycleScope.launch {
-            while (!viewQualified && !isFinishing) {
-                if (viewSessionId != null && (player?.currentPosition ?: 0L) >= 5000L) {
+        if (viewQualificationJob?.isActive == true || viewQualified) return
+        viewQualificationJob = lifecycleScope.launch {
+            while (!viewQualified && !isFinishing && !isDestroyed) {
+                // Count only while the media is genuinely playing. A seek or
+                // a paused player must never qualify a view by itself.
+                val current = player
+                if (viewSessionId != null && current?.isPlaying == true &&
+                    current.currentPosition >= minimumWatchSeconds * 1000L) {
                     qualifyView()
                     return@launch
                 }
@@ -761,8 +800,9 @@ class VideoPlayerActivity : AppCompatActivity() {
 
     private fun qualifyView() {
         val sessionId = viewSessionId ?: return
-        viewQualified = true
-        sendQualifyRequest(sessionId, 0)
+        if (viewQualified || viewQualificationInFlight) return
+        viewQualificationInFlight = true
+        sendQualifyRequest(sessionId, viewQualificationAttempts)
     }
 
     private fun sendQualifyRequest(sessionId: String, attempt: Int) {
@@ -774,23 +814,52 @@ class VideoPlayerActivity : AppCompatActivity() {
                     .post(body)
                     .build()
                 apiClient.newCall(request).execute().use { response ->
+                    val responseBody = response.body?.string().orEmpty()
+                    val responseJson = try { JSONObject(responseBody) } catch (_: Exception) { JSONObject() }
                     if (response.isSuccessful) {
                         Log.d(TAG, "View qualification response: ${response.code}")
+                        withContext(Dispatchers.Main) {
+                            // Backend is authoritative: counted, duplicate and
+                            // filtered are all terminal outcomes for a session.
+                            viewQualified = true
+                            viewQualificationInFlight = false
+                        }
+                    } else if (response.code == 400 && responseJson.optString("code") == "WATCH_TIME_NOT_REACHED") {
+                        val retrySeconds = responseJson.optInt("retryAfterSeconds", 2).coerceIn(1, 10)
+                        withContext(Dispatchers.Main) { viewQualificationInFlight = false }
+                        kotlinx.coroutines.delay(retrySeconds * 1000L)
+                        withContext(Dispatchers.Main) {
+                            if (!viewQualified && !isFinishing && !isDestroyed) {
+                                qualifyAfterFiveSeconds()
+                            }
+                        }
                     } else if (attempt < 3) {
                         Log.w(TAG, "View qualification unsuccessful (${response.code}), retrying attempt ${attempt + 1}")
+                        withContext(Dispatchers.Main) {
+                            viewQualificationInFlight = false
+                            viewQualificationAttempts = attempt + 1
+                        }
                         kotlinx.coroutines.delay(3_000L * (attempt + 1))
                         if (!isFinishing && !isDestroyed) {
-                            sendQualifyRequest(sessionId, attempt + 1)
+                            withContext(Dispatchers.Main) { qualifyAfterFiveSeconds() }
                         }
+                    } else {
+                        withContext(Dispatchers.Main) { viewQualificationInFlight = false }
                     }
                 }
             } catch (error: Exception) {
                 Log.w(TAG, "View qualification failed", error)
                 if (attempt < 3) {
+                    withContext(Dispatchers.Main) {
+                        viewQualificationInFlight = false
+                        viewQualificationAttempts = attempt + 1
+                    }
                     kotlinx.coroutines.delay(3_000L * (attempt + 1))
                     if (!isFinishing && !isDestroyed) {
-                        sendQualifyRequest(sessionId, attempt + 1)
+                        withContext(Dispatchers.Main) { qualifyAfterFiveSeconds() }
                     }
+                } else {
+                    withContext(Dispatchers.Main) { viewQualificationInFlight = false }
                 }
             }
         }
