@@ -251,6 +251,11 @@ export async function getAdminUsers(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/users`, { headers: authHeaders(token) });
   return parseResponse<{ users: Array<{ id: string; email: string; role: string; status: string; telegramUserId: string | null; createdAt: string; storageQuotaBytes: number | null; storageUsedBytes: number; todayEarningsMicros: number; todayUsers: number }> }>(response);
 }
+export type AdminEarningAdjustment = { id: string; creatorId: string; adminUserId: string; amountMicros: number; reason: string; createdAt: string; adminEmail?: string };
+export async function createAdminEarningAdjustment(token: string, creatorId: string, amountMicros: number, reason: string) {
+  const response = await fetch(`${BACKEND_URL}/api/admin/creators/${encodeURIComponent(creatorId)}/earning-adjustment`, { method: "POST", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify({ amountMicros, reason }) });
+  return parseResponse<{ adjustment: AdminEarningAdjustment; totalAdjustmentMicros: number; totalEarnedMicros: number; availableMicros: number }>(response);
+}
 export type AdminAccountDetails = {
   account: { id: string; email: string; role: string; status: string; telegramUserId: string | null; createdAt: string; hasGoogleLogin: number; hasPasswordLogin: number };
   profile: { displayName: string; bio: string; avatarUrl: string | null; brandColor: string; publicSlug: string; updatedAt: string } | null;
@@ -267,13 +272,14 @@ export type AdminAccountDetails = {
   botEvents: Array<{ id: string; botName: string; eventType: string; videoId: string | null; status: string; error: string | null; createdAt: string }>;
   apiKeys: Array<{ id: string; prefix: string; createdAt: string; lastUsedAt: string | null; revokedAt: string | null }>;
   viewedVideos: Array<{ id: string; videoTitle: string; country: string; startedAt: string; qualifiedAt: string | null; counted: number }>;
+  earningAdjustments: AdminEarningAdjustment[];
   listLimit: number;
 };
 export async function getAdminAccountDetails(token: string, id: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/users/${encodeURIComponent(id)}/details`, { headers: authHeaders(token) });
   return parseResponse<AdminAccountDetails>(response);
 }
-export type AdminAccountActivitySection = "videos" | "files" | "links" | "payouts" | "tickets" | "subscriptions" | "payments" | "botEvents" | "apiKeys" | "viewedVideos";
+export type AdminAccountActivitySection = "videos" | "files" | "links" | "payouts" | "tickets" | "subscriptions" | "payments" | "botEvents" | "apiKeys" | "viewedVideos" | "earningAdjustments";
 export async function getAdminAccountActivity<K extends AdminAccountActivitySection>(token: string, id: string, section: K, offset: number) {
   const response = await fetch(`${BACKEND_URL}/api/admin/users/${encodeURIComponent(id)}/activity/${section}?offset=${offset}`, { headers: authHeaders(token) });
   return parseResponse<{ records: AdminAccountDetails[K]; limit: number; offset: number }>(response);

@@ -7,6 +7,7 @@ import {
   getAdminUsers,
   updateAdminCreator,
   updateAdminUser,
+  createAdminEarningAdjustment,
   type AdminAccountDetails,
   type AdminAccountActivitySection,
 } from "../src/backend-api";
@@ -39,6 +40,9 @@ export default function AdminAccountDirectory({ view, toast }: { view: View; toa
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [adjustmentSaving, setAdjustmentSaving] = useState(false);
+  const [adjustmentAmount, setAdjustmentAmount] = useState("");
+  const [adjustmentReason, setAdjustmentReason] = useState("");
   const [loadingSection, setLoadingSection] = useState<AdminAccountActivitySection | null>(null);
   const load = useCallback(async () => {
     const adminToken = token();
@@ -127,6 +131,30 @@ export default function AdminAccountDirectory({ view, toast }: { view: View; toa
     }
   }
 
+  async function applyEarningAdjustment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!detail || detail.account.role !== "creator") return;
+    const adminToken = token();
+    if (!adminToken) { toast("Admin session expired"); return; }
+    const amount = Number(adjustmentAmount);
+    const reason = adjustmentReason.trim();
+    if (!Number.isFinite(amount) || amount === 0) { toast("Enter a non-zero amount"); return; }
+    if (!reason) { toast("Reason is required"); return; }
+    setAdjustmentSaving(true);
+    try {
+      await createAdminEarningAdjustment(adminToken, detail.account.id, Math.round(amount * 1_000_000), reason);
+      setAdjustmentAmount("");
+      setAdjustmentReason("");
+      setDetail(await getAdminAccountDetails(adminToken, detail.account.id));
+      await load();
+      toast(`${amount > 0 ? "Credit" : "Debit"} applied to creator earnings`);
+    } catch (reasonError) {
+      toast(reasonError instanceof Error ? reasonError.message : "Unable to adjust creator earnings");
+    } finally {
+      setAdjustmentSaving(false);
+    }
+  }
+
   const title = view === "creators" ? "Creator management" : view === "admins" ? "Admins" : "Users";
   const filtered = rows.filter(row => view === "all" || row.role === (view === "creators" ? "creator" : "admin"));
   const shown = filtered.filter(row => `${row.email} ${row.id} ${row.telegramUserId || ""}`.toLowerCase().includes(query.trim().toLowerCase()));
@@ -164,6 +192,15 @@ export default function AdminAccountDirectory({ view, toast }: { view: View; toa
           <div className="admin-account-stats">
             {[ ["Today earning", usd(detail.todayEarningsMicros)], ["Today users", detail.todayUsers.toLocaleString()], ["Videos", summary.videos], ["Files", summary.files], ["Share links", summary.links], ["Qualified views", summary.qualifiedViews], ["Videos watched", summary.viewingSessions], ["Earnings", usd(summary.earningsMicros)], ["Available", usd(summary.availableMicros)], ["Pending payout", usd(summary.pendingMicros)], ["Paid out", usd(summary.paidMicros)], ["Storage used", summary.storage ? gb(summary.storage.usedBytes) : "—"], ["Storage quota", summary.storage?.quotaBytes ? gb(summary.storage.quotaBytes) : "No total cap"] ].map(([label, value]) => <div key={String(label)}><small>{label}</small><b>{value}</b></div>)}
           </div>
+          {account.role === "creator" && <section className="admin-earning-adjustment card">
+            <div><span>ADMIN CONTROL</span><h3>Adjust creator earnings</h3><p>Use a positive amount to credit or a negative amount to deduct. Every change requires a reason and is recorded.</p></div>
+            <form onSubmit={event => void applyEarningAdjustment(event)}>
+              <label>Amount (USD)<input value={adjustmentAmount} onChange={event => setAdjustmentAmount(event.target.value)} type="number" step="0.01" placeholder="25.00 or -10.00" required /></label>
+              <label>Reason<input value={adjustmentReason} onChange={event => setAdjustmentReason(event.target.value)} maxLength={500} placeholder="Bonus, correction, or chargeback" required /></label>
+              <button className="btn btn-primary" disabled={adjustmentSaving}>{adjustmentSaving ? "Applying…" : "Apply adjustment"}</button>
+            </form>
+            {!!detail.earningAdjustments.length && <div className="admin-earning-adjustment-history"><b>Recent adjustments</b>{detail.earningAdjustments.slice(0, 5).map(item => <div key={item.id}><span>{usd(item.amountMicros)} · {item.reason}</span><time>{formattedDate(item.createdAt)}</time></div>)}</div>}
+          </section>}
           <nav className="admin-account-management" aria-label="Manage account activity"><a className="btn btn-outline" href="/admin/files">Manage videos</a><a className="btn btn-outline" href="/admin/withdrawals">Manage payouts</a><a className="btn btn-outline" href="/admin/tickets">Manage support</a></nav>
           <div className="admin-account-facts"><p><b>Login methods:</b> {account.hasGoogleLogin ? "Google " : ""}{account.hasPasswordLogin ? "Password" : ""}{!account.hasGoogleLogin && !account.hasPasswordLogin ? "None recorded" : ""}</p><p><b>Telegram:</b> {account.telegramUserId || "Not connected"}</p>{detail.profile && <><p><b>Public name:</b> {detail.profile.displayName || "Not set"}</p><p><b>Bio:</b> {detail.profile.bio || "Not set"}</p><p><b>Public profile:</b> <a href={`https://nightbox.in/creator/${detail.profile.publicSlug}`} target="_blank" rel="noreferrer">{detail.profile.publicSlug}</a></p></>}<p>Uploads allow files up to 2 GiB each. Credentials and password hashes are never displayed.</p></div>
           <DetailSection title="Videos" {...sectionProps("videos", summary.videos)}>{detail.videos.map(item => <div className="admin-account-record" key={item.id}><span><b>{item.title}</b><small>{item.id} · {item.status} · playback {item.playbackStatus}{item.fileSize ? ` · ${gb(item.fileSize)}` : ""}</small></span><time>{formattedDate(item.createdAt)}</time></div>)}</DetailSection>
