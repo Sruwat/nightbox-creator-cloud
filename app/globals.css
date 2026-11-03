@@ -139,6 +139,8 @@
   .topbar>div:first-child>span{font-size:10px}
   .app-content{padding:20px 14px;min-width:0}
   .app-title{gap:12px;align-items:flex-start;flex-wrap:wrap}
+  .app-content>.app-title{height:auto;min-height:0;align-items:stretch}
+  .app-content>.app-title>div{flex:0 0 auto}
   .app-title h1{overflow-wrap:anywhere}
   .app-title>.btn{flex:0 0 auto;min-height:42px}
   .metric{min-width:0;padding:15px}
