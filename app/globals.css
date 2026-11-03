@@ -1445,3 +1445,10 @@ html,body,#root{max-width:100%;overflow-x:hidden}.public-shell,.app-shell,.admin
 @media(max-width:760px){.creator-admin-card{grid-template-columns:1fr}.creator-admin-stats{flex-wrap:wrap}.creator-admin-actions{justify-content:flex-start}.admin-account-modal{padding:20px}.admin-account-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.admin-account-edit{grid-template-columns:1fr}.admin-account-edit label:has(textarea){grid-column:auto}.admin-account-record{flex-direction:column;gap:5px}.admin-account-record time{text-align:left}}
 .admin-account-more{display:block;margin:12px auto 2px}
 .admin-account-management{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}.admin-account-management a{text-decoration:none;font-size:10px}
+
+/* Final mobile override: never reserve a tall empty title area on narrow pages. */
+@media(max-width:760px){
+  .app-content>.app-title{height:auto!important;min-height:0!important;display:flex!important;flex-direction:column!important;align-items:stretch!important}
+  .app-content>.app-title>div{height:auto!important;min-height:0!important;flex:0 0 auto!important}
+  .app-content>.app-title>.btn{height:auto!important;min-height:44px!important;flex:0 0 auto!important;width:100%!important}
+}
