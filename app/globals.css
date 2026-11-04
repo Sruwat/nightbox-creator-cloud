@@ -637,6 +637,8 @@
 .topbar-panel{position:absolute;right:0;top:calc(100% + 10px);z-index:80;width:min(390px,calc(100vw - 28px));padding:12px;background:#fff;border:1px solid #dfe6f0;border-radius:14px;box-shadow:0 18px 45px #07152f26}
 .topbar-search-field{display:flex;align-items:center;gap:8px;padding:0 11px;border:1px solid #d9e1ed;border-radius:9px;background:#f8faff;color:var(--blue)}
 .topbar-search-field input{min-width:0;border:0!important;background:transparent!important;box-shadow:none!important;padding:11px 0;font-size:12px}
+.topbar-search-close{display:grid;place-items:center;flex:0 0 28px;width:28px;height:28px;border:0!important;border-radius:7px!important;color:#667085!important;font-size:20px;line-height:1}
+.topbar-search-close:hover{background:#eaf1ff!important;color:var(--blue)!important}
 .topbar-search-results{display:flex;flex-direction:column;gap:3px;margin-top:9px;max-height:360px;overflow:auto}
 .topbar-search-results button,.quick-actions-panel>button{display:grid;grid-template-columns:26px 1fr;column-gap:8px;align-items:center;width:100%;padding:10px;border-radius:9px!important;text-align:left;color:var(--ink)!important}
 .topbar-search-results button:hover,.quick-actions-panel>button:hover{background:#eef4ff!important}
