@@ -26,7 +26,8 @@ declare global {
   }
 }
 
-const GOOGLE_CLIENT_ID = String(import.meta.env.VITE_GOOGLE_CLIENT_ID || "616903528757-on8f6ar866ehcvu8m022itlr03aquvgd.apps.googleusercontent.com").trim();
+const runtimeEnv = (import.meta as ImportMeta & { env?: Record<string, string | boolean> }).env ?? {};
+const GOOGLE_CLIENT_ID = String(runtimeEnv.VITE_GOOGLE_CLIENT_ID || "616903528757-on8f6ar866ehcvu8m022itlr03aquvgd.apps.googleusercontent.com").trim();
 const GOOGLE_SCRIPT_ID = "nightbox-google-identity-services";
 
 function loadGoogleIdentity(): Promise<boolean> {

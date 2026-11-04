@@ -1,7 +1,11 @@
 /// <reference types="vite/client" />
 
-const configuredBackendUrl = String(import.meta.env.VITE_BACKEND_URL || "").trim();
-const BACKEND_URL = (configuredBackendUrl || (import.meta.env.DEV ? "http://localhost:3000" : "https://api.nightbox.in")).replace(/\/$/, "");
+// Vite injects `import.meta.env`, while the emergency esbuild bundle keeps
+// native `import.meta` and does not create the Vite env object. Keep both
+// builds safe so production never crashes before the app can render.
+const runtimeEnv = (import.meta as ImportMeta & { env?: Record<string, string | boolean> }).env ?? {};
+const configuredBackendUrl = String(runtimeEnv.VITE_BACKEND_URL || "").trim();
+const BACKEND_URL = (configuredBackendUrl || (runtimeEnv.DEV ? "http://localhost:3000" : "https://api.nightbox.in")).replace(/\/$/, "");
 
 export type SupportMessage = {
   id?: string;
