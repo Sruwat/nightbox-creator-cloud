@@ -641,6 +641,12 @@
 .topbar-search-close:hover{background:#eaf1ff!important;color:var(--blue)!important}
 .topbar-inline-search{display:flex;align-items:center;gap:7px;width:min(260px,28vw);height:34px;padding:0 9px;border:1px solid var(--line);border-radius:9px;background:#f8faff;color:var(--blue)}
 .topbar-inline-search input{min-width:0;width:100%;border:0!important;background:transparent!important;box-shadow:none!important;padding:8px 0;font-size:11px}
+.topbar-inline-search input{font-weight:700;color:var(--ink)}
+.topbar-inline-search input::placeholder,.search input::placeholder,.admin-filters input::placeholder,.admin-view-search input::placeholder{font-weight:650;color:#7d8798;opacity:1}
+.topbar-search-results button>b{font-weight:750}
+.topbar-search-results button>small{font-weight:550}
+.search input,.admin-filters input,.admin-view-search input{font-weight:650;color:var(--ink)}
+.admin-app .topbar-inline-search{display:flex;visibility:visible;opacity:1}
 .topbar-inline-search>button{display:grid;place-items:center;flex:0 0 22px;width:22px;height:22px;border:0!important;border-radius:6px!important;color:#667085!important;font-size:18px;line-height:1}
 .topbar-inline-search>button:hover{background:#eaf1ff!important;color:var(--blue)!important}
 .topbar-inline-search:focus-within{border-color:var(--blue);background:#fff}
