@@ -1335,9 +1335,10 @@ app.post('/api/videos/:id/playback-token', async (req, res) => {
   const expiresAt = Math.floor(Date.now() / 1000) + PLAYBACK_TOKEN_TTL_SECONDS;
   const token = encodePlaybackToken(video.id, sessionId, expiresAt);
   if (video.processing_status !== 'completed') {
-    const mediaUrl = bunny.hasTokenAuth()
-      ? bunny.getSignedDirectPlayUrl(video.id, expiresAt)
-      : `${PUBLIC_API_URL}/api/playback-media/${encodeURIComponent(video.id)}?token=${encodeURIComponent(token)}`;
+    // Always use the authorized range proxy while HLS is being prepared.
+    // This keeps MP4 fallback working even when Bunny URL-token settings are
+    // being changed, and prevents the client from downloading the full file.
+    const mediaUrl = `${PUBLIC_API_URL}/api/playback-media/${encodeURIComponent(video.id)}?token=${encodeURIComponent(token)}`;
     return res.json({
       mediaUrl,
       mediaType: 'progressive',

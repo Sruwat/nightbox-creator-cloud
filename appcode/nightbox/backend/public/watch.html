@@ -216,45 +216,52 @@
       return `nightbox://${targetPath.replace(/^\//, '')}`;
     }
 
+    function attachBrowserSource(url, progressive) {
+      if (!url) throw new Error('Playback URL unavailable');
+      if (window.nightboxHls) {
+        window.nightboxHls.destroy();
+        window.nightboxHls = null;
+      }
+      if (progressive || browserPlayer.canPlayType('application/vnd.apple.mpegurl')) {
+        browserPlayer.src = url;
+      } else if (window.Hls && window.Hls.isSupported()) {
+        const hls = new window.Hls({ enableWorker: true });
+        hls.loadSource(url);
+        hls.attachMedia(browserPlayer);
+        hls.on(window.Hls.Events.ERROR, (_event, data) => {
+          if (data?.fatal) document.getElementById('status').innerText = 'Video stream failed. Please retry.';
+        });
+        window.nightboxHls = hls;
+      } else {
+        throw new Error('Video playback is not supported in this browser');
+      }
+      browserPlayer.style.display = 'block';
+      browserPlayer.load();
+    }
+
     async function startBrowserView() {
       if (!linkSlug || /android/i.test(navigator.userAgent)) return;
       try {
         const resolvedVideoId = await resolveVideoId();
-        let metadata;
-        let metadataPayload;
-        for (let attempt = 0; attempt < 60; attempt += 1) {
-          metadata = await fetch(`/video/${encodeURIComponent(resolvedVideoId)}`);
-          metadataPayload = await metadata.json().catch(() => ({}));
-          if (metadata.status !== 202) break;
-          document.getElementById('status').innerText = `Video processing… checking again in 5 seconds (${attempt + 1}/60)`;
-          await new Promise((resolve) => setTimeout(resolve, 5000));
-        }
-        if (!metadata?.ok) throw new Error(metadataPayload?.error || 'Video metadata unavailable');
-        const video = metadataPayload.video;
-        const response = await fetch(`/api/videos/${encodeURIComponent(resolvedVideoId)}/playback-token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ linkSlug }) });
+        // Do not wait for HLS conversion. The API returns an authorized,
+        // range-enabled MP4 fallback while the background HLS job runs.
+        const response = await fetch(`/api/videos/${encodeURIComponent(resolvedVideoId)}/playback-token`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ linkSlug }),
+        });
         const playback = await response.json().catch(() => ({}));
-        if (response.status === 202) throw new Error('Video is still processing');
         if (response.status === 403) throw new Error(playback.error || 'Video is awaiting approval');
-        if (!response.ok || !playback.manifestUrl) throw new Error(playback.error || 'Playback authorization failed');
+        if (!response.ok || (!playback.manifestUrl && !playback.mediaUrl)) throw new Error(playback.error || 'Playback authorization failed');
         viewSessionId = playback.sessionId;
         viewToken = playback.viewToken;
         minimumWatchSeconds = Number(playback.minWatchSeconds) || 5;
-        const directUrl = playback.manifestUrl;
-        if (browserPlayer.canPlayType('application/vnd.apple.mpegurl')) {
-          browserPlayer.src = directUrl;
-        } else if (window.Hls && window.Hls.isSupported()) {
-          const hls = new window.Hls({ enableWorker: true });
-          hls.loadSource(directUrl);
-          hls.attachMedia(browserPlayer);
-          hls.on(window.Hls.Events.ERROR, (_event, data) => { if (data?.fatal) document.getElementById('status').innerText = 'Signed video stream failed. Please retry.'; });
-          window.nightboxHls = hls;
-        } else {
-          throw new Error('HLS playback is not supported by this browser');
-        }
-        browserPlayer.style.display = 'block';
-        browserPlayer.load();
-        browserPlayer.addEventListener('error', () => { document.getElementById('status').innerText = 'Signed video stream failed. Please retry.'; }, { once: true });
-        document.getElementById('status').innerText = 'Watch here or open the NightBox app.';
+        const progressive = playback.mediaType === 'progressive' || !playback.manifestUrl;
+        attachBrowserSource(progressive ? playback.mediaUrl : playback.manifestUrl, progressive);
+        document.getElementById('status').innerText = progressive
+          ? 'Video is playing while fast streaming prepares in the background.'
+          : 'Watch here or open the NightBox app.';
+        browserPlayer.addEventListener('error', () => { document.getElementById('status').innerText = 'Video stream failed. Please retry.'; }, { once: true });
       } catch (error) {
         document.getElementById('status').innerText = 'This video is not available in the browser.';
       }
