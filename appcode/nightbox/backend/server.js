@@ -1885,6 +1885,12 @@ app.get('/api/admin/users', requireAdmin, (req, res) => res.json({ users: store.
     + COALESCE((SELECT SUM(r.amount_micros) FROM referral_earnings r WHERE r.source_creator_id=u.id AND DATE(r.created_at)=DATE('now')),0)
     + COALESCE((SELECT SUM(a.amount_micros) FROM admin_earning_adjustments a WHERE a.creator_id=u.id AND DATE(a.created_at)=DATE('now')),0)
   ELSE 0 END AS todayEarningsMicros,
+  CASE WHEN u.role='creator' THEN
+    COALESCE((SELECT SUM(e.amount_micros) FROM earnings e WHERE e.creator_id=u.id),0)
+    + COALESCE((SELECT SUM(r.amount_micros) FROM referral_earnings r WHERE r.source_creator_id=u.id),0)
+    + COALESCE((SELECT SUM(a.amount_micros) FROM admin_earning_adjustments a WHERE a.creator_id=u.id),0)
+  ELSE 0 END AS totalEarningsMicros,
+  CASE WHEN u.role='creator' THEN COALESCE((SELECT COUNT(*) FROM videos v WHERE v.owner_id=u.id AND v.status <> 'deleted'),0) ELSE 0 END AS uploads,
   CASE WHEN u.role='creator' THEN COALESCE((SELECT COUNT(DISTINCT s.viewer_hash) FROM view_sessions s JOIN creator_links l ON l.id=s.link_id WHERE l.creator_id=u.id AND s.counted=1 AND DATE(s.qualified_at)=DATE('now')),0) ELSE 0 END AS todayUsers
   FROM users u LEFT JOIN creator_storage_limits l ON l.creator_id=u.id ORDER BY u.created_at DESC`).all() }));
 const ACCOUNT_ACTIVITY_QUERIES = {

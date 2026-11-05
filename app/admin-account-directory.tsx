@@ -15,7 +15,7 @@ import {
 type AdminUser = Awaited<ReturnType<typeof getAdminUsers>>["users"][number];
 type View = "all" | "creators" | "admins";
 type CreatorStatusFilter = "all" | "active" | "suspended";
-type CreatorSort = "newest" | "oldest" | "earning" | "storage";
+type CreatorSort = "newest" | "oldest" | "dailyEarning" | "totalEarning" | "uploads" | "storage";
 
 function formattedDate(value: string | null) {
   if (!value) return "—";
@@ -165,7 +165,9 @@ export default function AdminAccountDirectory({ view, toast }: { view: View; toa
     .filter(row => statusFilter === "all" || row.status === statusFilter)
     .filter(row => `${row.email} ${row.id} ${row.telegramUserId || ""}`.toLowerCase().includes(query.trim().toLowerCase()))
     .sort((left, right) => {
-      if (sortBy === "earning") return right.todayEarningsMicros - left.todayEarningsMicros;
+      if (sortBy === "dailyEarning") return right.todayEarningsMicros - left.todayEarningsMicros;
+      if (sortBy === "totalEarning") return right.totalEarningsMicros - left.totalEarningsMicros;
+      if (sortBy === "uploads") return right.uploads - left.uploads;
       if (sortBy === "storage") return right.storageUsedBytes - left.storageUsedBytes;
       const leftDate = new Date(left.createdAt).getTime();
       const rightDate = new Date(right.createdAt).getTime();
@@ -186,14 +188,14 @@ export default function AdminAccountDirectory({ view, toast }: { view: View; toa
     <div className="admin-filters admin-creator-filters">
       <div className="search"><span aria-hidden="true">⌕</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search by email, ID or Telegram ID…" aria-label="Search creators" /></div>
       <label className="admin-filter-control"><span>Status</span><select value={statusFilter} onChange={event => setStatusFilter(event.target.value as CreatorStatusFilter)} aria-label="Filter creators by status"><option value="all">All statuses</option><option value="active">Active</option><option value="suspended">Suspended</option></select></label>
-      <label className="admin-filter-control"><span>Sort</span><select value={sortBy} onChange={event => setSortBy(event.target.value as CreatorSort)} aria-label="Sort creators"><option value="newest">Newest joined</option><option value="oldest">Oldest joined</option><option value="earning">Today earning</option><option value="storage">Storage used</option></select></label>
+      <label className="admin-filter-control"><span>Sort</span><select value={sortBy} onChange={event => setSortBy(event.target.value as CreatorSort)} aria-label="Sort creators"><option value="newest">Newest joined</option><option value="oldest">Oldest joined</option><option value="dailyEarning">Daily earning</option><option value="totalEarning">Total earning</option><option value="uploads">Highest uploads</option><option value="storage">Storage used</option></select></label>
       {hasFilters && <button type="button" className="admin-filter-clear" onClick={clearFilters}>Clear filters</button>}
       <span className="admin-list-count">{shown.length} of {filtered.length} creators</span>
     </div>
     {error ? <div className="card empty-state" role="alert"><h2>Unable to load accounts</h2><p>{error}</p></div> : <div className="creator-admin-list">
       {shown.map(row => <article className="card creator-admin-card" key={row.id}>
         <div className="creator-admin-identity"><i>{row.email.slice(0, 2).toUpperCase()}</i><div><h2>{row.email}</h2><small>{row.id}</small><span className="admin-account-status">{row.role} · {row.status}</span></div></div>
-        <div className="creator-admin-stats"><span><b>{row.role === "creator" ? usd(row.todayEarningsMicros) : "—"}</b><small>today earning</small></span><span><b>{row.role === "creator" ? row.todayUsers.toLocaleString() : "—"}</b><small>today users</small></span><span><b>{gb(row.storageUsedBytes)}</b><small>storage used</small></span><span><b>{formattedDate(row.createdAt)}</b><small>joined</small></span></div>
+        <div className="creator-admin-stats"><span><b>{row.role === "creator" ? usd(row.todayEarningsMicros) : "—"}</b><small>today earning</small></span><span><b>{row.role === "creator" ? usd(row.totalEarningsMicros) : "—"}</b><small>total earning</small></span><span><b>{row.role === "creator" ? row.uploads.toLocaleString() : "—"}</b><small>uploads</small></span><span><b>{gb(row.storageUsedBytes)}</b><small>storage used</small></span><span><b>{formattedDate(row.createdAt)}</b><small>joined</small></span></div>
         <div className="creator-admin-actions"><button className="btn btn-outline" disabled={loadingId === row.id} onClick={() => void open(row)}>{loadingId === row.id ? "Loading…" : "View details"}</button>{row.role === "creator" && <><button className="btn btn-primary" onClick={() => void open(row, true)}>Edit</button><button className="btn btn-danger" onClick={() => void toggle(row)}>{row.status === "active" ? "Suspend" : "Activate"}</button></>}</div>
       </article>)}
     </div>}

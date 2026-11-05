@@ -253,7 +253,7 @@ export async function getPublicCpm() {
 
 export async function getAdminUsers(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/users`, { headers: authHeaders(token) });
-  return parseResponse<{ users: Array<{ id: string; email: string; role: string; status: string; telegramUserId: string | null; createdAt: string; storageQuotaBytes: number | null; storageUsedBytes: number; todayEarningsMicros: number; todayUsers: number }> }>(response);
+  return parseResponse<{ users: Array<{ id: string; email: string; role: string; status: string; telegramUserId: string | null; createdAt: string; storageQuotaBytes: number | null; storageUsedBytes: number; uploads: number; todayEarningsMicros: number; totalEarningsMicros: number; todayUsers: number }> }>(response);
 }
 export type AdminEarningAdjustment = { id: string; creatorId: string; adminUserId: string; amountMicros: number; reason: string; createdAt: string; adminEmail?: string };
 export async function createAdminEarningAdjustment(token: string, creatorId: string, amountMicros: number, reason: string) {
