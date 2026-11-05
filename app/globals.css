@@ -31,6 +31,17 @@
   .card,.wallet-hero,.user-event{max-width:100%}
 }
 
+/* Creator directory filters */
+.admin-creator-filters{align-items:center;gap:10px}
+.admin-creator-filters .search{flex:1 1 280px;min-width:220px}
+.admin-filter-control{display:flex;align-items:center;gap:7px;color:#a5a5ac;font-size:11px;font-weight:700;white-space:nowrap}
+.admin-filter-control select{min-width:132px;padding:9px 28px 9px 10px!important;border:1px solid #343438!important;border-radius:8px!important;background:#171719!important;color:#e5e5e9!important;font-size:12px!important}
+.admin-filter-control select:focus{border-color:#5a91ff!important;outline:none}
+.admin-filter-clear{padding:9px 11px!important;border:1px solid #3a3a40!important;border-radius:8px!important;color:#75d088!important;font-size:11px!important;font-weight:750!important;white-space:nowrap}
+.admin-filter-clear:hover{background:#1f2b22!important}
+.admin-creator-filters .admin-list-count{margin-left:auto;white-space:nowrap}
+@media(max-width:760px){.admin-creator-filters .search{flex-basis:100%}.admin-filter-control{flex:1 1 145px}.admin-filter-control select{width:100%;min-width:0}.admin-creator-filters .admin-list-count{margin-left:0}.admin-filter-clear{flex:0 0 auto}}
+
 /* Reference-aligned admin console theme. Keep the creator workspace and public site unchanged. */
 .admin-app{--admin-bg:#09090b;--admin-panel:#111113;--admin-panel-2:#151517;--admin-line:#262629;--admin-text:#e7e7e9;--admin-muted:#9b9ba3;--admin-green:#26a34a;background:var(--admin-bg);color:var(--admin-text);min-height:100vh}
 .admin-app .sidebar{background:#101012;border-right:1px solid #242427;color:#a6a6ad}

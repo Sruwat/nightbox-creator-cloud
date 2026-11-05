@@ -14,6 +14,8 @@ import {
 
 type AdminUser = Awaited<ReturnType<typeof getAdminUsers>>["users"][number];
 type View = "all" | "creators" | "admins";
+type CreatorStatusFilter = "all" | "active" | "suspended";
+type CreatorSort = "newest" | "oldest" | "earning" | "storage";
 
 function formattedDate(value: string | null) {
   if (!value) return "—";
@@ -35,6 +37,8 @@ function DetailSection({ title, count, loaded, loading, onMore, children }: { ti
 export default function AdminAccountDirectory({ view, toast }: { view: View; toast: (message: string) => void }) {
   const [rows, setRows] = useState<AdminUser[]>([]);
   const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<CreatorStatusFilter>("all");
+  const [sortBy, setSortBy] = useState<CreatorSort>("newest");
   const [error, setError] = useState("");
   const [detail, setDetail] = useState<AdminAccountDetails | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
@@ -157,14 +161,35 @@ export default function AdminAccountDirectory({ view, toast }: { view: View; toa
 
   const title = view === "creators" ? "Creator management" : view === "admins" ? "Admins" : "Users";
   const filtered = rows.filter(row => view === "all" || row.role === (view === "creators" ? "creator" : "admin"));
-  const shown = filtered.filter(row => `${row.email} ${row.id} ${row.telegramUserId || ""}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const shown = filtered
+    .filter(row => statusFilter === "all" || row.status === statusFilter)
+    .filter(row => `${row.email} ${row.id} ${row.telegramUserId || ""}`.toLowerCase().includes(query.trim().toLowerCase()))
+    .sort((left, right) => {
+      if (sortBy === "earning") return right.todayEarningsMicros - left.todayEarningsMicros;
+      if (sortBy === "storage") return right.storageUsedBytes - left.storageUsedBytes;
+      const leftDate = new Date(left.createdAt).getTime();
+      const rightDate = new Date(right.createdAt).getTime();
+      return sortBy === "oldest" ? leftDate - rightDate : rightDate - leftDate;
+    });
+  const hasFilters = Boolean(query.trim()) || statusFilter !== "all" || sortBy !== "newest";
+  function clearFilters() {
+    setQuery("");
+    setStatusFilter("all");
+    setSortBy("newest");
+  }
   const account = detail?.account;
   const summary = detail?.summary;
   const sectionProps = (section: AdminAccountActivitySection, count: number) => ({ count, loaded: detail?.[section].length || 0, loading: loadingSection === section, onMore: () => void more(section) });
 
   return <>
     <div className="app-title"><div><span>IDENTITY & ACCESS</span><h1>{title}</h1></div><button className="btn btn-dark" onClick={() => void load()}>Refresh</button></div>
-    <div className="admin-filters"><div className="search">⌕<input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search by email, ID or Telegram ID…" aria-label="Search accounts" /></div><span className="admin-list-count">{shown.length} accounts</span></div>
+    <div className="admin-filters admin-creator-filters">
+      <div className="search"><span aria-hidden="true">⌕</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search by email, ID or Telegram ID…" aria-label="Search creators" /></div>
+      <label className="admin-filter-control"><span>Status</span><select value={statusFilter} onChange={event => setStatusFilter(event.target.value as CreatorStatusFilter)} aria-label="Filter creators by status"><option value="all">All statuses</option><option value="active">Active</option><option value="suspended">Suspended</option></select></label>
+      <label className="admin-filter-control"><span>Sort</span><select value={sortBy} onChange={event => setSortBy(event.target.value as CreatorSort)} aria-label="Sort creators"><option value="newest">Newest joined</option><option value="oldest">Oldest joined</option><option value="earning">Today earning</option><option value="storage">Storage used</option></select></label>
+      {hasFilters && <button type="button" className="admin-filter-clear" onClick={clearFilters}>Clear filters</button>}
+      <span className="admin-list-count">{shown.length} of {filtered.length} creators</span>
+    </div>
     {error ? <div className="card empty-state" role="alert"><h2>Unable to load accounts</h2><p>{error}</p></div> : <div className="creator-admin-list">
       {shown.map(row => <article className="card creator-admin-card" key={row.id}>
         <div className="creator-admin-identity"><i>{row.email.slice(0, 2).toUpperCase()}</i><div><h2>{row.email}</h2><small>{row.id}</small><span className="admin-account-status">{row.role} · {row.status}</span></div></div>
