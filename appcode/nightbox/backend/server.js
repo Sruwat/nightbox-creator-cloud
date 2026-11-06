@@ -3234,6 +3234,47 @@ function resumeInterruptedTranscodes() {
   if (pending.length) console.log(`[HLS] Requeued ${pending.length} unfinished video processing job(s).`);
 }
 
+// Temporary uploads and HLS workspaces must not accumulate indefinitely. Keep
+// recent files available for active processing/fallback playback, then remove
+// only stale staging artifacts. Permanent media and the database live outside
+// this directory and are never touched by this cleanup.
+const TEMP_RETENTION_MS = Math.max(60 * 60 * 1000, Number(process.env.TEMP_RETENTION_HOURS || 24) * 60 * 60 * 1000);
+const TEMP_CLEANUP_INTERVAL_MS = Math.max(5 * 60 * 1000, Number(process.env.TEMP_CLEANUP_INTERVAL_MINUTES || 15) * 60 * 1000);
+
+function cleanupExpiredTempArtifacts() {
+  const cutoff = Date.now() - TEMP_RETENTION_MS;
+  let removed = 0;
+  let reclaimed = 0;
+
+  function walk(directory) {
+    let entries;
+    try { entries = fs.readdirSync(directory, { withFileTypes: true }); } catch (_) { return; }
+    for (const entry of entries) {
+      const target = path.join(directory, entry.name);
+      let stat;
+      try { stat = fs.statSync(target); } catch (_) { continue; }
+      if (entry.isDirectory()) {
+        walk(target);
+        try { if (fs.readdirSync(target).length === 0) fs.rmdirSync(target); } catch (_) { /* active/raced directory */ }
+        continue;
+      }
+      if (!stat.isFile() || stat.mtimeMs >= cutoff) continue;
+      try {
+        fs.unlinkSync(target);
+        removed += 1;
+        reclaimed += stat.size;
+      } catch (_) { /* active/raced file */ }
+    }
+  }
+
+  walk(TEMP_DIR);
+  if (removed) console.log(`[Temp cleanup] Removed ${removed} stale file(s), reclaimed ${(reclaimed / 1024 / 1024).toFixed(1)} MB.`);
+}
+
+const tempCleanupTimer = setInterval(cleanupExpiredTempArtifacts, TEMP_CLEANUP_INTERVAL_MS);
+tempCleanupTimer.unref();
+setTimeout(cleanupExpiredTempArtifacts, 5000).unref();
+
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🚀 Backend running on port ${PORT}`);
   console.log(`📡 Domain: ${DOMAIN_URL}`);
