@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.app.PictureInPictureParams
 import android.app.DownloadManager
 import android.content.Context
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
@@ -1137,15 +1139,34 @@ class VideoPlayerActivity : AppCompatActivity() {
         tvErrorMessage.text = message
     }
 
-    private fun shareVideo() {
-        val vid = videoId ?: return
-        val shareUrl = "$backendOrigin/watch/$vid${linkSlug?.let { "?link=${Uri.encode(it)}" } ?: ""}"
+    private fun copyShareLink(url: String) {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        if (clipboard == null) {
+            Toast.makeText(this, "Unable to copy link", Toast.LENGTH_SHORT).show()
+            return
+        }
+        clipboard.setPrimaryClip(ClipData.newPlainText("NightBox video link", url))
+        Toast.makeText(this, "Link copied", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun launchShareIntent(url: String) {
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
             putExtra(Intent.EXTRA_SUBJECT, "NightBox Video")
-            putExtra(Intent.EXTRA_TEXT, "Watch this video on NightBox: $shareUrl")
+            putExtra(Intent.EXTRA_TEXT, url)
         }
         startActivity(Intent.createChooser(shareIntent, "Share via"))
+    }
+
+    private fun shareVideo() {
+        val vid = videoId ?: return
+        val shareUrl = "$backendOrigin/watch/$vid${linkSlug?.let { "?link=${Uri.encode(it)}" } ?: ""}"
+        AlertDialog.Builder(this)
+            .setTitle("Share video")
+            .setPositiveButton("Copy link") { _, _ -> copyShareLink(shareUrl) }
+            .setNegativeButton("Share") { _, _ -> launchShareIntent(shareUrl) }
+            .setNeutralButton("Cancel", null)
+            .show()
     }
 
     private fun startManualDownload() {
