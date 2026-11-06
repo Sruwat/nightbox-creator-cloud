@@ -1346,13 +1346,36 @@ app.post('/api/videos/:id/playback-token', async (req, res) => {
       processingStage: publicProcessingStage(video.processing_stage),
       processingProgress: Number(video.processingProgress || 0),
       expiresAt: new Date(expiresAt * 1000).toISOString(),
+      expiresAtEpoch: expiresAt,
       sessionId,
       viewToken,
       minWatchSeconds: store.db.prepare('SELECT minimum_watch_seconds AS seconds FROM view_rules WHERE id=1').get().seconds,
     });
   }
-  if (!playbackReady(video)) return res.status(403).json({ error: REQUIRE_ADMIN_APPROVAL ? 'Video is awaiting admin approval' : 'Video is not ready for playback', code: REQUIRE_ADMIN_APPROVAL ? 'VIDEO_AWAITING_APPROVAL' : 'VIDEO_NOT_READY', state: publicVideoState(video) });
-  res.json({ manifestUrl: `${PUBLIC_API_URL}/api/playback-manifest/${encodeURIComponent(video.id)}?token=${encodeURIComponent(token)}`, expiresAt: new Date(expiresAt * 1000).toISOString(), sessionId, viewToken, minWatchSeconds: store.db.prepare('SELECT minimum_watch_seconds AS seconds FROM view_rules WHERE id=1').get().seconds });
+  // Auto-publish mode must keep the same watch link playable while the final
+  // HLS/CDN visibility flags are being reconciled. The source MP4 is already
+  // in storage at this point, so use the authorized range proxy as a
+  // temporary fallback instead of returning 403 and making the app wait.
+  if (!playbackReady(video)) {
+    if (REQUIRE_ADMIN_APPROVAL) {
+      return res.status(403).json({ error: 'Video is awaiting admin approval', code: 'VIDEO_AWAITING_APPROVAL', state: publicVideoState(video) });
+    }
+    const mediaUrl = `${PUBLIC_API_URL}/api/playback-media/${encodeURIComponent(video.id)}?token=${encodeURIComponent(token)}`;
+    return res.json({
+      mediaUrl,
+      mediaType: 'progressive',
+      processing: true,
+      processingStage: publicProcessingStage(video.processing_stage),
+      processingProgress: Number(video.processingProgress || 0),
+      fallbackReason: 'hls_not_ready',
+      expiresAt: new Date(expiresAt * 1000).toISOString(),
+      expiresAtEpoch: expiresAt,
+      sessionId,
+      viewToken,
+      minWatchSeconds: store.db.prepare('SELECT minimum_watch_seconds AS seconds FROM view_rules WHERE id=1').get().seconds,
+    });
+  }
+  res.json({ manifestUrl: `${PUBLIC_API_URL}/api/playback-manifest/${encodeURIComponent(video.id)}?token=${encodeURIComponent(token)}`, expiresAt: new Date(expiresAt * 1000).toISOString(), expiresAtEpoch: expiresAt, sessionId, viewToken, minWatchSeconds: store.db.prepare('SELECT minimum_watch_seconds AS seconds FROM view_rules WHERE id=1').get().seconds });
 });
 
 // Authorized progressive fallback while HLS is still processing. Range

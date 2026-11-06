@@ -124,6 +124,7 @@ class VideoPlayerActivity : AppCompatActivity() {
     private var remoteHlsUrl: String? = null
     private var remoteProgressiveUrl: String? = null
     private var prefetchedMediaType: String? = null
+    private var remotePlaybackExpiresAtEpoch: Long = 0L
     private var downloadUrl: String? = null
     private var durationUpdateRunnable: Runnable? = null
     private var shouldResumePlayback = false
@@ -209,6 +210,7 @@ class VideoPlayerActivity : AppCompatActivity() {
         remoteHlsUrl = intent?.getStringExtra("prefetched_manifest_url")
         remoteProgressiveUrl = intent?.getStringExtra("prefetched_media_url")
         prefetchedMediaType = intent?.getStringExtra("prefetched_media_type")
+        remotePlaybackExpiresAtEpoch = intent?.getLongExtra("prefetched_expires_at_epoch", 0L) ?: 0L
         viewSessionId = intent?.getStringExtra("prefetched_session_id")
         viewToken = intent?.getStringExtra("prefetched_view_token")
         downloadUrl = intent?.getStringExtra("prefetched_download_url")
@@ -407,6 +409,14 @@ class VideoPlayerActivity : AppCompatActivity() {
         releasePlayer()
         usingWebView = false
 
+        // FileInfo prefetch tokens are intentionally short-lived. Never try
+        // to play an expired signed URL; obtain a fresh authorized URL.
+        if (localVideoUri == null && playbackUrlExpired()) {
+            remoteHlsUrl = null
+            remoteProgressiveUrl = null
+            prefetchedMediaType = null
+        }
+
         if (localVideoUri != null) {
             // Local files always use ExoPlayer
             initExoPlayerLocal()
@@ -417,6 +427,11 @@ class VideoPlayerActivity : AppCompatActivity() {
                 requestPlaybackTokenAndInitialize()
             }
         }
+    }
+
+    private fun playbackUrlExpired(): Boolean {
+        return remotePlaybackExpiresAtEpoch > 0L &&
+            remotePlaybackExpiresAtEpoch <= (System.currentTimeMillis() / 1000L) + 5L
     }
 
     private fun requestPlaybackTokenAndInitialize() {
@@ -448,10 +463,31 @@ class VideoPlayerActivity : AppCompatActivity() {
                 apiClient.newCall(request).execute().use { response ->
                     val respCode = response.code
                     val bodyString = response.body?.string().orEmpty()
+                    val responseBody = try { JSONObject(bodyString) } catch (_: Exception) { JSONObject() }
+                    val responseProgressive = responseBody.optString("mediaUrl").takeIf { it.isNotBlank() }
+                    val responseManifest = responseBody.optString("manifestUrl").takeIf { it.isNotBlank() }
+
+                    // Some deployments/proxies return 202 while already
+                    // providing the authorized MP4 fallback. Start it now;
+                    // HLS conversion continues on the backend.
+                    if (respCode == 202 && responseProgressive != null) {
+                        withContext(Dispatchers.Main) {
+                            remoteHlsUrl = responseManifest
+                            remoteProgressiveUrl = responseProgressive
+                            prefetchedMediaType = "progressive"
+                            remotePlaybackExpiresAtEpoch = responseBody.optLong("expiresAtEpoch", 0L)
+                            viewSessionId = responseBody.optString("sessionId").takeIf { it.isNotBlank() }
+                            viewToken = responseBody.optString("viewToken").takeIf { it.isNotBlank() }
+                            minimumWatchSeconds = responseBody.optInt("minWatchSeconds", 5).coerceAtLeast(1)
+                            processingRetryCount = 0
+                            initExoPlayerHls(isProgressive = true)
+                        }
+                        return@use
+                    }
 
                     // Treat 202 as processing and retry every 5 seconds, maximum 24 attempts
                     if (respCode == 202 || respCode == 409) {
-                        val processingBody = try { JSONObject(bodyString) } catch (_: Exception) { JSONObject() }
+                        val processingBody = responseBody
                         val status = processingBody.optString("playbackStatus")
                         val processingStage = processingBody.optString("processingStage").takeIf { it.isNotBlank() }
                         withContext(Dispatchers.Main) {
@@ -484,9 +520,9 @@ class VideoPlayerActivity : AppCompatActivity() {
                     }
 
                     // Accept only an authorized manifest or temporary processing media URL.
-                    val payload = JSONObject(bodyString)
-                    val manifest = payload.optString("manifestUrl").takeIf { it.isNotBlank() }
-                    val progressive = payload.optString("mediaUrl").takeIf { it.isNotBlank() }
+                    val payload = responseBody
+                    val manifest = responseManifest
+                    val progressive = responseProgressive
                     if (manifest == null && progressive == null) throw IllegalStateException("Video stream is not available right now")
                     val sId = payload.optString("sessionId").takeIf { it.isNotBlank() }
                     val vToken = payload.optString("viewToken").takeIf { it.isNotBlank() }
@@ -503,6 +539,7 @@ class VideoPlayerActivity : AppCompatActivity() {
                         viewQualified = false
                         remoteHlsUrl = manifest
                         remoteProgressiveUrl = progressive
+                        remotePlaybackExpiresAtEpoch = payload.optLong("expiresAtEpoch", 0L)
                         viewSessionId = sId
                         viewToken = vToken
                         minimumWatchSeconds = payload.optInt("minWatchSeconds", 5).coerceAtLeast(1)
@@ -697,6 +734,12 @@ class VideoPlayerActivity : AppCompatActivity() {
                 Log.e(TAG, "Native playback failed (${error.errorCode})", error)
                 if (!playbackTokenRetryUsed && localVideoUri == null) {
                     playbackTokenRetryUsed = true
+                    // Force a fresh token on retry. Reusing the prefetched
+                    // URL can loop forever after its 60-second expiry.
+                    remoteHlsUrl = null
+                    remoteProgressiveUrl = null
+                    prefetchedMediaType = null
+                    remotePlaybackExpiresAtEpoch = 0L
                     window.decorView.postDelayed({
                         if (!isFinishing && !isDestroyed) initializePlayer()
                     }, 350L)

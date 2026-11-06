@@ -78,6 +78,7 @@ class FileInfoActivity : AppCompatActivity() {
     private var prefetchedViewToken: String? = null
     private var prefetchedDownloadUrl: String? = null
     private var prefetchedMinWatchSeconds: Int = 5
+    private var prefetchedExpiresAtEpoch: Long = 0L
 
     private val apiClient get() = NetworkClient.client
 
@@ -188,15 +189,20 @@ class FileInfoActivity : AppCompatActivity() {
                     .post(body)
                     .build()
                 apiClient.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) return@use
                     val payload = JSONObject(response.body?.string().orEmpty())
+                    // A processing response can still contain an authorized
+                    // MP4 fallback. Keep it instead of waiting for HLS.
+                    val mediaUrl = payload.optString("mediaUrl").takeIf { it.isNotBlank() }
+                    val manifestUrl = payload.optString("manifestUrl").takeIf { it.isNotBlank() }
+                    if (!response.isSuccessful && mediaUrl == null && manifestUrl == null) return@use
                     withContext(Dispatchers.Main) {
-                        prefetchedManifestUrl = payload.optString("manifestUrl").takeIf { it.isNotBlank() }
-                        prefetchedMediaUrl = payload.optString("mediaUrl").takeIf { it.isNotBlank() }
+                        prefetchedManifestUrl = manifestUrl
+                        prefetchedMediaUrl = mediaUrl
                         prefetchedMediaType = payload.optString("mediaType").takeIf { it.isNotBlank() }
                         prefetchedSessionId = payload.optString("sessionId").takeIf { it.isNotBlank() }
                         prefetchedViewToken = payload.optString("viewToken").takeIf { it.isNotBlank() }
                         prefetchedMinWatchSeconds = payload.optInt("minWatchSeconds", 5).coerceAtLeast(1)
+                        prefetchedExpiresAtEpoch = payload.optLong("expiresAtEpoch", 0L)
                         prefetchedDownloadUrl = payload.optString("downloadUrl")
                             .takeIf { it.startsWith("https://") }
                     }
@@ -462,6 +468,7 @@ class FileInfoActivity : AppCompatActivity() {
             prefetchedSessionId?.let { putExtra("prefetched_session_id", it) }
             prefetchedViewToken?.let { putExtra("prefetched_view_token", it) }
             prefetchedDownloadUrl?.let { putExtra("prefetched_download_url", it) }
+            if (prefetchedExpiresAtEpoch > 0L) putExtra("prefetched_expires_at_epoch", prefetchedExpiresAtEpoch)
             putExtra("prefetched_min_watch_seconds", prefetchedMinWatchSeconds)
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
