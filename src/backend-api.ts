@@ -460,11 +460,11 @@ export async function replyToCreatorTicket(token: string, id: string, message: s
 }
 export async function getAdminTickets(token: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/tickets`, { headers: authHeaders(token) });
-  return parseResponse<{ tickets: Array<{ id: string; email: string; subject: string; message: string; status: string; adminNote: string | null; createdAt: string; updatedAt: string; messages: SupportMessage[] }> }>(response);
+  return parseResponse<{ tickets: Array<{ id: string; email: string; subject: string; message: string; status: string; adminNote: string | null; createdAt: string; updatedAt: string; messages: SupportMessage[] }> }>(response, "admin");
 }
 export async function updateAdminTicket(token: string, id: string, status: string, adminNote: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/tickets/${encodeURIComponent(id)}`, { method: "PUT", headers: { ...authHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify({ status, adminNote }) });
-  return parseResponse(response);
+  return parseResponse(response, "admin");
 }
 export async function deleteAdminTicket(token: string, id: string) {
   const response = await fetch(`${BACKEND_URL}/api/admin/tickets/${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders(token) });
