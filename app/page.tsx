@@ -3402,12 +3402,6 @@ function LiveBots({
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const bots = [
     {
-      name: "Nightbox connection",
-      handle: "nightbox_connbot",
-      description: "Link this Telegram chat to your creator account.",
-      comingSoon: false,
-    },
-    {
       name: "Nightbox Files upload bot",
       handle: "nightbox_uploadbot",
       description: "Send supported video or document uploads.",
