@@ -6,26 +6,26 @@
 
 import { Fragment, useEffect, useEffectEvent, useState } from "react";
 
-async function copyTextToClipboard(text:string):Promise<void>{
-  if(!text) throw new Error("Nothing to copy");
-  try{
-    if(navigator.clipboard?.writeText){
+async function copyTextToClipboard(text: string): Promise<void> {
+  if (!text) throw new Error("Nothing to copy");
+  try {
+    if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text);
       return;
     }
-  }catch{}
-  const input=document.createElement("textarea");
-  input.value=text;
-  input.setAttribute("readonly","");
-  input.style.position="fixed";
-  input.style.left="-9999px";
-  input.style.opacity="0";
+  } catch {}
+  const input = document.createElement("textarea");
+  input.value = text;
+  input.setAttribute("readonly", "");
+  input.style.position = "fixed";
+  input.style.left = "-9999px";
+  input.style.opacity = "0";
   document.body.appendChild(input);
   input.focus();
   input.select();
-  const copied=document.execCommand("copy");
+  const copied = document.execCommand("copy");
   input.remove();
-  if(!copied) throw new Error("Clipboard unavailable");
+  if (!copied) throw new Error("Clipboard unavailable");
 }
 import LiveAdminViews from "./admin-views";
 import AdminAccountDirectory from "./admin-account-directory";
@@ -33,20 +33,97 @@ import AdminPaymentActions from "./admin-payment-actions";
 import GoogleSignInButton from "./google-signin-button";
 import "./google-signin.css";
 import CreatorFileManager from "../src/creator-file-manager";
-import { AdminRewardMilestones, CreatorRewardMilestones } from "../src/reward-milestones";
-import { adminLogin, approveAdminVideo, createAdminEvent, createCreatorApiKey, createCreatorTicket, createCreatorVideoLink, createWithdrawal, deleteAdminTicket, deleteAdminVideo, deleteCreatorVideo, getAdminAdsTxt, getAdminBotEvents, getAdminCpm, getAdminEvents, getAdminOverview, getAdminPayments, getAdminPlans, getAdminReferrals, getAdminReports, getAdminSettings, getAdminSubscriptions, getAdminTickets, getAdminTraffic, getAdminUsers, getAdminVideos, getAdminViewRules, getAdminWithdrawals, getCreatorAnalytics, getCreatorApiKeys, getCreatorOverview, getCreatorProfile, getCreatorTickets, getCreatorVideos, getCreatorWithdrawals, getEvents, getPublicCpm, getPublicCreatorProfile, loginWithGoogle, rejectAdminVideo, replyToCreatorTicket, sendContactMessage, submitDmcaReport, updateAdminAdsTxt, updateAdminCpm, updateAdminEvent, updateAdminPlan, updateAdminReport, updateAdminTicket, updateAdminViewRules, updateAdminWithdrawal, updateCreatorProfile, uploadVideo } from "../src/backend-api";
+import {
+  AdminRewardMilestones,
+  CreatorRewardMilestones,
+} from "../src/reward-milestones";
+import {
+  adminLogin,
+  approveAdminVideo,
+  createAdminEvent,
+  createCreatorApiKey,
+  createCreatorTicket,
+  createCreatorVideoLink,
+  createWithdrawal,
+  deleteAdminTicket,
+  deleteAdminVideo,
+  deleteCreatorVideo,
+  getAdminAdsTxt,
+  getAdminBotEvents,
+  getAdminCpm,
+  getAdminEvents,
+  getAdminOverview,
+  getAdminPayments,
+  getAdminPlans,
+  getAdminReferrals,
+  getAdminReports,
+  getAdminSettings,
+  getAdminSubscriptions,
+  getAdminTickets,
+  getAdminTraffic,
+  getAdminUsers,
+  getAdminVideos,
+  getAdminViewRules,
+  getAdminWithdrawals,
+  getCreatorAnalytics,
+  getCreatorApiKeys,
+  getCreatorOverview,
+  getCreatorProfile,
+  getCreatorTickets,
+  getCreatorVideos,
+  getCreatorWithdrawals,
+  getEvents,
+  getPublicCpm,
+  getPublicCreatorProfile,
+  loginWithGoogle,
+  rejectAdminVideo,
+  replyToCreatorTicket,
+  sendContactMessage,
+  submitDmcaReport,
+  updateAdminAdsTxt,
+  updateAdminCpm,
+  updateAdminEvent,
+  updateAdminPlan,
+  updateAdminReport,
+  updateAdminTicket,
+  updateAdminViewRules,
+  updateAdminWithdrawal,
+  updateCreatorProfile,
+  uploadVideo,
+} from "../src/backend-api";
 
-type FileItem = { id:string|number; name:string; type:string; size:string; views:number; earned:number; status:string; color:string; updated:string; link?:string|null };
-type AccountProfile = { name:string; email:string; picture:string|null };
-type Toast = {id:number; text:string};
+type FileItem = {
+  id: string | number;
+  name: string;
+  type: string;
+  size: string;
+  views: number;
+  earned: number;
+  status: string;
+  color: string;
+  updated: string;
+  link?: string | null;
+};
+type AccountProfile = { name: string; email: string; picture: string | null };
+type Toast = { id: number; text: string };
 type EventRecord = Awaited<ReturnType<typeof getEvents>>["events"][number];
-type CreatorTicket = Awaited<ReturnType<typeof getCreatorTickets>>["tickets"][number];
-type AdminTicket = Awaited<ReturnType<typeof getAdminTickets>>["tickets"][number];
-type AdminReport = Awaited<ReturnType<typeof getAdminReports>>["reports"][number];
+type CreatorTicket = Awaited<
+  ReturnType<typeof getCreatorTickets>
+>["tickets"][number];
+type AdminTicket = Awaited<
+  ReturnType<typeof getAdminTickets>
+>["tickets"][number];
+type AdminReport = Awaited<
+  ReturnType<typeof getAdminReports>
+>["reports"][number];
 type AdminEvent = Awaited<ReturnType<typeof getAdminEvents>>["events"][number];
 type AdminUser = Awaited<ReturnType<typeof getAdminUsers>>["users"][number];
-type AdminSubscription = Awaited<ReturnType<typeof getAdminSubscriptions>>["subscriptions"][number];
-type AdminPayment = Awaited<ReturnType<typeof getAdminPayments>>["payments"][number];
+type AdminSubscription = Awaited<
+  ReturnType<typeof getAdminSubscriptions>
+>["subscriptions"][number];
+type AdminPayment = Awaited<
+  ReturnType<typeof getAdminPayments>
+>["payments"][number];
 type CreatorAnalyticsData = Awaited<ReturnType<typeof getCreatorAnalytics>>;
 
 function formatSupportTimestamp(value: string) {
@@ -62,463 +139,6863 @@ function formatSupportTimestamp(value: string) {
   });
 }
 
-const userNav = [["Overview","/user/dashboard","◫"],["Upload","/user/upload","↑"],["My Files","/user/files","▱"],["Analytics","/user/analytics","⌁"],["Earnings","/user/earnings","$"],["Withdraw","/user/withdraw","↗"],["Bots & API","/user/bots","⌘"],["Premium","/user/premium","★"],["Events","/user/events","♢"],["Tickets","/user/tickets","?"],["Settings","/user/settings","⚙"]];
-const adminNav = [["Overview","/admin/dashboard","⊞"],["Live charts","/admin/analytics","▥"],["Traffic & load","/admin/traffic","⌁"],["View review queue","/admin/views","◷"],["Creators","/admin/creators","♙"],["Users","/admin/users","◉"],["Admins","/admin/admins","♧"],["Earnings","/admin/earnings","$"],["Payments","/admin/payments","∿"],["Bonuses","/admin/rewards","♙"],["Referral earnings","/admin/referrals","⑂"],["CPM & view rules","/admin/revenue","↗"],["Payout requests","/admin/withdrawals","⇧"],["Videos & files","/admin/files","▱"],["Events & updates","/admin/events","♢"],["Support & feedback","/admin/tickets","□"],["Reports & DMCA","/admin/reports","!"],["Bot activity","/admin/bot-activity","⌘"],["Platform settings","/admin/settings","⚙"]];
-const adminNavGroups = [{label:"ANALYTICS",routes:["/admin/dashboard","/admin/analytics","/admin/traffic","/admin/views"]},{label:"PEOPLE",routes:["/admin/creators","/admin/users","/admin/admins"]},{label:"FINANCE",routes:["/admin/earnings","/admin/payments","/admin/rewards","/admin/referrals","/admin/revenue","/admin/withdrawals"]},{label:"CONTENT",routes:["/admin/files"]},{label:"ENGAGEMENT",routes:["/admin/events","/admin/tickets","/admin/reports"]},{label:"SYSTEM",routes:["/admin/bot-activity","/admin/settings"]}];
+const userNav = [
+  ["Overview", "/user/dashboard", "◫"],
+  ["Upload", "/user/upload", "↑"],
+  ["My Files", "/user/files", "▱"],
+  ["Analytics", "/user/analytics", "⌁"],
+  ["Earnings", "/user/earnings", "$"],
+  ["Withdraw", "/user/withdraw", "↗"],
+  ["Bots & API", "/user/bots", "⌘"],
+  ["Premium", "/user/premium", "★"],
+  ["Events", "/user/events", "♢"],
+  ["Tickets", "/user/tickets", "?"],
+  ["Settings", "/user/settings", "⚙"],
+];
+const adminNav = [
+  ["Overview", "/admin/dashboard", "⊞"],
+  ["Live charts", "/admin/analytics", "▥"],
+  ["Traffic & load", "/admin/traffic", "⌁"],
+  ["View review queue", "/admin/views", "◷"],
+  ["Creators", "/admin/creators", "♙"],
+  ["Users", "/admin/users", "◉"],
+  ["Admins", "/admin/admins", "♧"],
+  ["Earnings", "/admin/earnings", "$"],
+  ["Payments", "/admin/payments", "∿"],
+  ["Bonuses", "/admin/rewards", "♙"],
+  ["Referral earnings", "/admin/referrals", "⑂"],
+  ["CPM & view rules", "/admin/revenue", "↗"],
+  ["Payout requests", "/admin/withdrawals", "⇧"],
+  ["Videos & files", "/admin/files", "▱"],
+  ["Events & updates", "/admin/events", "♢"],
+  ["Support & feedback", "/admin/tickets", "□"],
+  ["Reports & DMCA", "/admin/reports", "!"],
+  ["Bot activity", "/admin/bot-activity", "⌘"],
+  ["Platform settings", "/admin/settings", "⚙"],
+];
+const adminNavGroups = [
+  {
+    label: "ANALYTICS",
+    routes: [
+      "/admin/dashboard",
+      "/admin/analytics",
+      "/admin/traffic",
+      "/admin/views",
+    ],
+  },
+  {
+    label: "PEOPLE",
+    routes: ["/admin/creators", "/admin/users", "/admin/admins"],
+  },
+  {
+    label: "FINANCE",
+    routes: [
+      "/admin/earnings",
+      "/admin/payments",
+      "/admin/rewards",
+      "/admin/referrals",
+      "/admin/revenue",
+      "/admin/withdrawals",
+    ],
+  },
+  { label: "CONTENT", routes: ["/admin/files"] },
+  {
+    label: "ENGAGEMENT",
+    routes: ["/admin/events", "/admin/tickets", "/admin/reports"],
+  },
+  { label: "SYSTEM", routes: ["/admin/bot-activity", "/admin/settings"] },
+];
 
-function routeNow(){ return typeof window === "undefined" ? "/" : window.location.pathname; }
-function money(n:number){ return new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(n); }
-function countryName(code:string){if(code==="ZZ")return "Unknown country";try{return `${new Intl.DisplayNames(["en"],{type:"region"}).of(code)||code} (${code})`}catch{return code}}
-function effectiveCpm(data:Pick<CreatorAnalyticsData,"summary"|"countries">){return data.summary.views>0?data.summary.earningsMicros/1_000_000/data.summary.views*1000:null}
-function configuredCpm(rates:Array<{country:string;cpmCents:number}>){return rates.find(rate=>rate.country==="ZZ")?.cpmCents??1000}
-function displayRateCountry(country:string){return country==="ZZ"?"All countries":countryName(country)}
-function videoStatusLabel(status:string){const normalized=String(status||"").trim().toLowerCase();if(["processing","ready","active","live"].includes(normalized))return "Active";return normalized?normalized.charAt(0).toUpperCase()+normalized.slice(1):"Active"}
-function videoStatusIsActive(status:string){return videoStatusLabel(status)==="Active"}
-function toastGlobal(message:string){if(typeof window!=="undefined")window.alert(message)}
+function routeNow() {
+  return typeof window === "undefined" ? "/" : window.location.pathname;
+}
+function money(n: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(n);
+}
+function countryName(code: string) {
+  if (code === "ZZ") return "Unknown country";
+  try {
+    return `${new Intl.DisplayNames(["en"], { type: "region" }).of(code) || code} (${code})`;
+  } catch {
+    return code;
+  }
+}
+function effectiveCpm(
+  data: Pick<CreatorAnalyticsData, "summary" | "countries">,
+) {
+  return data.summary.views > 0
+    ? (data.summary.earningsMicros / 1_000_000 / data.summary.views) * 1000
+    : null;
+}
+function configuredCpm(rates: Array<{ country: string; cpmCents: number }>) {
+  return rates.find((rate) => rate.country === "ZZ")?.cpmCents ?? 1000;
+}
+function displayRateCountry(country: string) {
+  return country === "ZZ" ? "All countries" : countryName(country);
+}
+function videoStatusLabel(status: string) {
+  const normalized = String(status || "")
+    .trim()
+    .toLowerCase();
+  if (["processing", "ready", "active", "live"].includes(normalized))
+    return "Active";
+  return normalized
+    ? normalized.charAt(0).toUpperCase() + normalized.slice(1)
+    : "Active";
+}
+function videoStatusIsActive(status: string) {
+  return videoStatusLabel(status) === "Active";
+}
+function toastGlobal(message: string) {
+  if (typeof window !== "undefined") window.alert(message);
+}
 
-export default function NightBoxApp(){
-  const [route,setRoute]=useState(()=>{const initial=routeNow();return initial.startsWith("/user")&&typeof window!=="undefined"&&!localStorage.getItem("nightbox-token")?"/auth/login":initial}); const [toasts,setToasts]=useState<Toast[]>([]); const [files,setFiles]=useState<FileItem[]>([]); const [token,setToken]=useState(()=>typeof window!=="undefined"?localStorage.getItem("nightbox-token")||"":""); const [profile,setProfile]=useState<AccountProfile|null>(()=>{if(typeof window==="undefined")return null;try{return JSON.parse(localStorage.getItem("nightbox-profile")||"null") as AccountProfile|null}catch{return null}}); const [adminAuth,setAdminAuth]=useState(()=>typeof window!=="undefined"&&sessionStorage.getItem("nightbox-admin")==="1"); const [menu,setMenu]=useState(false);
-  useEffect(()=>{
-    let handled=false;
-    const onAuthExpired=(event:Event)=>{
-      const scope=(event as CustomEvent<{scope?:string}>).detail?.scope;
-      if((scope!=="creator"&&scope!=="admin")||handled)return;
-      handled=true;
-      if(scope==="admin"){
+export default function NightBoxApp() {
+  const [route, setRoute] = useState(() => {
+    const initial = routeNow();
+    return initial.startsWith("/user") &&
+      typeof window !== "undefined" &&
+      !localStorage.getItem("nightbox-token")
+      ? "/auth/login"
+      : initial;
+  });
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [files, setFiles] = useState<FileItem[]>([]);
+  const [token, setToken] = useState(() =>
+    typeof window !== "undefined"
+      ? localStorage.getItem("nightbox-token") || ""
+      : "",
+  );
+  const [profile, setProfile] = useState<AccountProfile | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      return JSON.parse(
+        localStorage.getItem("nightbox-profile") || "null",
+      ) as AccountProfile | null;
+    } catch {
+      return null;
+    }
+  });
+  const [adminAuth, setAdminAuth] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      sessionStorage.getItem("nightbox-admin") === "1",
+  );
+  const [menu, setMenu] = useState(false);
+  useEffect(() => {
+    let handled = false;
+    const onAuthExpired = (event: Event) => {
+      const scope = (event as CustomEvent<{ scope?: string }>).detail?.scope;
+      if ((scope !== "creator" && scope !== "admin") || handled) return;
+      handled = true;
+      if (scope === "admin") {
         sessionStorage.removeItem("nightbox-admin-token");
         sessionStorage.removeItem("nightbox-admin");
         setAdminAuth(false);
-        const next="/admin/login";
-        history.replaceState({},"",next);
+        const next = "/admin/login";
+        history.replaceState({}, "", next);
         setRoute(next);
         setMenu(false);
-        setToasts(current=>[...current,{id:Date.now(),text:"Admin session expired. Please sign in again."}]);
+        setToasts((current) => [
+          ...current,
+          {
+            id: Date.now(),
+            text: "Admin session expired. Please sign in again.",
+          },
+        ]);
         return;
       }
       localStorage.removeItem("nightbox-token");
       localStorage.removeItem("nightbox-profile");
       setToken("");
       setProfile(null);
-      const next="/auth/login";
-      history.replaceState({},"",next);
+      const next = "/auth/login";
+      history.replaceState({}, "", next);
       setRoute(next);
       setMenu(false);
-      setToasts(current=>[...current,{id:Date.now(),text:"Your session expired. Please sign in again."}]);
+      setToasts((current) => [
+        ...current,
+        { id: Date.now(), text: "Your session expired. Please sign in again." },
+      ]);
     };
-    window.addEventListener("nightbox-auth-expired",onAuthExpired);
-    return()=>window.removeEventListener("nightbox-auth-expired",onAuthExpired);
-  },[]);
-  useEffect(()=>{const h=()=>{const next=routeNow();setRoute(next.startsWith("/user")&&!localStorage.getItem("nightbox-token")?"/auth/login":next);setMenu(false)};window.addEventListener("popstate",h);return()=>window.removeEventListener("popstate",h)},[]);
-  
-// eslint-disable-next-line react-hooks/set-state-in-effect
-useEffect(()=>{if(!token){setFiles([]);return}getCreatorVideos(token).then(({videos})=>{const next=videos.map(v=>({id:v.id,name:v.title,type:"VIDEO",size:v.fileSize?`${(v.fileSize/1024/1024).toFixed(1)} MB`:"Backend record",views:v.eligibleViews,earned:v.earningsMicros/1000000,status:videoStatusLabel(v.status),color:"#2563eb",updated:new Date(v.createdAt).toLocaleDateString(),link:v.link}));setFiles(next)}).catch(()=>setFiles([]))},[token]);
-  const go=(p:string)=>{const next=p.startsWith("/user")&&!localStorage.getItem("nightbox-token")?"/auth/login":p;history.pushState({},"",next);setRoute(next);setMenu(false);window.scrollTo({top:0,behavior:"smooth"})};
-  const toast=(text:string)=>{const id=Date.now();setToasts(t=>[...t,{id,text}]);setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),2800)};
-  const saveFiles=(next:FileItem[])=>{setFiles(next)};
-  const setSession=(nextToken:string,nextProfile?:AccountProfile)=>{setToken(nextToken);localStorage.setItem("nightbox-token",nextToken);if(nextProfile){setProfile(nextProfile);localStorage.setItem("nightbox-profile",JSON.stringify(nextProfile))}};
-  let content;if(route.startsWith("/admin"))content=<AdminApp route={route} go={go} auth={adminAuth} setAuth={setAdminAuth} toast={toast}/>;else if(route.startsWith("/user"))content=<UserApp route={route} go={go} files={files} saveFiles={saveFiles} toast={toast} token={token} profile={profile}/>;else if(route.startsWith("/auth"))content=<LiveAuthPage route={route} go={go} toast={toast} setSession={setSession}/>;else if(route.startsWith("/creator/"))content=<CreatorPublicProfile slug={decodeURIComponent(route.slice("/creator/".length))}/>;else content=<PublicSite route={route} go={go} menu={menu} setMenu={setMenu} toast={toast}/>;
-  return <>{content}<div className="toast-stack">{toasts.map(t=><div className="toast" key={t.id}>✓ {t.text}</div>)}</div></>;
-}
+    window.addEventListener("nightbox-auth-expired", onAuthExpired);
+    return () =>
+      window.removeEventListener("nightbox-auth-expired", onAuthExpired);
+  }, []);
+  useEffect(() => {
+    const h = () => {
+      const next = routeNow();
+      setRoute(
+        next.startsWith("/user") && !localStorage.getItem("nightbox-token")
+          ? "/auth/login"
+          : next,
+      );
+      setMenu(false);
+    };
+    window.addEventListener("popstate", h);
+    return () => window.removeEventListener("popstate", h);
+  }, []);
 
-function Brand({dark=false,go}:{dark?:boolean,go:(p:string)=>void}){return <button className={`brand ${dark?"brand-dark":""}`} onClick={()=>go("/")}><span className="brand-mark"><i/><i/></span><span>Night<span>Box</span></span></button>}
-function Pill({children,tone="blue"}:{children:React.ReactNode,tone?:string}){return <span className={`pill pill-${tone}`}>{children}</span>}
-function Metric({label,value,delta,icon}:{label:string,value:string,delta?:string,icon:string}){return <div className="metric card"><div className="metric-top"><span className="metric-icon">{icon}</span>{delta&&<Pill tone={delta.startsWith("-")?"red":"green"}>{delta}</Pill>}</div><strong>{value}</strong><span>{label}</span></div>}
-
-function PublicSite({route,go,menu,setMenu,toast}:{route:string,go:(p:string)=>void,menu:boolean,setMenu:(v:boolean)=>void,toast:(s:string)=>void}){
-  const pages:Record<string,React.ReactNode>={"/":<Home go={go}/>,"/features":<Features go={go}/>,"/events":<Events/>,"/about":<About go={go}/>,"/contact":<Contact toast={toast}/>,"/faq":<FAQ/>,"/terms":<Legal kind="Terms of Service"/>,"/privacy":<Legal kind="Privacy Policy"/>,"/dmca":<Legal kind="DMCA Policy"/>,"/cookies":<Legal kind="Cookie Policy"/>};
-  return <div className="public-shell"><header className="public-header"><Brand go={go}/><nav className={menu?"open":""}>{[["Features","/features"],["Events","/events"],["About","/about"],["Contact","/contact"],["FAQ","/faq"]].map(x=><button key={x[1]} onClick={()=>go(x[1])}>{x[0]}</button>)}<button className="btn btn-dark nav-login" onClick={()=>go("/auth/login")}>Sign in</button></nav><button className="hamb" onClick={()=>setMenu(!menu)}>☰</button></header>{pages[route]||<NotFound go={go} />}{route==="/"&&<PublicCountryRates go={go}/>}<Footer go={go}/></div>
-}
-
-function PublicCountryRates({go}:{go:(path:string)=>void}){
-  const [rates,setRates]=useState<Array<{country:string;cpmCents:number}>|null>(null);
-  useEffect(()=>{getPublicCpm().then(({rates:current})=>setRates(current)).catch(()=>setRates([]))},[]);
-  return <section className="public-cpm-section" id="public-country-rates"><div className="public-cpm-card"><div className="public-cpm-intro"><Pill tone="orange">TRANSPARENT CREATOR PAYOUTS</Pill><h2>Know the rate before you share.</h2><p>Check the current admin-configured payout rate for each viewer country, without signing in. Rates are shown in USD per 1,000 eligible views.</p><button className="btn btn-primary" onClick={()=>go("/auth/register")}>Start creating <span aria-hidden="true">→</span></button></div><div className="public-cpm-rates"><div className="public-cpm-rate-heading"><div><span>LIVE RATE CARD</span><h3>Country CPM</h3></div><span className="public-cpm-live"><i/> Public · no sign-in</span></div>{rates===null?<p className="public-cpm-state">Loading current rates…</p>:rates.length? <div className="public-cpm-list">{rates.map(rate=><div className="public-cpm-row" key={rate.country}><span><b>{displayRateCountry(rate.country)}</b><small>{rate.country==="ZZ"?"Default rate when no country-specific override is configured":"Rate for eligible views from this country"}</small></span><strong>{money(rate.cpmCents/100)}<small>/ 1,000 views</small></strong></div>)}</div>:<p className="public-cpm-state">Current CPM rates are temporarily unavailable. Please try again shortly.</p>}<small className="public-cpm-footnote">A view must meet NightBox eligibility rules to earn. The default rate applies when no country-specific override exists. Past eligible views keep the rate recorded when they qualified.</small></div></div></section>
-}
-
-function Home({go}:{go:(p:string)=>void}){return <main><section className="hero"><div className="hero-glow g1"/><div className="hero-glow g2"/><div className="hero-copy"><Pill tone="orange">● Built for creators</Pill><h1>Share files.<br/><em>Grow reach.</em><br/>Get rewarded.</h1><p>One polished workspace to upload and share creator videos—while transparent analytics turn qualified attention into creator earnings.</p><div className="hero-actions"><button className="btn btn-primary btn-lg" onClick={()=>go("/auth/register")}>↑ Start for free</button><button className="play-btn">▶</button><span>No card required</span></div><div className="proof-row"><div><b>Country CPM</b><span>server configured</span></div><div><b>2 GB</b><span>upload limit</span></div></div></div><div className="hero-visual"><div className="orbit o1"/><div className="orbit o2"/><div className="float-file ff1"><span className="file-logo">FILE</span><div><b>Your next project</b><small>Ready to share</small></div><Pill tone="green">Secure</Pill></div><div className="float-file ff2"><span className="file-logo orange">MEDIA</span><div><b>Creator workspace</b><small>Backend delivered</small></div></div><div className="earning-card"><span>Creator earnings</span><b>Live ledger</b><small>Server-recorded earnings</small><div className="mini-bars"><i/><i/><i/><i/><i/><i/><i/></div></div><div className="view-chip">◉ Country-aware view tracking</div></div></section><section className="trusted"><span>BUILT FOR MODERN DIGITAL WORK</span><div><b>Designers</b><b>Educators</b><b>Developers</b><b>Filmmakers</b><b>Podcasters</b></div></section><section className="section"><div className="section-title"><Pill>PLATFORM</Pill><h2>Everything your files need.<br/><em>Nothing they don’t.</em></h2><p>Secure storage, elegant delivery and actionable revenue insights in one thoughtful creator platform.</p></div><div className="feature-grid"><FeatureCard icon="↑" title="Upload without friction" text="Video uploads with progress, recovery and format-aware validation up to 4 GB." color="blue"/><FeatureCard icon="↗" title="Share beautifully" text="Clean creator links with backend authorization and reliable global delivery." color="orange"/><FeatureCard icon="$" title="Earn transparently" text="See eligible views, CPM, daily earnings and every wallet movement in one ledger." color="dark"/><FeatureCard icon="⌁" title="Understand your audience" text="Explore qualified traffic by file and country with server-recorded reports." color="light"/></div></section><section className="how section"><div className="section-title left"><Pill tone="orange">HOW IT WORKS</Pill><h2>From upload to income<br/>in three clear steps.</h2></div><div className="steps"><Step n="01" title="Upload your work" text="Drop a video, add a title and send it through the connected backend."/><Step n="02" title="Share your NightLink" text="Publish a clean creator link anywhere—social, communities, your website or direct messages."/><Step n="03" title="Track qualified reach" text="Server-verified views flow into your wallet with transparent analytics."/></div></section><section className="cta-band"><div><Pill tone="orange">YOUR CREATIVE WORKSPACE</Pill><h2>Give every file<br/>a place to perform.</h2><p>Launch your NightBox workspace today. Upload, share and understand what resonates.</p></div><button className="btn btn-white btn-lg" onClick={()=>go("/auth/register")}>Create free workspace →</button></section></main>}
-function FeatureCard({icon,title,text,color}:{icon:string,title:string,text:string,color:string}){return <article className={`feature-card fc-${color}`}><span className="feature-icon">{icon}</span><h3>{title}</h3><p>{text}</p><a>Explore feature →</a></article>}
-function Step({n,title,text}:{n:string,title:string,text:string}){return <article className="step"><b>{n}</b><span/><h3>{title}</h3><p>{text}</p></article>}
-function Features({go}:{go:(p:string)=>void}){const groups:[string,string,string[]][]=[["Cloud storage","Organize every creator video in a private workspace built for reliable delivery.",["Multipart uploads up to 4 GB","Creator-owned files and folders","Separate project storage","Fast CDN-ready playback"]],["Sharing controls","Turn a stored file into a clean link that is easy to publish and safer to operate.",["Creator video links","Server-side authorization","Bunny CDN delivery","Social sharing support"]],["Creator monetization","Understand how qualified attention becomes a transparent earnings record.",["Configurable country CPM rules","File-level revenue records","Server-side earning ledger","Withdrawal request tracking"]],["Performance analytics","See the signals that matter without guessing which views count.",["Qualified views and earnings","Country-level reporting","Per-file performance","Admin revenue controls"]],["Safety and compliance","Responsible distribution controls help protect creators, viewers and the platform.",["Traffic quality checks","Hashed viewer records","Duplicate-view filtering","Account and file moderation"]],["Support and automation","Connect your everyday workflow while keeping access scoped and revocable.",["Telegram upload bots","Creator-scoped API keys","Bot event history","Revocable credentials"]]];return <><PageHero eyebrow="NIGHTBOX FEATURES" title="A complete operating system for shared files." text="From the first upload to the last qualified view, NightBox keeps storage, delivery, insight and control in one workspace."/><section className="section public-detail-intro"><div><Pill tone="orange">ONE CONNECTED WORKFLOW</Pill><h2>Less switching. More control over every file.</h2></div><p>Creators can upload from the dashboard or connected Telegram tools, publish a controlled link, review delivery activity and follow the earning record from one place. Operations teams get the controls needed to manage users, files, view rules and payouts.</p></section><section className="section feature-page-grid">{groups.map((g,i)=><article className="detail-card" key={g[0]}><span>0{i+1}</span><h2>{g[0]}</h2><p>{g[1]}</p><ul>{g[2].map((x:string)=><li key={x}>✓ {x}</li>)}</ul></article>)}</section><section className="section public-detail-split"><div className="detail-card fc-dark"><Pill tone="orange">HOW IT CONNECTS</Pill><h2>Upload once. Deliver everywhere.</h2><p>Files are recorded by the NightBox backend, delivered through the configured storage and CDN path, and represented in the creator dashboard with live status and share controls.</p></div><div className="detail-card"><Pill>BUILT FOR CLARITY</Pill><h2>Every important action has a place.</h2><p>Creators get storage, links, analytics, earnings, support and bot access. Administrators get moderation, revenue, withdrawal and platform health controls.</p></div></section><section className="mini-cta"><h2>Ready to move your files forward?</h2><button className="btn btn-primary" onClick={()=>go("/auth/register")}>Start for free →</button></section></>}
-function Events(){const [events,setEvents]=useState<EventRecord[]>([]);useEffect(()=>{getEvents().then(x=>setEvents(Array.isArray(x.events)?x.events:[])).catch(()=>setEvents([]))},[]);return <><PageHero eyebrow="EVENTS HUB" title="Creator events with a clear path to participate." text="Discover campaigns published by NightBox operations, understand the reward terms and follow your progress from the workspace."/><section className="section public-detail-intro"><div><Pill tone="orange">HOW EVENTS WORK</Pill><h2>Find a campaign, create consistently and track the result.</h2></div><p>Events are published by operations with a title, description, dates and reward information. Your creator workspace keeps the relevant activity visible while the backend records eligible views and milestone progress.</p></section><section className="section"><div className="event-grid">{events.length?events.map(event=><article className="card detail-card" key={event.id}><span>{event.startsAt?new Date(event.startsAt).toLocaleDateString():"ACTIVE"}</span><h2>{event.title}</h2><p>{event.description}</p>{event.rewardNote&&<small>{event.rewardNote}</small>}<div className="event-card-meta"><b>Published campaign</b><span>Check the event terms in your workspace before sharing.</span></div></article>):<div className="card empty-state"><h2>No active events right now</h2><p>New campaigns will appear here when published by NightBox operations. Check back from time to time or create your workspace to receive event updates.</p></div>}</div></section><section className="section public-detail-split"><div className="detail-card"><Pill>PARTICIPATE</Pill><h2>Build your audience responsibly.</h2><p>Use your own content, share it with the right audience and avoid artificial traffic. Event rewards depend on the eligibility rules shown for each campaign.</p></div><div className="detail-card fc-orange"><Pill tone="orange">TRACK PROGRESS</Pill><h2>Milestones stay understandable.</h2><p>Qualified views, activity and reward milestones are handled by the connected backend so creators can focus on publishing rather than manual counting.</p></div></section></>}
-function About({go}:{go:(p:string)=>void}){return <><PageHero eyebrow="ABOUT NIGHTBOX" title="Creators deserve more than a download button." text="NightBox is building a safer, clearer way to distribute digital work and understand its real reach."/><section className="section"><div className="story"><div><Pill>OUR MISSION</Pill><h2>Make digital distribution work for the people who create value.</h2></div><div><p>Traditional file hosting treats a creator&apos;s work like anonymous storage. NightBox treats every shared file as a living digital asset with context, protection, analytics and earning potential.</p><p>We are focused on thoughtful product design, transparent reporting and infrastructure that stays dependable when a link travels far. That means clear ownership, useful controls and fewer surprises for creators and their audiences.</p><button className="btn btn-dark" onClick={()=>go("/auth/register")}>Join NightBox →</button></div></div></section><section className="section public-detail-intro"><div><Pill tone="orange">WHAT WE BELIEVE</Pill><h2>Good infrastructure should feel understandable.</h2></div><p>Storage, delivery, analytics and earnings can become complicated quickly. NightBox brings those pieces together with straightforward screens, server-recorded decisions and access controls that are visible when they matter.</p></section><section className="section about-values"><article className="detail-card"><span>01</span><h2>Creator ownership</h2><p>Your files, links and workspace activity are organized around the creator account that owns them.</p></article><article className="detail-card"><span>02</span><h2>Measured delivery</h2><p>Qualified views and country rules are recorded by the backend instead of being estimated from a presentation-only dashboard.</p></article><article className="detail-card"><span>03</span><h2>Responsible growth</h2><p>Traffic quality, moderation, support and revocable integrations are part of the product, not an afterthought.</p></article></section><section className="section about-principles"><div><Pill tone="orange">OUR PROMISE</Pill><h2>Build for the moment after the link is shared.</h2><p>NightBox is designed for real workflows: a creator uploads a file, a viewer opens it, the system records meaningful activity and the creator can understand what happened. We keep improving that loop without hiding the operational details.</p></div><div className="about-principle-list"><span><b>Clear by default</b>Useful status, ownership and next steps.</span><span><b>Secure by design</b>Scoped access and server-side controls.</span><span><b>Ready to grow</b>Infrastructure that can expand with creator demand.</span></div></section></>}
-function Contact({toast}:{toast:(s:string)=>void}){const submit=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const form=new FormData(e.currentTarget);try{await sendContactMessage({name:String(form.get("name")),email:String(form.get("email")),subject:String(form.get("subject")),message:String(form.get("message"))});toast("Message received by NightBox support");e.currentTarget.reset()}catch(error){toast(error instanceof Error?error.message:"Unable to send message")}};return <><PageHero eyebrow="CONTACT" title="Let’s solve it together." text="Questions, content reports, partnerships or support—we’ll route your message to the right team."/><section className="section contact-grid"><div><h2>Choose the right channel</h2>{[["General support","Use the contact form below"],["Legal & DMCA","legal@nightbox.cloud"],["Advertising","partners@nightbox.cloud"]].map(x=><div className="contact-line" key={x[0]}><span>↗</span><div><b>{x[0]}</b><small>{x[1]}</small></div></div>)}</div><form className="form-card" onSubmit={submit}><div className="two"><label>Name<input name="name" required placeholder="Your full name"/></label><label>Email<input name="email" required type="email" placeholder="you@example.com"/></label></div><label>Subject<input name="subject" required placeholder="What is this about?"/></label><label>Message<textarea name="message" required rows={6} placeholder="Tell us how we can help…"/></label><button className="btn btn-primary" type="submit">Send message →</button></form></section></>}
-function FAQ(){const [open,setOpen]=useState(0);const q=[["What is NightBox?","NightBox is a creator-focused cloud platform for storing, sharing and monetizing creator videos."],["Which file types can I upload?","Creator video uploads up to 4 GB are supported through the connected backend and Telegram upload services."],["How are earnings calculated?","Revenue is based on eligible views. The applicable CPM is selected server-side from the viewer country and locked when the view qualifies."],["What is the minimum withdrawal?","The minimum withdrawal threshold is configured by operations and enforced by the backend."],["Can I protect a share link?","Share links pass through backend authorization and view-quality checks. Video delivery depends on the configured Bunny Stream service."],["How does the Telegram bot work?","Users create a revocable API key from Bots & API, connect the upload bot and manage remote uploads from their dashboard."]];return <><PageHero eyebrow="HELP CENTER" title="Answers without the runaround." text="Clear guidance on accounts, files, monetization, security and payouts."/><section className="section faq-list">{q.map((x,i)=><button onClick={()=>setOpen(open===i?-1:i)} className={open===i?"active":""} key={x[0]}><span>{x[0]}</span><b>{open===i?"−":"+"}</b>{open===i&&<p>{x[1]}</p>}</button>)}</section></>}
-function DmcaForm(){const [busy,setBusy]=useState(false);const [sent,setSent]=useState(false);const submit=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();setBusy(true);const form=new FormData(e.currentTarget);try{await submitDmcaReport({name:String(form.get("name")),email:String(form.get("email")),videoUrl:String(form.get("videoUrl")),reason:String(form.get("reason"))});setSent(true);e.currentTarget.reset()}catch(error){toastGlobal(error instanceof Error?error.message:"Unable to submit report")}finally{setBusy(false)}};return <div className="card form-card"><h2>Submit a DMCA report</h2><p>Use this form for a specific infringement notice. Reports are reviewed by the trust and safety team.</p>{sent&&<p className="success-copy">Report received. Our team will review it.</p>}<form onSubmit={submit}><div className="two"><label>Name<input name="name" required/></label><label>Email<input name="email" required type="email"/></label></div><label>Video or link<input name="videoUrl" required type="url" placeholder="https://..."/></label><label>Reason<textarea name="reason" required rows={4}/></label><button className="btn btn-primary" disabled={busy}>{busy?"Submitting…":"Submit report →"}</button></form></div>}
-function Legal({kind}:{kind:string}){const all:Record<string,string[]>={"Terms of Service":["Using NightBox","Your account and content","Storage and availability","Creator revenue program","Withdrawals and adjustments","Acceptable use","Suspension and termination"],"Privacy Policy":["Information we collect","How information is used","Sharing and service providers","Data retention","Your rights","Security measures","International processing"],"DMCA Policy":["Reporting infringement","Required notice information","Counter-notice process","Three-strike policy","Restoration timeline","Misrepresentation","Contacting our legal team"],"Cookie Policy":["Essential cookies","Preferences","Analytics","Advertising","Managing consent","Retention","Policy updates"]};const blocks=all[kind]||[];return <><PageHero eyebrow="LEGAL · UPDATED AUGUST 2026" title={kind} text={`This ${kind.toLowerCase()} explains the standards that keep NightBox clear, safe and dependable.`}/>{kind==="DMCA Policy"&&<section className="section"><DmcaForm/></section>}<section className="section legal-layout"><aside>{blocks.map((x,i)=><a key={x}>0{i+1} {x}</a>)}</aside><article>{blocks.map((x,i)=><section key={x}><h2>{i+1}. {x}</h2><p>NightBox is designed to provide secure file storage, controlled sharing, analytics and creator monetization. By using the service, you agree to provide accurate information, respect intellectual property rights and avoid fraudulent or harmful activity.</p><p>Operational limits, eligibility and processing timelines are shown clearly inside the product. We may review reports, restrict content or hold transactions when necessary to protect users, advertisers and the integrity of the platform.</p></section>)}</article></section></>}
-function PageHero({eyebrow,title,text}:{eyebrow:string,title:string,text:string}){const visualClass=`page-hero-${eyebrow.toLowerCase().replaceAll(" ","-")}`;return <section className={`page-hero ${visualClass}`}><Pill tone="orange">{eyebrow}</Pill><h1>{title}</h1><p>{text}</p></section>}
-function Footer({go}:{go:(p:string)=>void}){return <footer><div className="footer-main"><div><Brand dark go={go}/><p>Secure cloud delivery, meaningful analytics and transparent creator earnings.</p></div><div><b>Product</b><button onClick={()=>go("/features")}>Features</button><button onClick={()=>go("/events")}>Events</button></div><div><b>Resources</b><button onClick={()=>go("/faq")}>FAQ</button><button onClick={()=>go("/contact")}>Contact</button></div><div><b>Legal</b><button onClick={()=>go("/terms")}>Terms</button><button onClick={()=>go("/privacy")}>Privacy</button><button onClick={()=>go("/dmca")}>DMCA</button><button onClick={()=>go("/cookies")}>Cookies</button></div></div><div className="footer-bottom"><span>© 2026 NightBox Technologies. All rights reserved.</span><span><i/> Platform status</span></div></footer>}
-
-function LiveAuthPage({route,go,toast,setSession}:{route:string,go:(p:string)=>void,toast:(s:string)=>void,setSession:(token:string,profile?:AccountProfile)=>void}){
-  const isRegister=route.includes("register");
-  const [googleBusy,setGoogleBusy]=useState(false);
-  const signInWithGoogle=async(credential:string)=>{
-    setGoogleBusy(true);
-    try{
-      const result=await loginWithGoogle(credential);
-      setSession(result.token,{name:result.user.name||result.user.email.split("@")[0],email:result.user.email,picture:result.user.picture||null});toast(isRegister?"Workspace ready":"Signed in with Google");setTimeout(()=>go("/user/dashboard"),300)
-    }catch(error){toast(error instanceof Error?error.message:"Google sign-in failed")}
-    finally{setGoogleBusy(false)}
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => {
+    if (!token) {
+      setFiles([]);
+      return;
+    }
+    getCreatorVideos(token)
+      .then(({ videos }) => {
+        const next = videos.map((v) => ({
+          id: v.id,
+          name: v.title,
+          type: "VIDEO",
+          size: v.fileSize
+            ? `${(v.fileSize / 1024 / 1024).toFixed(1)} MB`
+            : "Backend record",
+          views: v.eligibleViews,
+          earned: v.earningsMicros / 1000000,
+          status: videoStatusLabel(v.status),
+          color: "#2563eb",
+          updated: new Date(v.createdAt).toLocaleDateString(),
+          link: v.link,
+        }));
+        setFiles(next);
+      })
+      .catch(() => setFiles([]));
+  }, [token]);
+  const go = (p: string) => {
+    const next =
+      p.startsWith("/user") && !localStorage.getItem("nightbox-token")
+        ? "/auth/login"
+        : p;
+    history.pushState({}, "", next);
+    setRoute(next);
+    setMenu(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
-  return <div className="auth-shell"><div className="auth-art"><Brand dark go={go}/><div className="auth-message"><Pill tone="orange">CREATOR CLOUD</Pill><h1>Your work.<br/>Shared on your terms.</h1><p>Store, distribute and understand every file from one secure workspace.</p></div></div><div className="auth-form-wrap"><button className="back" onClick={()=>go("/")}>← Back to website</button><section className="auth-form" aria-labelledby="creator-auth-title"><h2 id="creator-auth-title">{isRegister?"Create your workspace":"Welcome back"}</h2><p>{isRegister?"Sign up securely with your Google account.":"Sign in securely with your Google account."}</p><GoogleSignInButton mode={isRegister?"signup":"signin"} onCredential={signInWithGoogle}/>{googleBusy&&<small className="google-signin-loading" role="status">Verifying Google account…</small>}<small className="google-signin-switch">{isRegister?"Already have an account? ":"New to NightBox? "}<button type="button" onClick={()=>go(isRegister?"/auth/login":"/auth/register")}>{isRegister?"Sign in with Google":"Sign up with Google"}</button></small></section></div></div>
-}
-
-function LiveUpload({files,saveFiles,toast,token}:{files:FileItem[],saveFiles:(x:FileItem[])=>void,toast:(s:string)=>void,token:string}){const [file,setFile]=useState<File|null>(null);const [name,setName]=useState("");const [busy,setBusy]=useState(false);const [progress,setProgress]=useState(0);const choose=(next:File|null)=>{if(!next)return;const allowed=next.type.startsWith("video/")||/\.(mp4|m4v|mkv|webm|avi|flv|mov|wmv|3gp|mpeg|mpg|ts|ogv)$/i.test(next.name);if(!allowed){toast("Please choose a valid video file (MP4, MKV, MOV, WebM, AVI, or similar).");return}if(next.size>2*1024*1024*1024){toast("Video must be 2 GB or smaller.");return}setFile(next);setProgress(0);if(!name)setName(next.name)};const submit=async()=>{if(!file){toast("Choose a video file first");return}if(!token){toast("Please sign in before uploading");return}setBusy(true);setProgress(0);try{const result=await uploadVideo(file,name,token,setUploadProgress=>setProgress(setUploadProgress.percent));const item:FileItem={id:result.videoId,name:name||file.name,type:file.name.split(".").pop()?.toUpperCase()||"VIDEO",size:`${(file.size/1024/1024).toFixed(1)} MB`,views:0,earned:0,status:"Processing",color:"#2563eb",updated:"Just now",link:null};saveFiles([item,...files]);toast("Upload received. Processing and admin approval are required before the playable link is released.");setFile(null);setName("");setProgress(0)}catch(error){toast(error instanceof Error?error.message:"Upload failed")}finally{setBusy(false)}};return <><AppTitle eyebrow="FILE DELIVERY" title="Upload a new video"/><div className="upload-layout"><div className="card upload-card"><div className="dropzone"><span>↑</span><h3>{file?.name||"Choose a video file"}</h3><label className="btn btn-dark">Browse files<input type="file" accept="video/*,.mkv,.avi,.mov,.m4v,.webm" hidden disabled={busy} onChange={e=>{choose(e.target.files?.[0]||null);e.currentTarget.value=""}}/></label><small>Video uploads up to 2 GB are sent directly to the connected NightBox backend.</small>{busy&&<div className="upload-progress" role="status" aria-live="polite"><div className="upload-progress-track"><i style={{width:`${Math.max(progress,2)}%`}}/></div><span>{progress?`Uploading ${progress}%…`:"Preparing upload…"}</span></div>}</div><div className="upload-fields"><label>Display name<input value={name} disabled={busy} onChange={e=>setName(e.target.value)} placeholder="Video title"/></label><button className="btn btn-primary" disabled={busy||!token||!file} onClick={submit}>{!token?"Sign in to upload":busy?`Uploading ${progress}%…`:"Upload to backend →"}</button></div></div></div></>}
-
-function UserApp({route,go,files,saveFiles,toast,token,profile}:{route:string,go:(p:string)=>void,files:FileItem[],saveFiles:(x:FileItem[])=>void,toast:(s:string)=>void,token:string,profile:AccountProfile|null}){const [drawerOpen,setDrawerOpen]=useState(false);const [sidebarCollapsed,setSidebarCollapsed]=useState(false);const navigate=(p:string)=>{setDrawerOpen(false);go(p)};const openSidebar=()=>{setSidebarCollapsed(false);setDrawerOpen(true)};return <div className={`app-shell ${sidebarCollapsed?"sidebar-collapsed":""}`}><Sidebar nav={userNav} route={route} go={navigate} admin={false} open={drawerOpen} close={()=>setDrawerOpen(false)} collapsed={sidebarCollapsed} toggleCollapse={()=>setSidebarCollapsed(value=>!value)}/><div className="app-main"><Topbar go={navigate} admin={false} profile={profile} onMenu={openSidebar}/><div className="app-content">{route==="/user/dashboard"&&<UserOverview go={navigate} files={files} token={token} toast={toast}/>} {route==="/user/upload"&&<LiveUpload files={files} saveFiles={saveFiles} toast={toast} token={token}/>} {route==="/user/files"&&<FilesTable files={files} saveFiles={saveFiles} toast={toast} token={token} go={navigate}/>} {route==="/user/analytics"&&<Analytics token={token}/>} {route==="/user/earnings"&&<Earnings token={token}/>} {route==="/user/withdraw"&&<LiveWithdrawal token={token} toast={toast}/>} {route==="/user/premium"&&<PremiumStatus/>} {route==="/user/events"&&<LiveUserEvents token={token} toast={toast}/>} {route==="/user/tickets"&&<LiveTickets token={token} toast={toast}/>} {route==="/user/bots"&&<LiveBots token={token} toast={toast}/>} {route==="/user/settings"&&<LiveSettings/>}</div></div></div>}
-function NavIcon({route}:{route:string}){
-  const common={fill:"none",stroke:"currentColor",strokeWidth:1.8,strokeLinecap:"round" as const,strokeLinejoin:"round" as const};
-  const icons:Record<string,React.ReactNode>={
-    "/user/dashboard":<><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></>,
-    "/admin/dashboard":<><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></>,
-    "/user/upload":<><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M5 20h14"/></>,
-    "/user/files":<><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21z"/><path d="M4 5.5v13A2.5 2.5 0 0 1 6.5 16H20"/></>,
-    "/user/analytics":<><path d="M3 3v18h18"/><path d="m7 14 4-4 3 3 6-7"/></>,
-    "/admin/analytics":<><path d="M3 3v18h18"/><path d="m7 14 4-4 3 3 6-7"/></>,
-    "/admin/traffic":<><path d="M4 19V5"/><path d="M4 19h17"/><path d="m7 15 4-4 3 2 6-7"/></>,
-    "/user/earnings":<><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></>,
-    "/admin/earnings":<><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></>,
-    "/user/withdraw":<><path d="M7 17 17 7"/><path d="M8 7h9v9"/><path d="M4 20h16"/></>,
-    "/user/premium":<><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></>,
-    "/user/events":<><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></>,
-    "/user/tickets":<><path d="M21 15a4 4 0 0 1-4 4H7l-4 2V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></>,
-    "/user/bots":<><rect x="5" y="7" width="14" height="13" rx="3"/><path d="M12 3v4M9 12h.01M15 12h.01M9 16h6M3 11v5M21 11v5"/></>,
-    "/user/settings":<><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.7-.7a8 8 0 0 1-1.7 1l-.3 1.8h-2.8l-.3-1.8a8 8 0 0 1-1.7-1l-1.7.7-1.4-2.4L7.3 15a8 8 0 0 1 0-2l-1.4-1.1 1.4-2.4 1.7.7a8 8 0 0 1 1.7-1l.3-1.8h2.8l.3 1.8a8 8 0 0 1 1.7 1l1.7-.7 1.4 2.4-1.4 1.1a8 8 0 0 1-.1 2z"/></>,
-    "/admin/users":<><path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M20 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></>,
-    "/admin/creators":<><path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="m19 8 1.5 1.5L23 7"/></>,
-    "/admin/admins":<><circle cx="9" cy="8" r="4"/><path d="M3 21v-2a6 6 0 0 1 12 0v2M19 8v6M16 11h6"/></>,
-    "/admin/payments":<><path d="M3 7h18v13H3z"/><path d="M3 10h18M7 15h4"/><path d="M6 7V4h14"/></>,
-    "/admin/rewards":<><rect x="3" y="8" width="18" height="13" rx="2"/><path d="M12 8v13M3 12h18M12 8H7a3 3 0 1 1 3-3zM12 8h5a3 3 0 1 0-3-3z"/></>,
-    "/admin/referrals":<><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.5 8.5 15.5 15.5M18 3v5h-5"/></>,
-    "/admin/revenue":<><path d="M4 19V5"/><path d="M4 19h17"/><path d="m7 15 4-4 3 2 6-7"/></>,
-    "/admin/withdrawals":<><path d="M12 3v12m-5-5 5 5 5-5"/><path d="M4 20h16"/></>,
-    "/admin/files":<><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21z"/><path d="M4 5.5v13A2.5 2.5 0 0 1 6.5 16H20"/></>,
-    "/admin/events":<><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></>,
-    "/admin/tickets":<><path d="M21 15a4 4 0 0 1-4 4H7l-4 2V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></>,
-    "/admin/reports":<><path d="M12 3 2.8 19a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3z"/><path d="M12 9v4m0 4h.01"/></>,
-    "/admin/views":<><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></>,
-    "/admin/bot-activity":<><rect x="5" y="7" width="14" height="13" rx="3"/><path d="M12 3v4M9 12h.01M15 12h.01M9 16h6"/></>,
-    "/admin/settings":<><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.7-.7a8 8 0 0 1-1.7 1l-.3 1.8h-2.8l-.3-1.8a8 8 0 0 1-1.7-1l-1.7.7-1.4-2.4L7.3 15a8 8 0 0 1 0-2l-1.4-1.1 1.4-2.4 1.7.7a8 8 0 0 1 1.7-1l.3-1.8h2.8l.3 1.8a8 8 0 0 1 1.7 1l1.7-.7 1.4 2.4-1.4 1.1a8 8 0 0 1-.1 2z"/></>
+  const toast = (text: string) => {
+    const id = Date.now();
+    setToasts((t) => [...t, { id, text }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2800);
   };
-  return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true" {...common}>{icons[route]||<circle cx="12" cy="12" r="8"/>}</svg>;
+  const saveFiles = (next: FileItem[]) => {
+    setFiles(next);
+  };
+  const setSession = (nextToken: string, nextProfile?: AccountProfile) => {
+    setToken(nextToken);
+    localStorage.setItem("nightbox-token", nextToken);
+    if (nextProfile) {
+      setProfile(nextProfile);
+      localStorage.setItem("nightbox-profile", JSON.stringify(nextProfile));
+    }
+  };
+  let content;
+  if (route.startsWith("/admin"))
+    content = (
+      <AdminApp
+        route={route}
+        go={go}
+        auth={adminAuth}
+        setAuth={setAdminAuth}
+        toast={toast}
+      />
+    );
+  else if (route.startsWith("/user"))
+    content = (
+      <UserApp
+        route={route}
+        go={go}
+        files={files}
+        saveFiles={saveFiles}
+        toast={toast}
+        token={token}
+        profile={profile}
+      />
+    );
+  else if (route.startsWith("/auth"))
+    content = (
+      <LiveAuthPage
+        route={route}
+        go={go}
+        toast={toast}
+        setSession={setSession}
+      />
+    );
+  else if (route.startsWith("/creator/"))
+    content = (
+      <CreatorPublicProfile
+        slug={decodeURIComponent(route.slice("/creator/".length))}
+      />
+    );
+  else
+    content = (
+      <PublicSite
+        route={route}
+        go={go}
+        menu={menu}
+        setMenu={setMenu}
+        toast={toast}
+      />
+    );
+  return (
+    <>
+      {content}
+      <div className="toast-stack">
+        {toasts.map((t) => (
+          <div className="toast" key={t.id}>
+            ✓ {t.text}
+          </div>
+        ))}
+      </div>
+    </>
+  );
 }
-function Sidebar({nav,route,go,admin,open,close,collapsed,toggleCollapse}:{nav:string[][],route:string,go:(p:string)=>void,admin:boolean,open:boolean,close:()=>void,collapsed:boolean,toggleCollapse:()=>void}){const leave=()=>{if(admin){sessionStorage.removeItem("nightbox-admin-token");sessionStorage.removeItem("nightbox-admin")}else{localStorage.removeItem("nightbox-token");localStorage.removeItem("nightbox-profile")}go(admin?"/admin/login":"/")};const renderLink=(x:string[])=><button className={route===x[1]?"active":""} key={x[1]} onClick={()=>go(x[1])}><i><NavIcon route={x[1]}/></i><span>{x[0]}</span></button>;const handleClose=()=>{toggleCollapse();close()};return <><button className={`drawer-scrim ${open?"visible":""}`} aria-label="Close menu" onClick={close}/><aside className={`sidebar ${admin?"admin-side":""} ${open?"drawer-open":""} ${collapsed?"sidebar-collapsed":""}`}><div className="sidebar-head"><Brand dark go={go}/><button className="drawer-close" aria-label={collapsed?"Open sidebar":"Close sidebar"} title={collapsed?"Open sidebar":"Close sidebar"} onClick={handleClose}>×</button></div>{admin&&<Pill tone="orange">ADMIN</Pill>}<nav>{admin?adminNavGroups.map(group=><section className="sidebar-group" key={group.label}><span>{group.label}</span>{group.routes.map(path=>{const item=nav.find(x=>x[1]===path);return item?renderLink(item):null})}</section>):nav.map(renderLink)}</nav><div className="side-bottom"><div className="storage"><span><b>{admin?"Server capacity":"Your storage"}</b><small>{admin?"Configured in deployment":"Reported by backend"}</small></span><i><em style={{width:"0%"}}/></i></div><button onClick={leave}>↪ Log out</button></div></aside></>}
-function Topbar({go,admin,profile,onMenu}:{go:(p:string)=>void,admin:boolean,profile?:AccountProfile|null,onMenu:()=>void}){const [searchOpen,setSearchOpen]=useState(false);const [quickOpen,setQuickOpen]=useState(false);const [query,setQuery]=useState("");const displayName=profile?.name||profile?.email||"Signed-in creator";const initials=displayName.split(/\s+/).map(part=>part[0]).join("").slice(0,2).toUpperCase()||"CR";const profileStyle=profile?.picture?{backgroundImage:`url(${JSON.stringify(profile.picture)})`}:undefined;const nav=admin?adminNav:userNav;const results=nav.filter(item=>item[0].toLowerCase().includes(query.trim().toLowerCase()));const closeSearch=()=>{setSearchOpen(false);setQuery("")};const openRoute=(path:string)=>{closeSearch();setQuickOpen(false);go(path)};const handleSearchKey=(event:React.KeyboardEvent<HTMLInputElement>)=>{if(event.key==="Escape")closeSearch();if(event.key==="Enter"&&results[0])openRoute(results[0][1])};const logout=()=>{if(admin){sessionStorage.removeItem("nightbox-admin-token");sessionStorage.removeItem("nightbox-admin")}else{localStorage.removeItem("nightbox-token");localStorage.removeItem("nightbox-profile")}go(admin?"/admin/login":"/auth/login")};return <header className="topbar"><button className="app-menu" aria-label="Open navigation menu" onClick={onMenu}>☰</button><div><span>{admin?"NightBox Operations":"Creator workspace"}</span><b>{admin?"Connected":"Connected"}<i/></b></div><div className="topbar-actions"><div className="topbar-inline-search"><span aria-hidden="true">⌕</span><input value={query} onFocus={()=>{setSearchOpen(true);setQuickOpen(false)}} onChange={event=>{setQuery(event.target.value);setSearchOpen(true);setQuickOpen(false)}} onKeyDown={handleSearchKey} placeholder="Search dashboard..." aria-label="Search dashboard pages"/>{query&&<button type="button" aria-label="Clear dashboard search" onClick={closeSearch}>×</button>}</div><button className="icon-btn topbar-search-toggle" aria-label={searchOpen?"Close dashboard search":"Search dashboard"} aria-expanded={searchOpen} onClick={()=>{if(searchOpen)closeSearch();else{setSearchOpen(true);setQuickOpen(false)}}}>{searchOpen?"×":"⌕"}</button><button className="icon-btn" aria-label="Open quick actions" aria-expanded={quickOpen} onClick={()=>{setQuickOpen(value=>!value);setSearchOpen(false)}}>♢</button><button className="avatar" onClick={()=>openRoute(admin?"/admin/settings":"/user/settings")} aria-label={`${displayName} account`}>{!admin&&profile?.picture?<span className="avatar-image" role="img" aria-label="Google profile" style={profileStyle}/>:admin?"OA":initials}</button><span className="user-name"><b>{admin?"Operations admin":displayName}</b><small>{admin?"Server-authorized":profile?.email||"Google account"}</small></span><button className="logout-btn" onClick={logout}>Log out</button>{searchOpen&&<div className="topbar-panel topbar-search-panel"><div className="topbar-search-results">{results.length?results.map(item=><button key={item[1]} onClick={()=>openRoute(item[1])}><span>{item[2]}</span><b>{item[0]}</b><small>{item[1]}</small></button>):<p>No matching dashboard page.</p>}</div></div>}{quickOpen&&<div className="topbar-panel quick-actions-panel"><b className="quick-actions-title">Quick actions</b>{(admin?[["♙","Review users","/admin/users"],["▱","Manage files","/admin/files"],["⚙","Open settings","/admin/settings"]]:[["↑","Upload a video","/user/upload"],["▱","Open my files","/user/files"],["⚙","Open settings","/user/settings"]]).map(item=><button key={item[2]} onClick={()=>openRoute(item[2])}><span>{item[0]}</span><b>{item[1]}</b></button>)}</div>}</div></header>}
-function AppTitle({eyebrow,title,action}:{eyebrow:string,title:string,action?:React.ReactNode}){return <div className="app-title"><div><span>{eyebrow}</span><h1>{title}</h1></div>{action}</div>}
-function LiveTickets({token,toast}:{token:string;toast:(s:string)=>void}){const [rows,setRows]=useState<CreatorTicket[]>([]);const [subject,setSubject]=useState("");const [message,setMessage]=useState("");const [drafts,setDrafts]=useState<Record<string,string>>({});const [loading,setLoading]=useState(true);const [sending,setSending]=useState<string|null>(null);const load=async()=>{try{const result=await getCreatorTickets(token);setRows(result.tickets)}catch{setRows([])}finally{setLoading(false)}};
-useEffect(()=>{void Promise.resolve().then(load)},[token]);const submit=async(e:React.FormEvent)=>{e.preventDefault();try{await createCreatorTicket(token,subject,message);setSubject("");setMessage("");toast("Support ticket sent. Replies will appear below.");await load()}catch(error){toast(error instanceof Error?error.message:"Unable to create ticket")}};const sendReply=async(row:CreatorTicket)=>{const reply=(drafts[row.id]||"").trim();if(!reply)return;setSending(row.id);try{await replyToCreatorTicket(token,row.id,reply);setDrafts(current=>({...current,[row.id]:""}));toast("Reply sent to support");await load()}catch(error){toast(error instanceof Error?error.message:"Unable to send reply")}finally{setSending(null)}};return <><AppTitle eyebrow="SUPPORT" title="Support tickets"/><form className="card compact-form ticket-form" onSubmit={submit}><h2>Open a ticket</h2><p className="form-intro">Tell our team what you need. Your message and every reply stay together below.</p><label>Subject<input required value={subject} onChange={e=>setSubject(e.target.value)}/></label><label>Message<textarea required rows={4} value={message} onChange={e=>setMessage(e.target.value)}/></label><button className="btn btn-primary">Send to support</button></form><section className="tickets-history"><div className="tickets-history-heading"><div><span>YOUR CONVERSATIONS</span><h2>Messages & replies</h2></div><button className="btn btn-outline" onClick={()=>{setLoading(true);void load()}}>Refresh</button></div>{loading?<div className="card tickets-empty">Loading your support conversations…</div>:rows.length?rows.map(row=>{const messages=row.messages?.length?row.messages:[{authorType:"creator" as const,message:row.message,createdAt:row.createdAt},...(row.adminNote?[{authorType:"admin" as const,message:row.adminNote,createdAt:row.updatedAt}]:[])];const closed=["resolved","closed"].includes(row.status.toLowerCase());return <article className="card ticket-conversation" key={row.id}><header><div><span className="ticket-subject">{row.subject}</span><small>Sent {new Date(row.createdAt).toLocaleString()}</small></div><span className={`ticket-status status-${row.status.toLowerCase().replace(/[^a-z]+/g,"-")}`}>{row.status.replaceAll("_"," ")}</span></header><div className="ticket-thread">{messages.map((item,index)=><div className={item.authorType==="admin"?"ticket-reply":"ticket-message"} key={item.id||`${row.id}-${index}`}><span>{item.authorType==="admin"?<><i aria-hidden="true">N</i> NightBox support</>:"Your message"}<small>{new Date(item.createdAt).toLocaleString()}</small></span><p>{item.message}</p></div>)}</div>{closed?<div className="ticket-waiting">This ticket is closed. Please open a new ticket if you need further help.</div>:<div className="ticket-reply-form"><label htmlFor={`reply-${row.id}`}>Reply to support</label><textarea id={`reply-${row.id}`} rows={3} maxLength={5000} value={drafts[row.id]||""} onChange={e=>setDrafts(current=>({...current,[row.id]:e.target.value}))} placeholder="Write your reply…"/><button className="btn btn-primary" disabled={sending===row.id||!(drafts[row.id]||"").trim()} onClick={()=>void sendReply(row)}>{sending===row.id?"Sending…":"Send reply"}</button></div>}</article>}):<div className="card tickets-empty"><b>No support messages yet</b><span>When you send a ticket, your message and every reply from NightBox support will appear here.</span></div>}</section></>}
-function LiveSettings(){const token=typeof window!=="undefined"?localStorage.getItem("nightbox-token"):null;const [profile,setProfile]=useState<Awaited<ReturnType<typeof getCreatorProfile>>["profile"]|null>(null);const [status,setStatus]=useState("");useEffect(()=>{if(token)getCreatorProfile(token).then(data=>setProfile(data.profile)).catch(()=>setStatus("Unable to load creator profile"))},[token]);const save=async(event:React.FormEvent)=>{event.preventDefault();if(!token||!profile)return;try{const result=await updateCreatorProfile(token,{displayName:profile.displayName,bio:profile.bio,avatarUrl:profile.avatarUrl,brandColor:profile.brandColor});setProfile(result.profile);setStatus("Profile and branding saved") }catch(error){setStatus(error instanceof Error?error.message:"Unable to save profile")}};return <><AppTitle eyebrow="ACCOUNT" title="Settings"/><form className="card compact-form" onSubmit={save}><div><h2>Creator profile & branding</h2><p>These details are available to your creator profile and can be used with branded conversion links.</p></div>{profile?<><label>Display name<input value={profile.displayName} maxLength={80} onChange={e=>setProfile({...profile,displayName:e.target.value})}/></label><label>Bio<textarea value={profile.bio} maxLength={280} rows={4} onChange={e=>setProfile({...profile,bio:e.target.value})}/></label><label>Avatar URL<input value={profile.avatarUrl||""} onChange={e=>setProfile({...profile,avatarUrl:e.target.value||null})} placeholder="https://…"/></label><label>Brand color<input type="color" value={profile.brandColor} onChange={e=>setProfile({...profile,brandColor:e.target.value})}/></label><small>Public profile: /creator/{profile.publicSlug}</small><button className="btn btn-primary">Save profile</button></>:<p>{status||"Loading profile…"}</p>}{status&&<p>{status}</p>}</form><div className="card empty-state security-card"><h2>Account security</h2><p>Authentication, creator ownership, API keys and earnings permissions are managed securely by NightBox.</p></div></>}
-function CreatorPublicProfile({slug}:{slug:string}){const [profile,setProfile]=useState<Awaited<ReturnType<typeof getPublicCreatorProfile>>["profile"]|null>(null);const [error,setError]=useState("");useEffect(()=>{getPublicCreatorProfile(slug).then(result=>setProfile(result.profile)).catch(reason=>setError(reason instanceof Error?reason.message:"Profile not found"))},[slug]);if(error)return <main className="public-site"><section className="mini-cta"><h2>{error}</h2><p>This creator profile is unavailable.</p></section></main>;if(!profile)return <main className="public-site"><section className="mini-cta"><h2>Loading creator profile…</h2></section></main>;return <main className="public-site"><section className="page-hero" style={{borderColor:profile.brandColor}}><Pill tone="orange">CREATOR PROFILE</Pill><h1>{profile.displayName||"NightBox creator"}</h1><p>{profile.bio||"Creator profile on NightBox."}</p><small>{profile.email}</small></section></main>}
-function LiveAdminTickets({toast}:{toast:(s:string)=>void}){const [rows,setRows]=useState<AdminTicket[]>([]);const load=async()=>{const token=sessionStorage.getItem("nightbox-admin-token");if(!token){toast("Admin session expired. Please sign in again.");return}try{const result=await getAdminTickets(token);setRows(result.tickets)}catch(error){toast(error instanceof Error?error.message:"Unable to load support queue");setRows([])}};useEffect(()=>{void load()},[]);const update=async(row:AdminTicket)=>{const token=sessionStorage.getItem("nightbox-admin-token");if(!token){toast("Admin session expired. Please sign in again.");return}try{await updateAdminTicket(token,row.id,row.status,(row.adminNote||"").trim());toast("Reply and ticket status saved");await load()}catch(error){toast(error instanceof Error?error.message:"Unable to update ticket")}};const remove=async(row:AdminTicket)=>{if(!window.confirm(`Delete ticket “${row.subject}”? This cannot be undone.`))return;const token=sessionStorage.getItem("nightbox-admin-token");if(!token)return;try{await deleteAdminTicket(token,row.id);setRows(current=>current.filter(item=>item.id!==row.id));toast("Ticket deleted")}catch(error){toast(error instanceof Error?error.message:"Unable to delete ticket")}};return <><AppTitle eyebrow="SUPPORT OPERATIONS" title="Support queue" action={<button className="btn btn-dark" onClick={load}>Refresh</button>}/><DataTable headers={["USER","SUBJECT","CONVERSATION","REPLY TO CREATOR","STATUS","ACTION"]} rows={rows.map(row=>{const messages=row.messages?.length?row.messages:[{authorType:"creator" as const,message:row.message,createdAt:row.createdAt},...(row.adminNote?[{authorType:"admin" as const,message:row.adminNote,createdAt:row.updatedAt}]:[])];return [row.email,row.subject,<div className="admin-ticket-thread" key={`thread-${row.id}`}>{messages.map((item,index)=><p className={item.authorType==="admin"?"admin-thread-reply":"admin-thread-message"} key={item.id||`${row.id}-${index}`}><span className="admin-thread-heading"><b>{item.authorType==="admin"?"NightBox support":"Creator"}</b><time dateTime={item.createdAt} title={item.createdAt}>{formatSupportTimestamp(item.createdAt)}</time></span><span className="admin-thread-body">{item.message}</span></p>)}</div>,<textarea key={`reply-${row.id}`} className="admin-ticket-reply" aria-label={`Reply to ${row.email}`} rows={3} value={row.adminNote||""} placeholder="Write a reply the creator can see…" onChange={e=>setRows(current=>current.map(item=>item.id===row.id?{...item,adminNote:e.target.value}:item))}/>,<select key={`status-${row.id}`} value={row.status} onChange={e=>setRows(current=>current.map(item=>item.id===row.id?{...item,status:e.target.value}:item))}><option>open</option><option>in_progress</option><option>resolved</option><option>closed</option></select>,<span className="admin-ticket-actions" key={`actions-${row.id}`}><button onClick={()=>update(row)}>Save reply</button><button className="danger-link" onClick={()=>void remove(row)}>Delete</button></span>]})}/>{!rows.length&&<div className="card empty-state"><p>No support conversations to review.</p></div>}</>}
-function LiveUserEvents({token,toast}:{token:string;toast:(s:string)=>void}){const [events,setEvents]=useState<EventRecord[]>([]);useEffect(()=>{getEvents().then(x=>setEvents(Array.isArray(x.events)?x.events:[])).catch(()=>setEvents([]))},[]);return <><AppTitle eyebrow="COMMUNITY" title="Events"/><CreatorRewardMilestones token={token} toast={toast}/><div className="events-history"><DataTable headers={["EVENT","DETAILS","REWARD"]} rows={events.map(event=>[event.title,event.description,event.rewardNote||"See event details"])}/></div>{!events.length&&<div className="card empty-state"><p>No active events are currently published.</p></div>}</>}
-function LiveAdminReports({toast}:{toast:(s:string)=>void}){const [rows,setRows]=useState<AdminReport[]>([]);const load=()=>{const token=sessionStorage.getItem("nightbox-admin-token");if(token)getAdminReports(token).then(x=>setRows(x.reports)).catch(()=>setRows([]))};useEffect(load,[]);const update=async(row:AdminReport)=>{const token=sessionStorage.getItem("nightbox-admin-token");if(!token)return;try{await updateAdminReport(token,row.id,row.status,row.adminNote||"");toast("Report updated");load()}catch(error){toast(error instanceof Error?error.message:"Unable to update report")}};return <><AppTitle eyebrow="TRUST & SAFETY" title="Reports and DMCA" action={<button className="btn btn-dark" onClick={load}>Refresh</button>}/><DataTable headers={["REPORTER","REASON","VIDEO","STATUS","ACTION"]} rows={rows.map(row=>[row.reporterEmail,row.reason,row.videoUrl||row.videoId||"Not specified",<select key={row.id} value={row.status} onChange={e=>{row.status=e.target.value;setRows([...rows])}}><option>open</option><option>in_review</option><option>resolved</option><option>rejected</option></select>,<button key={row.id} onClick={()=>update(row)}>Save</button>])}/>{!rows.length&&<div className="card empty-state"><p>No reports are currently pending.</p></div>}</>}
-function LiveAdminEvents({toast}:{toast:(s:string)=>void}) {
-  const [rows,setRows]=useState<AdminEvent[]>([]);
-  const [title,setTitle]=useState("");
-  const [description,setDescription]=useState("");
-  const load=()=>{const token=sessionStorage.getItem("nightbox-admin-token");if(token)getAdminEvents(token).then(x=>setRows(x.events)).catch(()=>setRows([]))};
-  useEffect(load,[]);
-  const create=async(e:React.FormEvent)=>{e.preventDefault();const token=sessionStorage.getItem("nightbox-admin-token");if(!token)return;try{await createAdminEvent(token,{title,description,active:1});setTitle("");setDescription("");toast("Event published");load()}catch(error){toast(error instanceof Error?error.message:"Unable to publish event")}};
-  const toggle=async(row:AdminEvent)=>{const token=sessionStorage.getItem("nightbox-admin-token");if(!token)return;try{await updateAdminEvent(token,row.id,row.active?0:1);load()}catch(error){toast(error instanceof Error?error.message:"Unable to update event")}};
-  return <><AppTitle eyebrow="COMMUNITY OPERATIONS" title="Events &amp; updates"/><form className="card compact-form" onSubmit={create}><h2>Publish event</h2><label>Title<input required value={title} onChange={e=>setTitle(e.target.value)}/></label><label>Description<textarea required rows={3} value={description} onChange={e=>setDescription(e.target.value)}/></label><button className="btn btn-primary">Publish event</button></form><DataTable headers={["EVENT","DESCRIPTION","STATUS","ACTION"]} rows={rows.map(row=>[row.title,row.description,row.active?"Active":"Hidden",<button key={row.id} onClick={()=>toggle(row)}>{row.active?"Hide":"Publish"}</button>])}/></>;
+
+function Brand({
+  dark = false,
+  go,
+}: {
+  dark?: boolean;
+  go: (p: string) => void;
+}) {
+  return (
+    <button
+      className={`brand ${dark ? "brand-dark" : ""}`}
+      onClick={() => go("/")}
+    >
+      <span className="brand-mark">
+        <i />
+        <i />
+      </span>
+      <span>
+        Night<span>Box</span>
+      </span>
+    </button>
+  );
 }
-function LiveAdminSettings({toast}:{toast:(s:string)=>void}){const [settings,setSettings]=useState<Record<string,string|boolean>|null>(null);const [content,setContent]=useState("");const [loading,setLoading]=useState(true);const [saving,setSaving]=useState(false);const notify=useEffectEvent(toast);useEffect(()=>{const token=sessionStorage.getItem("nightbox-admin-token");Promise.resolve().then(()=>{if(!token)throw new Error("Administrator session missing");return Promise.all([getAdminSettings(token),getAdminAdsTxt(token)])}).then(([config,ads])=>{setSettings(config.settings);setContent(ads.content)}).catch(()=>notify("Unable to load admin settings")).finally(()=>setLoading(false))},[]);const save=async(e:React.FormEvent)=>{e.preventDefault();const token=sessionStorage.getItem("nightbox-admin-token");if(!token)return;setSaving(true);try{const result=await updateAdminAdsTxt(token,content);setContent(result.content);toast("ads.txt files published")}catch(error){toast(error instanceof Error?error.message:"Unable to publish ads.txt files")}finally{setSaving(false)}};return <><AppTitle eyebrow="PLATFORM" title="Settings"/><div className="card settings-list">{settings?Object.entries(settings).map(([key,value])=><div className="table-row" key={key}><b>{key}</b><span>{String(value)}</span></div>):<p className="empty-copy">{loading?"Loading platform configuration…":"Unable to load platform configuration."}</p>}</div><div className="card empty-state"><p>Secrets are intentionally not exposed in the admin UI. Change deployment values through the server environment.</p></div><form className="card compact-form admin-adstxt-form" onSubmit={save}><div><h2>ads.txt publisher declarations</h2><p>This single editor publishes identical plain text to <a href="https://nightbox.in/ads.txt" target="_blank" rel="noreferrer">/ads.txt</a> and <a href="https://nightbox.in/app-ads.txt" target="_blank" rel="noreferrer">/app-ads.txt</a>. Add only seller records provided by your advertising partners, one record per line.</p></div><label htmlFor="admin-ads-txt">File contents<textarea id="admin-ads-txt" rows={12} maxLength={65536} spellCheck={false} placeholder="Paste authorized seller records from your ad network" value={content} onChange={event=>setContent(event.target.value)}/></label><div className="ads-txt-actions"><small>{new TextEncoder().encode(content).length.toLocaleString()} / 65,536 bytes · Plain text only</small><button className="btn btn-primary" disabled={loading||saving}>{saving?"Publishing…":"Publish both files"}</button></div></form></>}
-function LiveWithdrawal({token,toast}:{token:string;toast:(s:string)=>void}){
-  const [data,setData]=useState<Awaited<ReturnType<typeof getCreatorWithdrawals>>|null>(null);
-  const [amount,setAmount]=useState("");
-  const [method,setMethod]=useState<"UPI"|"PayPal">("UPI");
-  const [payoutAccount,setPayoutAccount]=useState("");
-  const [submitting,setSubmitting]=useState(false);
-  const load=()=>getCreatorWithdrawals(token).then(setData).catch(()=>setData(null));
-  useEffect(()=>{Promise.resolve().then(load)},[token]);
-  const balance=(data?.balanceMicros||0)/1000000;
-  const minimum=(data?.minimumMicros||10000000)/1000000;
-  const eligible=balance>=minimum;
-  const progress=Math.min(100,minimum?balance/minimum*100:0);
-  const submit=async(e:React.FormEvent)=>{
+function Pill({
+  children,
+  tone = "blue",
+}: {
+  children: React.ReactNode;
+  tone?: string;
+}) {
+  return <span className={`pill pill-${tone}`}>{children}</span>;
+}
+function Metric({
+  label,
+  value,
+  delta,
+  icon,
+}: {
+  label: string;
+  value: string;
+  delta?: string;
+  icon: string;
+}) {
+  return (
+    <div className="metric card">
+      <div className="metric-top">
+        <span className="metric-icon">{icon}</span>
+        {delta && (
+          <Pill tone={delta.startsWith("-") ? "red" : "green"}>{delta}</Pill>
+        )}
+      </div>
+      <strong>{value}</strong>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function PublicSite({
+  route,
+  go,
+  menu,
+  setMenu,
+  toast,
+}: {
+  route: string;
+  go: (p: string) => void;
+  menu: boolean;
+  setMenu: (v: boolean) => void;
+  toast: (s: string) => void;
+}) {
+  const pages: Record<string, React.ReactNode> = {
+    "/": <Home go={go} />,
+    "/features": <Features go={go} />,
+    "/events": <Events />,
+    "/about": <About go={go} />,
+    "/contact": <Contact toast={toast} />,
+    "/faq": <FAQ />,
+    "/terms": <Legal kind="Terms of Service" />,
+    "/privacy": <Legal kind="Privacy Policy" />,
+    "/dmca": <Legal kind="DMCA Policy" />,
+    "/cookies": <Legal kind="Cookie Policy" />,
+  };
+  return (
+    <div className="public-shell">
+      <header className="public-header">
+        <Brand go={go} />
+        <nav className={menu ? "open" : ""}>
+          {[
+            ["Features", "/features"],
+            ["Events", "/events"],
+            ["About", "/about"],
+            ["Contact", "/contact"],
+            ["FAQ", "/faq"],
+          ].map((x) => (
+            <button key={x[1]} onClick={() => go(x[1])}>
+              {x[0]}
+            </button>
+          ))}
+          <button
+            className="btn btn-dark nav-login"
+            onClick={() => go("/auth/login")}
+          >
+            Sign in
+          </button>
+        </nav>
+        <button className="hamb" onClick={() => setMenu(!menu)}>
+          ☰
+        </button>
+      </header>
+      {pages[route] || <NotFound go={go} />}
+      {route === "/" && <PublicCountryRates go={go} />}
+      <Footer go={go} />
+    </div>
+  );
+}
+
+function PublicCountryRates({ go }: { go: (path: string) => void }) {
+  const [rates, setRates] = useState<Array<{
+    country: string;
+    cpmCents: number;
+  }> | null>(null);
+  useEffect(() => {
+    getPublicCpm()
+      .then(({ rates: current }) => setRates(current))
+      .catch(() => setRates([]));
+  }, []);
+  return (
+    <section className="public-cpm-section" id="public-country-rates">
+      <div className="public-cpm-card">
+        <div className="public-cpm-intro">
+          <Pill tone="orange">TRANSPARENT CREATOR PAYOUTS</Pill>
+          <h2>Know the rate before you share.</h2>
+          <p>
+            Check the current admin-configured payout rate for each viewer
+            country, without signing in. Rates are shown in USD per 1,000
+            eligible views.
+          </p>
+          <button
+            className="btn btn-primary"
+            onClick={() => go("/auth/register")}
+          >
+            Start creating <span aria-hidden="true">→</span>
+          </button>
+        </div>
+        <div className="public-cpm-rates">
+          <div className="public-cpm-rate-heading">
+            <div>
+              <span>LIVE RATE CARD</span>
+              <h3>Country CPM</h3>
+            </div>
+            <span className="public-cpm-live">
+              <i /> Public · no sign-in
+            </span>
+          </div>
+          {rates === null ? (
+            <p className="public-cpm-state">Loading current rates…</p>
+          ) : rates.length ? (
+            <div className="public-cpm-list">
+              {rates.map((rate) => (
+                <div className="public-cpm-row" key={rate.country}>
+                  <span>
+                    <b>{displayRateCountry(rate.country)}</b>
+                    <small>
+                      {rate.country === "ZZ"
+                        ? "Default rate when no country-specific override is configured"
+                        : "Rate for eligible views from this country"}
+                    </small>
+                  </span>
+                  <strong>
+                    {money(rate.cpmCents / 100)}
+                    <small>/ 1,000 views</small>
+                  </strong>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="public-cpm-state">
+              Current CPM rates are temporarily unavailable. Please try again
+              shortly.
+            </p>
+          )}
+          <small className="public-cpm-footnote">
+            A view must meet NightBox eligibility rules to earn. The default
+            rate applies when no country-specific override exists. Past eligible
+            views keep the rate recorded when they qualified.
+          </small>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Home({ go }: { go: (p: string) => void }) {
+  return (
+    <main>
+      <section className="hero">
+        <div className="hero-glow g1" />
+        <div className="hero-glow g2" />
+        <div className="hero-copy">
+          <Pill tone="orange">● Built for creators</Pill>
+          <h1>
+            Share files.
+            <br />
+            <em>Grow reach.</em>
+            <br />
+            Get rewarded.
+          </h1>
+          <p>
+            One polished workspace to upload and share creator videos—while
+            transparent analytics turn qualified attention into creator
+            earnings.
+          </p>
+          <div className="hero-actions">
+            <button
+              className="btn btn-primary btn-lg"
+              onClick={() => go("/auth/register")}
+            >
+              ↑ Start for free
+            </button>
+            <button className="play-btn">▶</button>
+            <span>No card required</span>
+          </div>
+          <div className="proof-row">
+            <div>
+              <b>Country CPM</b>
+              <span>server configured</span>
+            </div>
+            <div>
+              <b>2 GB</b>
+              <span>upload limit</span>
+            </div>
+          </div>
+        </div>
+        <div className="hero-visual">
+          <div className="orbit o1" />
+          <div className="orbit o2" />
+          <div className="float-file ff1">
+            <span className="file-logo">FILE</span>
+            <div>
+              <b>Your next project</b>
+              <small>Ready to share</small>
+            </div>
+            <Pill tone="green">Secure</Pill>
+          </div>
+          <div className="float-file ff2">
+            <span className="file-logo orange">MEDIA</span>
+            <div>
+              <b>Creator workspace</b>
+              <small>Backend delivered</small>
+            </div>
+          </div>
+          <div className="earning-card">
+            <span>Creator earnings</span>
+            <b>Live ledger</b>
+            <small>Server-recorded earnings</small>
+            <div className="mini-bars">
+              <i />
+              <i />
+              <i />
+              <i />
+              <i />
+              <i />
+              <i />
+            </div>
+          </div>
+          <div className="view-chip">◉ Country-aware view tracking</div>
+        </div>
+      </section>
+      <section className="trusted">
+        <span>BUILT FOR MODERN DIGITAL WORK</span>
+        <div>
+          <b>Designers</b>
+          <b>Educators</b>
+          <b>Developers</b>
+          <b>Filmmakers</b>
+          <b>Podcasters</b>
+        </div>
+      </section>
+      <section className="section">
+        <div className="section-title">
+          <Pill>PLATFORM</Pill>
+          <h2>
+            Everything your files need.
+            <br />
+            <em>Nothing they don’t.</em>
+          </h2>
+          <p>
+            Secure storage, elegant delivery and actionable revenue insights in
+            one thoughtful creator platform.
+          </p>
+        </div>
+        <div className="feature-grid">
+          <FeatureCard
+            icon="↑"
+            title="Upload without friction"
+            text="Video uploads with progress, recovery and format-aware validation up to 4 GB."
+            color="blue"
+          />
+          <FeatureCard
+            icon="↗"
+            title="Share beautifully"
+            text="Clean creator links with backend authorization and reliable global delivery."
+            color="orange"
+          />
+          <FeatureCard
+            icon="$"
+            title="Earn transparently"
+            text="See eligible views, CPM, daily earnings and every wallet movement in one ledger."
+            color="dark"
+          />
+          <FeatureCard
+            icon="⌁"
+            title="Understand your audience"
+            text="Explore qualified traffic by file and country with server-recorded reports."
+            color="light"
+          />
+        </div>
+      </section>
+      <section className="how section">
+        <div className="section-title left">
+          <Pill tone="orange">HOW IT WORKS</Pill>
+          <h2>
+            From upload to income
+            <br />
+            in three clear steps.
+          </h2>
+        </div>
+        <div className="steps">
+          <Step
+            n="01"
+            title="Upload your work"
+            text="Drop a video, add a title and send it through the connected backend."
+          />
+          <Step
+            n="02"
+            title="Share your NightLink"
+            text="Publish a clean creator link anywhere—social, communities, your website or direct messages."
+          />
+          <Step
+            n="03"
+            title="Track qualified reach"
+            text="Server-verified views flow into your wallet with transparent analytics."
+          />
+        </div>
+      </section>
+      <section className="cta-band">
+        <div>
+          <Pill tone="orange">YOUR CREATIVE WORKSPACE</Pill>
+          <h2>
+            Give every file
+            <br />a place to perform.
+          </h2>
+          <p>
+            Launch your NightBox workspace today. Upload, share and understand
+            what resonates.
+          </p>
+        </div>
+        <button
+          className="btn btn-white btn-lg"
+          onClick={() => go("/auth/register")}
+        >
+          Create free workspace →
+        </button>
+      </section>
+    </main>
+  );
+}
+function FeatureCard({
+  icon,
+  title,
+  text,
+  color,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+  color: string;
+}) {
+  return (
+    <article className={`feature-card fc-${color}`}>
+      <span className="feature-icon">{icon}</span>
+      <h3>{title}</h3>
+      <p>{text}</p>
+      <a>Explore feature →</a>
+    </article>
+  );
+}
+function Step({ n, title, text }: { n: string; title: string; text: string }) {
+  return (
+    <article className="step">
+      <b>{n}</b>
+      <span />
+      <h3>{title}</h3>
+      <p>{text}</p>
+    </article>
+  );
+}
+function Features({ go }: { go: (p: string) => void }) {
+  const groups: [string, string, string[]][] = [
+    [
+      "Cloud storage",
+      "Organize every creator video in a private workspace built for reliable delivery.",
+      [
+        "Multipart uploads up to 4 GB",
+        "Creator-owned files and folders",
+        "Separate project storage",
+        "Fast CDN-ready playback",
+      ],
+    ],
+    [
+      "Sharing controls",
+      "Turn a stored file into a clean link that is easy to publish and safer to operate.",
+      [
+        "Creator video links",
+        "Server-side authorization",
+        "Bunny CDN delivery",
+        "Social sharing support",
+      ],
+    ],
+    [
+      "Creator monetization",
+      "Understand how qualified attention becomes a transparent earnings record.",
+      [
+        "Configurable country CPM rules",
+        "File-level revenue records",
+        "Server-side earning ledger",
+        "Withdrawal request tracking",
+      ],
+    ],
+    [
+      "Performance analytics",
+      "See the signals that matter without guessing which views count.",
+      [
+        "Qualified views and earnings",
+        "Country-level reporting",
+        "Per-file performance",
+        "Admin revenue controls",
+      ],
+    ],
+    [
+      "Safety and compliance",
+      "Responsible distribution controls help protect creators, viewers and the platform.",
+      [
+        "Traffic quality checks",
+        "Hashed viewer records",
+        "Duplicate-view filtering",
+        "Account and file moderation",
+      ],
+    ],
+    [
+      "Support and automation",
+      "Connect your everyday workflow while keeping access scoped and revocable.",
+      [
+        "Telegram upload bots",
+        "Creator-scoped API keys",
+        "Bot event history",
+        "Revocable credentials",
+      ],
+    ],
+  ];
+  return (
+    <>
+      <PageHero
+        eyebrow="NIGHTBOX FEATURES"
+        title="A complete operating system for shared files."
+        text="From the first upload to the last qualified view, NightBox keeps storage, delivery, insight and control in one workspace."
+      />
+      <section className="section public-detail-intro">
+        <div>
+          <Pill tone="orange">ONE CONNECTED WORKFLOW</Pill>
+          <h2>Less switching. More control over every file.</h2>
+        </div>
+        <p>
+          Creators can upload from the dashboard or connected Telegram tools,
+          publish a controlled link, review delivery activity and follow the
+          earning record from one place. Operations teams get the controls
+          needed to manage users, files, view rules and payouts.
+        </p>
+      </section>
+      <section className="section feature-page-grid">
+        {groups.map((g, i) => (
+          <article className="detail-card" key={g[0]}>
+            <span>0{i + 1}</span>
+            <h2>{g[0]}</h2>
+            <p>{g[1]}</p>
+            <ul>
+              {g[2].map((x: string) => (
+                <li key={x}>✓ {x}</li>
+              ))}
+            </ul>
+          </article>
+        ))}
+      </section>
+      <section className="section public-detail-split">
+        <div className="detail-card fc-dark">
+          <Pill tone="orange">HOW IT CONNECTS</Pill>
+          <h2>Upload once. Deliver everywhere.</h2>
+          <p>
+            Files are recorded by the NightBox backend, delivered through the
+            configured storage and CDN path, and represented in the creator
+            dashboard with live status and share controls.
+          </p>
+        </div>
+        <div className="detail-card">
+          <Pill>BUILT FOR CLARITY</Pill>
+          <h2>Every important action has a place.</h2>
+          <p>
+            Creators get storage, links, analytics, earnings, support and bot
+            access. Administrators get moderation, revenue, withdrawal and
+            platform health controls.
+          </p>
+        </div>
+      </section>
+      <section className="mini-cta">
+        <h2>Ready to move your files forward?</h2>
+        <button
+          className="btn btn-primary"
+          onClick={() => go("/auth/register")}
+        >
+          Start for free →
+        </button>
+      </section>
+    </>
+  );
+}
+function Events() {
+  const [events, setEvents] = useState<EventRecord[]>([]);
+  useEffect(() => {
+    getEvents()
+      .then((x) => setEvents(Array.isArray(x.events) ? x.events : []))
+      .catch(() => setEvents([]));
+  }, []);
+  return (
+    <>
+      <PageHero
+        eyebrow="EVENTS HUB"
+        title="Creator events with a clear path to participate."
+        text="Discover campaigns published by NightBox operations, understand the reward terms and follow your progress from the workspace."
+      />
+      <section className="section public-detail-intro">
+        <div>
+          <Pill tone="orange">HOW EVENTS WORK</Pill>
+          <h2>Find a campaign, create consistently and track the result.</h2>
+        </div>
+        <p>
+          Events are published by operations with a title, description, dates
+          and reward information. Your creator workspace keeps the relevant
+          activity visible while the backend records eligible views and
+          milestone progress.
+        </p>
+      </section>
+      <section className="section">
+        <div className="event-grid">
+          {events.length ? (
+            events.map((event) => (
+              <article className="card detail-card" key={event.id}>
+                <span>
+                  {event.startsAt
+                    ? new Date(event.startsAt).toLocaleDateString()
+                    : "ACTIVE"}
+                </span>
+                <h2>{event.title}</h2>
+                <p>{event.description}</p>
+                {event.rewardNote && <small>{event.rewardNote}</small>}
+                <div className="event-card-meta">
+                  <b>Published campaign</b>
+                  <span>
+                    Check the event terms in your workspace before sharing.
+                  </span>
+                </div>
+              </article>
+            ))
+          ) : (
+            <div className="card empty-state">
+              <h2>No active events right now</h2>
+              <p>
+                New campaigns will appear here when published by NightBox
+                operations. Check back from time to time or create your
+                workspace to receive event updates.
+              </p>
+            </div>
+          )}
+        </div>
+      </section>
+      <section className="section public-detail-split">
+        <div className="detail-card">
+          <Pill>PARTICIPATE</Pill>
+          <h2>Build your audience responsibly.</h2>
+          <p>
+            Use your own content, share it with the right audience and avoid
+            artificial traffic. Event rewards depend on the eligibility rules
+            shown for each campaign.
+          </p>
+        </div>
+        <div className="detail-card fc-orange">
+          <Pill tone="orange">TRACK PROGRESS</Pill>
+          <h2>Milestones stay understandable.</h2>
+          <p>
+            Qualified views, activity and reward milestones are handled by the
+            connected backend so creators can focus on publishing rather than
+            manual counting.
+          </p>
+        </div>
+      </section>
+    </>
+  );
+}
+function About({ go }: { go: (p: string) => void }) {
+  return (
+    <>
+      <PageHero
+        eyebrow="ABOUT NIGHTBOX"
+        title="Creators deserve more than a download button."
+        text="NightBox is building a safer, clearer way to distribute digital work and understand its real reach."
+      />
+      <section className="section">
+        <div className="story">
+          <div>
+            <Pill>OUR MISSION</Pill>
+            <h2>
+              Make digital distribution work for the people who create value.
+            </h2>
+          </div>
+          <div>
+            <p>
+              Traditional file hosting treats a creator&apos;s work like
+              anonymous storage. NightBox treats every shared file as a living
+              digital asset with context, protection, analytics and earning
+              potential.
+            </p>
+            <p>
+              We are focused on thoughtful product design, transparent reporting
+              and infrastructure that stays dependable when a link travels far.
+              That means clear ownership, useful controls and fewer surprises
+              for creators and their audiences.
+            </p>
+            <button
+              className="btn btn-dark"
+              onClick={() => go("/auth/register")}
+            >
+              Join NightBox →
+            </button>
+          </div>
+        </div>
+      </section>
+      <section className="section public-detail-intro">
+        <div>
+          <Pill tone="orange">WHAT WE BELIEVE</Pill>
+          <h2>Good infrastructure should feel understandable.</h2>
+        </div>
+        <p>
+          Storage, delivery, analytics and earnings can become complicated
+          quickly. NightBox brings those pieces together with straightforward
+          screens, server-recorded decisions and access controls that are
+          visible when they matter.
+        </p>
+      </section>
+      <section className="section about-values">
+        <article className="detail-card">
+          <span>01</span>
+          <h2>Creator ownership</h2>
+          <p>
+            Your files, links and workspace activity are organized around the
+            creator account that owns them.
+          </p>
+        </article>
+        <article className="detail-card">
+          <span>02</span>
+          <h2>Measured delivery</h2>
+          <p>
+            Qualified views and country rules are recorded by the backend
+            instead of being estimated from a presentation-only dashboard.
+          </p>
+        </article>
+        <article className="detail-card">
+          <span>03</span>
+          <h2>Responsible growth</h2>
+          <p>
+            Traffic quality, moderation, support and revocable integrations are
+            part of the product, not an afterthought.
+          </p>
+        </article>
+      </section>
+      <section className="section about-principles">
+        <div>
+          <Pill tone="orange">OUR PROMISE</Pill>
+          <h2>Build for the moment after the link is shared.</h2>
+          <p>
+            NightBox is designed for real workflows: a creator uploads a file, a
+            viewer opens it, the system records meaningful activity and the
+            creator can understand what happened. We keep improving that loop
+            without hiding the operational details.
+          </p>
+        </div>
+        <div className="about-principle-list">
+          <span>
+            <b>Clear by default</b>Useful status, ownership and next steps.
+          </span>
+          <span>
+            <b>Secure by design</b>Scoped access and server-side controls.
+          </span>
+          <span>
+            <b>Ready to grow</b>Infrastructure that can expand with creator
+            demand.
+          </span>
+        </div>
+      </section>
+    </>
+  );
+}
+function Contact({ toast }: { toast: (s: string) => void }) {
+  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const value=Number(amount);
-    if(!Number.isFinite(value)||value<minimum||value>balance){toast(`Enter an amount between ${money(minimum)} and ${money(balance)}`);return}
+    const form = new FormData(e.currentTarget);
+    try {
+      await sendContactMessage({
+        name: String(form.get("name")),
+        email: String(form.get("email")),
+        subject: String(form.get("subject")),
+        message: String(form.get("message")),
+      });
+      toast("Message received by NightBox support");
+      e.currentTarget.reset();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Unable to send message");
+    }
+  };
+  return (
+    <>
+      <PageHero
+        eyebrow="CONTACT"
+        title="Let’s solve it together."
+        text="Questions, content reports, partnerships or support—we’ll route your message to the right team."
+      />
+      <section className="section contact-grid">
+        <div>
+          <h2>Choose the right channel</h2>
+          {[
+            ["General support", "Use the contact form below"],
+            ["Legal & DMCA", "legal@nightbox.cloud"],
+            ["Advertising", "partners@nightbox.cloud"],
+          ].map((x) => (
+            <div className="contact-line" key={x[0]}>
+              <span>↗</span>
+              <div>
+                <b>{x[0]}</b>
+                <small>{x[1]}</small>
+              </div>
+            </div>
+          ))}
+        </div>
+        <form className="form-card" onSubmit={submit}>
+          <div className="two">
+            <label>
+              Name
+              <input name="name" required placeholder="Your full name" />
+            </label>
+            <label>
+              Email
+              <input
+                name="email"
+                required
+                type="email"
+                placeholder="you@example.com"
+              />
+            </label>
+          </div>
+          <label>
+            Subject
+            <input name="subject" required placeholder="What is this about?" />
+          </label>
+          <label>
+            Message
+            <textarea
+              name="message"
+              required
+              rows={6}
+              placeholder="Tell us how we can help…"
+            />
+          </label>
+          <button className="btn btn-primary" type="submit">
+            Send message →
+          </button>
+        </form>
+      </section>
+    </>
+  );
+}
+function FAQ() {
+  const [open, setOpen] = useState(0);
+  const q = [
+    [
+      "What is NightBox?",
+      "NightBox is a creator-focused cloud platform for storing, sharing and monetizing creator videos.",
+    ],
+    [
+      "Which file types can I upload?",
+      "Creator video uploads up to 4 GB are supported through the connected backend and Telegram upload services.",
+    ],
+    [
+      "How are earnings calculated?",
+      "Revenue is based on eligible views. The applicable CPM is selected server-side from the viewer country and locked when the view qualifies.",
+    ],
+    [
+      "What is the minimum withdrawal?",
+      "The minimum withdrawal threshold is configured by operations and enforced by the backend.",
+    ],
+    [
+      "Can I protect a share link?",
+      "Share links pass through backend authorization and view-quality checks. Video delivery depends on the configured Bunny Stream service.",
+    ],
+    [
+      "How does the Telegram bot work?",
+      "Users create a revocable API key from Bots & API, connect the upload bot and manage remote uploads from their dashboard.",
+    ],
+  ];
+  return (
+    <>
+      <PageHero
+        eyebrow="HELP CENTER"
+        title="Answers without the runaround."
+        text="Clear guidance on accounts, files, monetization, security and payouts."
+      />
+      <section className="section faq-list">
+        {q.map((x, i) => (
+          <button
+            onClick={() => setOpen(open === i ? -1 : i)}
+            className={open === i ? "active" : ""}
+            key={x[0]}
+          >
+            <span>{x[0]}</span>
+            <b>{open === i ? "−" : "+"}</b>
+            {open === i && <p>{x[1]}</p>}
+          </button>
+        ))}
+      </section>
+    </>
+  );
+}
+function DmcaForm() {
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setBusy(true);
+    const form = new FormData(e.currentTarget);
+    try {
+      await submitDmcaReport({
+        name: String(form.get("name")),
+        email: String(form.get("email")),
+        videoUrl: String(form.get("videoUrl")),
+        reason: String(form.get("reason")),
+      });
+      setSent(true);
+      e.currentTarget.reset();
+    } catch (error) {
+      toastGlobal(
+        error instanceof Error ? error.message : "Unable to submit report",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="card form-card">
+      <h2>Submit a DMCA report</h2>
+      <p>
+        Use this form for a specific infringement notice. Reports are reviewed
+        by the trust and safety team.
+      </p>
+      {sent && (
+        <p className="success-copy">
+          Report received. Our team will review it.
+        </p>
+      )}
+      <form onSubmit={submit}>
+        <div className="two">
+          <label>
+            Name
+            <input name="name" required />
+          </label>
+          <label>
+            Email
+            <input name="email" required type="email" />
+          </label>
+        </div>
+        <label>
+          Video or link
+          <input
+            name="videoUrl"
+            required
+            type="url"
+            placeholder="https://..."
+          />
+        </label>
+        <label>
+          Reason
+          <textarea name="reason" required rows={4} />
+        </label>
+        <button className="btn btn-primary" disabled={busy}>
+          {busy ? "Submitting…" : "Submit report →"}
+        </button>
+      </form>
+    </div>
+  );
+}
+function Legal({ kind }: { kind: string }) {
+  const all: Record<string, string[]> = {
+    "Terms of Service": [
+      "Using NightBox",
+      "Your account and content",
+      "Storage and availability",
+      "Creator revenue program",
+      "Withdrawals and adjustments",
+      "Acceptable use",
+      "Suspension and termination",
+    ],
+    "Privacy Policy": [
+      "Information we collect",
+      "How information is used",
+      "Sharing and service providers",
+      "Data retention",
+      "Your rights",
+      "Security measures",
+      "International processing",
+    ],
+    "DMCA Policy": [
+      "Reporting infringement",
+      "Required notice information",
+      "Counter-notice process",
+      "Three-strike policy",
+      "Restoration timeline",
+      "Misrepresentation",
+      "Contacting our legal team",
+    ],
+    "Cookie Policy": [
+      "Essential cookies",
+      "Preferences",
+      "Analytics",
+      "Advertising",
+      "Managing consent",
+      "Retention",
+      "Policy updates",
+    ],
+  };
+  const blocks = all[kind] || [];
+  return (
+    <>
+      <PageHero
+        eyebrow="LEGAL · UPDATED AUGUST 2026"
+        title={kind}
+        text={`This ${kind.toLowerCase()} explains the standards that keep NightBox clear, safe and dependable.`}
+      />
+      {kind === "DMCA Policy" && (
+        <section className="section">
+          <DmcaForm />
+        </section>
+      )}
+      <section className="section legal-layout">
+        <aside>
+          {blocks.map((x, i) => (
+            <a key={x}>
+              0{i + 1} {x}
+            </a>
+          ))}
+        </aside>
+        <article>
+          {blocks.map((x, i) => (
+            <section key={x}>
+              <h2>
+                {i + 1}. {x}
+              </h2>
+              <p>
+                NightBox is designed to provide secure file storage, controlled
+                sharing, analytics and creator monetization. By using the
+                service, you agree to provide accurate information, respect
+                intellectual property rights and avoid fraudulent or harmful
+                activity.
+              </p>
+              <p>
+                Operational limits, eligibility and processing timelines are
+                shown clearly inside the product. We may review reports,
+                restrict content or hold transactions when necessary to protect
+                users, advertisers and the integrity of the platform.
+              </p>
+            </section>
+          ))}
+        </article>
+      </section>
+    </>
+  );
+}
+function PageHero({
+  eyebrow,
+  title,
+  text,
+}: {
+  eyebrow: string;
+  title: string;
+  text: string;
+}) {
+  const visualClass = `page-hero-${eyebrow.toLowerCase().replaceAll(" ", "-")}`;
+  return (
+    <section className={`page-hero ${visualClass}`}>
+      <Pill tone="orange">{eyebrow}</Pill>
+      <h1>{title}</h1>
+      <p>{text}</p>
+    </section>
+  );
+}
+function Footer({ go }: { go: (p: string) => void }) {
+  return (
+    <footer>
+      <div className="footer-main">
+        <div>
+          <Brand dark go={go} />
+          <p>
+            Secure cloud delivery, meaningful analytics and transparent creator
+            earnings.
+          </p>
+        </div>
+        <div>
+          <b>Product</b>
+          <button onClick={() => go("/features")}>Features</button>
+          <button onClick={() => go("/events")}>Events</button>
+        </div>
+        <div>
+          <b>Resources</b>
+          <button onClick={() => go("/faq")}>FAQ</button>
+          <button onClick={() => go("/contact")}>Contact</button>
+        </div>
+        <div>
+          <b>Legal</b>
+          <button onClick={() => go("/terms")}>Terms</button>
+          <button onClick={() => go("/privacy")}>Privacy</button>
+          <button onClick={() => go("/dmca")}>DMCA</button>
+          <button onClick={() => go("/cookies")}>Cookies</button>
+        </div>
+      </div>
+      <div className="footer-bottom">
+        <span>© 2026 NightBox Technologies. All rights reserved.</span>
+        <span>
+          <i /> Platform status
+        </span>
+      </div>
+    </footer>
+  );
+}
+
+function LiveAuthPage({
+  route,
+  go,
+  toast,
+  setSession,
+}: {
+  route: string;
+  go: (p: string) => void;
+  toast: (s: string) => void;
+  setSession: (token: string, profile?: AccountProfile) => void;
+}) {
+  const isRegister = route.includes("register");
+  const [googleBusy, setGoogleBusy] = useState(false);
+  const signInWithGoogle = async (credential: string) => {
+    setGoogleBusy(true);
+    try {
+      const result = await loginWithGoogle(credential);
+      setSession(result.token, {
+        name: result.user.name || result.user.email.split("@")[0],
+        email: result.user.email,
+        picture: result.user.picture || null,
+      });
+      toast(isRegister ? "Workspace ready" : "Signed in with Google");
+      setTimeout(() => go("/user/dashboard"), 300);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Google sign-in failed");
+    } finally {
+      setGoogleBusy(false);
+    }
+  };
+  return (
+    <div className="auth-shell">
+      <div className="auth-art">
+        <Brand dark go={go} />
+        <div className="auth-message">
+          <Pill tone="orange">CREATOR CLOUD</Pill>
+          <h1>
+            Your work.
+            <br />
+            Shared on your terms.
+          </h1>
+          <p>
+            Store, distribute and understand every file from one secure
+            workspace.
+          </p>
+        </div>
+      </div>
+      <div className="auth-form-wrap">
+        <button className="back" onClick={() => go("/")}>
+          ← Back to website
+        </button>
+        <section className="auth-form" aria-labelledby="creator-auth-title">
+          <h2 id="creator-auth-title">
+            {isRegister ? "Create your workspace" : "Welcome back"}
+          </h2>
+          <p>
+            {isRegister
+              ? "Sign up securely with your Google account."
+              : "Sign in securely with your Google account."}
+          </p>
+          <GoogleSignInButton
+            mode={isRegister ? "signup" : "signin"}
+            onCredential={signInWithGoogle}
+          />
+          {googleBusy && (
+            <small className="google-signin-loading" role="status">
+              Verifying Google account…
+            </small>
+          )}
+          <small className="google-signin-switch">
+            {isRegister ? "Already have an account? " : "New to NightBox? "}
+            <button
+              type="button"
+              onClick={() => go(isRegister ? "/auth/login" : "/auth/register")}
+            >
+              {isRegister ? "Sign in with Google" : "Sign up with Google"}
+            </button>
+          </small>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function LiveUpload({
+  files,
+  saveFiles,
+  toast,
+  token,
+}: {
+  files: FileItem[];
+  saveFiles: (x: FileItem[]) => void;
+  toast: (s: string) => void;
+  token: string;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const choose = (next: File | null) => {
+    if (!next) return;
+    const allowed =
+      next.type.startsWith("video/") ||
+      /\.(mp4|m4v|mkv|webm|avi|flv|mov|wmv|3gp|mpeg|mpg|ts|ogv)$/i.test(
+        next.name,
+      );
+    if (!allowed) {
+      toast(
+        "Please choose a valid video file (MP4, MKV, MOV, WebM, AVI, or similar).",
+      );
+      return;
+    }
+    if (next.size > 2 * 1024 * 1024 * 1024) {
+      toast("Video must be 2 GB or smaller.");
+      return;
+    }
+    setFile(next);
+    setProgress(0);
+    if (!name) setName(next.name);
+  };
+  const submit = async () => {
+    if (!file) {
+      toast("Choose a video file first");
+      return;
+    }
+    if (!token) {
+      toast("Please sign in before uploading");
+      return;
+    }
+    setBusy(true);
+    setProgress(0);
+    try {
+      const result = await uploadVideo(file, name, token, (setUploadProgress) =>
+        setProgress(setUploadProgress.percent),
+      );
+      const item: FileItem = {
+        id: result.videoId,
+        name: name || file.name,
+        type: file.name.split(".").pop()?.toUpperCase() || "VIDEO",
+        size: `${(file.size / 1024 / 1024).toFixed(1)} MB`,
+        views: 0,
+        earned: 0,
+        status: "Processing",
+        color: "#2563eb",
+        updated: "Just now",
+        link: null,
+      };
+      saveFiles([item, ...files]);
+      toast(
+        "Upload received. Processing and admin approval are required before the playable link is released.",
+      );
+      setFile(null);
+      setName("");
+      setProgress(0);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Upload failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <AppTitle eyebrow="FILE DELIVERY" title="Upload a new video" />
+      <div className="upload-layout">
+        <div className="card upload-card">
+          <div className="dropzone">
+            <span>↑</span>
+            <h3>{file?.name || "Choose a video file"}</h3>
+            <label className="btn btn-dark">
+              Browse files
+              <input
+                type="file"
+                accept="video/*,.mkv,.avi,.mov,.m4v,.webm"
+                hidden
+                disabled={busy}
+                onChange={(e) => {
+                  choose(e.target.files?.[0] || null);
+                  e.currentTarget.value = "";
+                }}
+              />
+            </label>
+            <small>
+              Video uploads up to 2 GB are sent directly to the connected
+              NightBox backend.
+            </small>
+            {busy && (
+              <div className="upload-progress" role="status" aria-live="polite">
+                <div className="upload-progress-track">
+                  <i style={{ width: `${Math.max(progress, 2)}%` }} />
+                </div>
+                <span>
+                  {progress ? `Uploading ${progress}%…` : "Preparing upload…"}
+                </span>
+              </div>
+            )}
+          </div>
+          <div className="upload-fields">
+            <label>
+              Display name
+              <input
+                value={name}
+                disabled={busy}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Video title"
+              />
+            </label>
+            <button
+              className="btn btn-primary"
+              disabled={busy || !token || !file}
+              onClick={submit}
+            >
+              {!token
+                ? "Sign in to upload"
+                : busy
+                  ? `Uploading ${progress}%…`
+                  : "Upload to backend →"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function UserApp({
+  route,
+  go,
+  files,
+  saveFiles,
+  toast,
+  token,
+  profile,
+}: {
+  route: string;
+  go: (p: string) => void;
+  files: FileItem[];
+  saveFiles: (x: FileItem[]) => void;
+  toast: (s: string) => void;
+  token: string;
+  profile: AccountProfile | null;
+}) {
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const navigate = (p: string) => {
+    setDrawerOpen(false);
+    go(p);
+  };
+  const openSidebar = () => {
+    setSidebarCollapsed(false);
+    setDrawerOpen(true);
+  };
+  return (
+    <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+      <Sidebar
+        nav={userNav}
+        route={route}
+        go={navigate}
+        admin={false}
+        open={drawerOpen}
+        close={() => setDrawerOpen(false)}
+        collapsed={sidebarCollapsed}
+        toggleCollapse={() => setSidebarCollapsed((value) => !value)}
+      />
+      <div className="app-main">
+        <Topbar
+          go={navigate}
+          admin={false}
+          profile={profile}
+          onMenu={openSidebar}
+        />
+        <div className="app-content">
+          {route === "/user/dashboard" && (
+            <UserOverview
+              go={navigate}
+              files={files}
+              token={token}
+              toast={toast}
+            />
+          )}{" "}
+          {route === "/user/upload" && (
+            <LiveUpload
+              files={files}
+              saveFiles={saveFiles}
+              toast={toast}
+              token={token}
+            />
+          )}{" "}
+          {route === "/user/files" && (
+            <FilesTable
+              files={files}
+              saveFiles={saveFiles}
+              toast={toast}
+              token={token}
+              go={navigate}
+            />
+          )}{" "}
+          {route === "/user/analytics" && <Analytics token={token} />}{" "}
+          {route === "/user/earnings" && <Earnings token={token} />}{" "}
+          {route === "/user/withdraw" && (
+            <LiveWithdrawal token={token} toast={toast} />
+          )}{" "}
+          {route === "/user/premium" && <PremiumStatus />}{" "}
+          {route === "/user/events" && (
+            <LiveUserEvents token={token} toast={toast} />
+          )}{" "}
+          {route === "/user/tickets" && (
+            <LiveTickets token={token} toast={toast} />
+          )}{" "}
+          {route === "/user/bots" && <LiveBots token={token} toast={toast} />}{" "}
+          {route === "/user/settings" && <LiveSettings />}
+        </div>
+      </div>
+    </div>
+  );
+}
+function NavIcon({ route }: { route: string }) {
+  const common = {
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.8,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  };
+  const icons: Record<string, React.ReactNode> = {
+    "/user/dashboard": (
+      <>
+        <rect x="3" y="3" width="7" height="7" rx="1.5" />
+        <rect x="14" y="3" width="7" height="7" rx="1.5" />
+        <rect x="3" y="14" width="7" height="7" rx="1.5" />
+        <rect x="14" y="14" width="7" height="7" rx="1.5" />
+      </>
+    ),
+    "/admin/dashboard": (
+      <>
+        <rect x="3" y="3" width="7" height="7" rx="1.5" />
+        <rect x="14" y="3" width="7" height="7" rx="1.5" />
+        <rect x="3" y="14" width="7" height="7" rx="1.5" />
+        <rect x="14" y="14" width="7" height="7" rx="1.5" />
+      </>
+    ),
+    "/user/upload": (
+      <>
+        <path d="M12 16V4" />
+        <path d="m7 9 5-5 5 5" />
+        <path d="M5 20h14" />
+      </>
+    ),
+    "/user/files": (
+      <>
+        <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21z" />
+        <path d="M4 5.5v13A2.5 2.5 0 0 1 6.5 16H20" />
+      </>
+    ),
+    "/user/analytics": (
+      <>
+        <path d="M3 3v18h18" />
+        <path d="m7 14 4-4 3 3 6-7" />
+      </>
+    ),
+    "/admin/analytics": (
+      <>
+        <path d="M3 3v18h18" />
+        <path d="m7 14 4-4 3 3 6-7" />
+      </>
+    ),
+    "/admin/traffic": (
+      <>
+        <path d="M4 19V5" />
+        <path d="M4 19h17" />
+        <path d="m7 15 4-4 3 2 6-7" />
+      </>
+    ),
+    "/user/earnings": (
+      <>
+        <path d="M12 2v20" />
+        <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+      </>
+    ),
+    "/admin/earnings": (
+      <>
+        <path d="M12 2v20" />
+        <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+      </>
+    ),
+    "/user/withdraw": (
+      <>
+        <path d="M7 17 17 7" />
+        <path d="M8 7h9v9" />
+        <path d="M4 20h16" />
+      </>
+    ),
+    "/user/premium": (
+      <>
+        <path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z" />
+      </>
+    ),
+    "/user/events": (
+      <>
+        <rect x="3" y="5" width="18" height="16" rx="2" />
+        <path d="M16 3v4M8 3v4M3 10h18" />
+      </>
+    ),
+    "/user/tickets": (
+      <>
+        <path d="M21 15a4 4 0 0 1-4 4H7l-4 2V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+      </>
+    ),
+    "/user/bots": (
+      <>
+        <rect x="5" y="7" width="14" height="13" rx="3" />
+        <path d="M12 3v4M9 12h.01M15 12h.01M9 16h6M3 11v5M21 11v5" />
+      </>
+    ),
+    "/user/settings": (
+      <>
+        <circle cx="12" cy="12" r="3" />
+        <path d="m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.7-.7a8 8 0 0 1-1.7 1l-.3 1.8h-2.8l-.3-1.8a8 8 0 0 1-1.7-1l-1.7.7-1.4-2.4L7.3 15a8 8 0 0 1 0-2l-1.4-1.1 1.4-2.4 1.7.7a8 8 0 0 1 1.7-1l.3-1.8h2.8l.3 1.8a8 8 0 0 1 1.7 1l1.7-.7 1.4 2.4-1.4 1.1a8 8 0 0 1-.1 2z" />
+      </>
+    ),
+    "/admin/users": (
+      <>
+        <path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+        <circle cx="10" cy="7" r="4" />
+        <path d="M20 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8" />
+      </>
+    ),
+    "/admin/creators": (
+      <>
+        <path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+        <circle cx="10" cy="7" r="4" />
+        <path d="m19 8 1.5 1.5L23 7" />
+      </>
+    ),
+    "/admin/admins": (
+      <>
+        <circle cx="9" cy="8" r="4" />
+        <path d="M3 21v-2a6 6 0 0 1 12 0v2M19 8v6M16 11h6" />
+      </>
+    ),
+    "/admin/payments": (
+      <>
+        <path d="M3 7h18v13H3z" />
+        <path d="M3 10h18M7 15h4" />
+        <path d="M6 7V4h14" />
+      </>
+    ),
+    "/admin/rewards": (
+      <>
+        <rect x="3" y="8" width="18" height="13" rx="2" />
+        <path d="M12 8v13M3 12h18M12 8H7a3 3 0 1 1 3-3zM12 8h5a3 3 0 1 0-3-3z" />
+      </>
+    ),
+    "/admin/referrals": (
+      <>
+        <circle cx="6" cy="6" r="3" />
+        <circle cx="18" cy="18" r="3" />
+        <path d="M8.5 8.5 15.5 15.5M18 3v5h-5" />
+      </>
+    ),
+    "/admin/revenue": (
+      <>
+        <path d="M4 19V5" />
+        <path d="M4 19h17" />
+        <path d="m7 15 4-4 3 2 6-7" />
+      </>
+    ),
+    "/admin/withdrawals": (
+      <>
+        <path d="M12 3v12m-5-5 5 5 5-5" />
+        <path d="M4 20h16" />
+      </>
+    ),
+    "/admin/files": (
+      <>
+        <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21z" />
+        <path d="M4 5.5v13A2.5 2.5 0 0 1 6.5 16H20" />
+      </>
+    ),
+    "/admin/events": (
+      <>
+        <rect x="3" y="5" width="18" height="16" rx="2" />
+        <path d="M16 3v4M8 3v4M3 10h18" />
+      </>
+    ),
+    "/admin/tickets": (
+      <>
+        <path d="M21 15a4 4 0 0 1-4 4H7l-4 2V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+      </>
+    ),
+    "/admin/reports": (
+      <>
+        <path d="M12 3 2.8 19a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3z" />
+        <path d="M12 9v4m0 4h.01" />
+      </>
+    ),
+    "/admin/views": (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 2" />
+      </>
+    ),
+    "/admin/bot-activity": (
+      <>
+        <rect x="5" y="7" width="14" height="13" rx="3" />
+        <path d="M12 3v4M9 12h.01M15 12h.01M9 16h6" />
+      </>
+    ),
+    "/admin/settings": (
+      <>
+        <circle cx="12" cy="12" r="3" />
+        <path d="m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.7-.7a8 8 0 0 1-1.7 1l-.3 1.8h-2.8l-.3-1.8a8 8 0 0 1-1.7-1l-1.7.7-1.4-2.4L7.3 15a8 8 0 0 1 0-2l-1.4-1.1 1.4-2.4 1.7.7a8 8 0 0 1 1.7-1l.3-1.8h2.8l.3 1.8a8 8 0 0 1 1.7 1l1.7-.7 1.4 2.4-1.4 1.1a8 8 0 0 1-.1 2z" />
+      </>
+    ),
+  };
+  return (
+    <svg
+      className="nav-icon"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      {...common}
+    >
+      {icons[route] || <circle cx="12" cy="12" r="8" />}
+    </svg>
+  );
+}
+function Sidebar({
+  nav,
+  route,
+  go,
+  admin,
+  open,
+  close,
+  collapsed,
+  toggleCollapse,
+}: {
+  nav: string[][];
+  route: string;
+  go: (p: string) => void;
+  admin: boolean;
+  open: boolean;
+  close: () => void;
+  collapsed: boolean;
+  toggleCollapse: () => void;
+}) {
+  const leave = () => {
+    if (admin) {
+      sessionStorage.removeItem("nightbox-admin-token");
+      sessionStorage.removeItem("nightbox-admin");
+    } else {
+      localStorage.removeItem("nightbox-token");
+      localStorage.removeItem("nightbox-profile");
+    }
+    go(admin ? "/admin/login" : "/");
+  };
+  const renderLink = (x: string[]) => (
+    <button
+      className={route === x[1] ? "active" : ""}
+      key={x[1]}
+      onClick={() => go(x[1])}
+    >
+      <i>
+        <NavIcon route={x[1]} />
+      </i>
+      <span>{x[0]}</span>
+    </button>
+  );
+  const handleClose = () => {
+    toggleCollapse();
+    close();
+  };
+  return (
+    <>
+      <button
+        className={`drawer-scrim ${open ? "visible" : ""}`}
+        aria-label="Close menu"
+        onClick={close}
+      />
+      <aside
+        className={`sidebar ${admin ? "admin-side" : ""} ${open ? "drawer-open" : ""} ${collapsed ? "sidebar-collapsed" : ""}`}
+      >
+        <div className="sidebar-head">
+          <Brand dark go={go} />
+          <button
+            className="drawer-close"
+            aria-label={collapsed ? "Open sidebar" : "Close sidebar"}
+            title={collapsed ? "Open sidebar" : "Close sidebar"}
+            onClick={handleClose}
+          >
+            ×
+          </button>
+        </div>
+        {admin && <Pill tone="orange">ADMIN</Pill>}
+        <nav>
+          {admin
+            ? adminNavGroups.map((group) => (
+                <section className="sidebar-group" key={group.label}>
+                  <span>{group.label}</span>
+                  {group.routes.map((path) => {
+                    const item = nav.find((x) => x[1] === path);
+                    return item ? renderLink(item) : null;
+                  })}
+                </section>
+              ))
+            : nav.map(renderLink)}
+        </nav>
+        <div className="side-bottom">
+          <div className="storage">
+            <span>
+              <b>{admin ? "Server capacity" : "Your storage"}</b>
+              <small>
+                {admin ? "Configured in deployment" : "Reported by backend"}
+              </small>
+            </span>
+            <i>
+              <em style={{ width: "0%" }} />
+            </i>
+          </div>
+          <button onClick={leave}>↪ Log out</button>
+        </div>
+      </aside>
+    </>
+  );
+}
+function Topbar({
+  go,
+  admin,
+  profile,
+  onMenu,
+}: {
+  go: (p: string) => void;
+  admin: boolean;
+  profile?: AccountProfile | null;
+  onMenu: () => void;
+}) {
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const displayName = profile?.name || profile?.email || "Signed-in creator";
+  const initials =
+    displayName
+      .split(/\s+/)
+      .map((part) => part[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() || "CR";
+  const profileStyle = profile?.picture
+    ? { backgroundImage: `url(${JSON.stringify(profile.picture)})` }
+    : undefined;
+  const nav = admin ? adminNav : userNav;
+  const results = nav.filter((item) =>
+    item[0].toLowerCase().includes(query.trim().toLowerCase()),
+  );
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setQuery("");
+  };
+  const openRoute = (path: string) => {
+    closeSearch();
+    setQuickOpen(false);
+    go(path);
+  };
+  const handleSearchKey = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") closeSearch();
+    if (event.key === "Enter" && results[0]) openRoute(results[0][1]);
+  };
+  const logout = () => {
+    if (admin) {
+      sessionStorage.removeItem("nightbox-admin-token");
+      sessionStorage.removeItem("nightbox-admin");
+    } else {
+      localStorage.removeItem("nightbox-token");
+      localStorage.removeItem("nightbox-profile");
+    }
+    go(admin ? "/admin/login" : "/auth/login");
+  };
+  return (
+    <header className="topbar">
+      <button
+        className="app-menu"
+        aria-label="Open navigation menu"
+        onClick={onMenu}
+      >
+        ☰
+      </button>
+      <div>
+        <span>{admin ? "NightBox Operations" : "Creator workspace"}</span>
+        <b>
+          {admin ? "Connected" : "Connected"}
+          <i />
+        </b>
+      </div>
+      <div className="topbar-actions">
+        <div className="topbar-inline-search">
+          <span aria-hidden="true">⌕</span>
+          <input
+            value={query}
+            onFocus={() => {
+              setSearchOpen(true);
+              setQuickOpen(false);
+            }}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setSearchOpen(true);
+              setQuickOpen(false);
+            }}
+            onKeyDown={handleSearchKey}
+            placeholder="Search dashboard..."
+            aria-label="Search dashboard pages"
+          />
+          {query && (
+            <button
+              type="button"
+              aria-label="Clear dashboard search"
+              onClick={closeSearch}
+            >
+              ×
+            </button>
+          )}
+        </div>
+        <button
+          className="icon-btn topbar-search-toggle"
+          aria-label={
+            searchOpen ? "Close dashboard search" : "Search dashboard"
+          }
+          aria-expanded={searchOpen}
+          onClick={() => {
+            if (searchOpen) closeSearch();
+            else {
+              setSearchOpen(true);
+              setQuickOpen(false);
+            }
+          }}
+        >
+          {searchOpen ? "×" : "⌕"}
+        </button>
+        <button
+          className="icon-btn"
+          aria-label="Open quick actions"
+          aria-expanded={quickOpen}
+          onClick={() => {
+            setQuickOpen((value) => !value);
+            setSearchOpen(false);
+          }}
+        >
+          ♢
+        </button>
+        <button
+          className="avatar"
+          onClick={() =>
+            openRoute(admin ? "/admin/settings" : "/user/settings")
+          }
+          aria-label={`${displayName} account`}
+        >
+          {!admin && profile?.picture ? (
+            <span
+              className="avatar-image"
+              role="img"
+              aria-label="Google profile"
+              style={profileStyle}
+            />
+          ) : admin ? (
+            "OA"
+          ) : (
+            initials
+          )}
+        </button>
+        <span className="user-name">
+          <b>{admin ? "Operations admin" : displayName}</b>
+          <small>
+            {admin ? "Server-authorized" : profile?.email || "Google account"}
+          </small>
+        </span>
+        <button className="logout-btn" onClick={logout}>
+          Log out
+        </button>
+        {searchOpen && (
+          <div className="topbar-panel topbar-search-panel">
+            <div className="topbar-search-results">
+              {results.length ? (
+                results.map((item) => (
+                  <button key={item[1]} onClick={() => openRoute(item[1])}>
+                    <span>{item[2]}</span>
+                    <b>{item[0]}</b>
+                    <small>{item[1]}</small>
+                  </button>
+                ))
+              ) : (
+                <p>No matching dashboard page.</p>
+              )}
+            </div>
+          </div>
+        )}
+        {quickOpen && (
+          <div className="topbar-panel quick-actions-panel">
+            <b className="quick-actions-title">Quick actions</b>
+            {(admin
+              ? [
+                  ["♙", "Review users", "/admin/users"],
+                  ["▱", "Manage files", "/admin/files"],
+                  ["⚙", "Open settings", "/admin/settings"],
+                ]
+              : [
+                  ["↑", "Upload a video", "/user/upload"],
+                  ["▱", "Open my files", "/user/files"],
+                  ["⚙", "Open settings", "/user/settings"],
+                ]
+            ).map((item) => (
+              <button key={item[2]} onClick={() => openRoute(item[2])}>
+                <span>{item[0]}</span>
+                <b>{item[1]}</b>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </header>
+  );
+}
+function AppTitle({
+  eyebrow,
+  title,
+  action,
+}: {
+  eyebrow: string;
+  title: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="app-title">
+      <div>
+        <span>{eyebrow}</span>
+        <h1>{title}</h1>
+      </div>
+      {action}
+    </div>
+  );
+}
+function LiveTickets({
+  token,
+  toast,
+}: {
+  token: string;
+  toast: (s: string) => void;
+}) {
+  const [rows, setRows] = useState<CreatorTicket[]>([]);
+  const [subject, setSubject] = useState("");
+  const [message, setMessage] = useState("");
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState<string | null>(null);
+  const load = async () => {
+    try {
+      const result = await getCreatorTickets(token);
+      setRows(result.tickets);
+    } catch {
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    void Promise.resolve().then(load);
+  }, [token]);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await createCreatorTicket(token, subject, message);
+      setSubject("");
+      setMessage("");
+      toast("Support ticket sent. Replies will appear below.");
+      await load();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Unable to create ticket");
+    }
+  };
+  const sendReply = async (row: CreatorTicket) => {
+    const reply = (drafts[row.id] || "").trim();
+    if (!reply) return;
+    setSending(row.id);
+    try {
+      await replyToCreatorTicket(token, row.id, reply);
+      setDrafts((current) => ({ ...current, [row.id]: "" }));
+      toast("Reply sent to support");
+      await load();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Unable to send reply");
+    } finally {
+      setSending(null);
+    }
+  };
+  return (
+    <>
+      <AppTitle eyebrow="SUPPORT" title="Support tickets" />
+      <form className="card compact-form ticket-form" onSubmit={submit}>
+        <h2>Open a ticket</h2>
+        <p className="form-intro">
+          Tell our team what you need. Your message and every reply stay
+          together below.
+        </p>
+        <label>
+          Subject
+          <input
+            required
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+          />
+        </label>
+        <label>
+          Message
+          <textarea
+            required
+            rows={4}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+          />
+        </label>
+        <button className="btn btn-primary">Send to support</button>
+      </form>
+      <section className="tickets-history">
+        <div className="tickets-history-heading">
+          <div>
+            <span>YOUR CONVERSATIONS</span>
+            <h2>Messages & replies</h2>
+          </div>
+          <button
+            className="btn btn-outline"
+            onClick={() => {
+              setLoading(true);
+              void load();
+            }}
+          >
+            Refresh
+          </button>
+        </div>
+        {loading ? (
+          <div className="card tickets-empty">
+            Loading your support conversations…
+          </div>
+        ) : rows.length ? (
+          rows.map((row) => {
+            const messages = row.messages?.length
+              ? row.messages
+              : [
+                  {
+                    authorType: "creator" as const,
+                    message: row.message,
+                    createdAt: row.createdAt,
+                  },
+                  ...(row.adminNote
+                    ? [
+                        {
+                          authorType: "admin" as const,
+                          message: row.adminNote,
+                          createdAt: row.updatedAt,
+                        },
+                      ]
+                    : []),
+                ];
+            const closed = ["resolved", "closed"].includes(
+              row.status.toLowerCase(),
+            );
+            return (
+              <article className="card ticket-conversation" key={row.id}>
+                <header>
+                  <div>
+                    <span className="ticket-subject">{row.subject}</span>
+                    <small>
+                      Sent {new Date(row.createdAt).toLocaleString()}
+                    </small>
+                  </div>
+                  <span
+                    className={`ticket-status status-${row.status.toLowerCase().replace(/[^a-z]+/g, "-")}`}
+                  >
+                    {row.status.replaceAll("_", " ")}
+                  </span>
+                </header>
+                <div className="ticket-thread">
+                  {messages.map((item, index) => (
+                    <div
+                      className={
+                        item.authorType === "admin"
+                          ? "ticket-reply"
+                          : "ticket-message"
+                      }
+                      key={item.id || `${row.id}-${index}`}
+                    >
+                      <span>
+                        {item.authorType === "admin" ? (
+                          <>
+                            <i aria-hidden="true">N</i> NightBox support
+                          </>
+                        ) : (
+                          "Your message"
+                        )}
+                        <small>
+                          {new Date(item.createdAt).toLocaleString()}
+                        </small>
+                      </span>
+                      <p>{item.message}</p>
+                    </div>
+                  ))}
+                </div>
+                {closed ? (
+                  <div className="ticket-waiting">
+                    This ticket is closed. Please open a new ticket if you need
+                    further help.
+                  </div>
+                ) : (
+                  <div className="ticket-reply-form">
+                    <label htmlFor={`reply-${row.id}`}>Reply to support</label>
+                    <textarea
+                      id={`reply-${row.id}`}
+                      rows={3}
+                      maxLength={5000}
+                      value={drafts[row.id] || ""}
+                      onChange={(e) =>
+                        setDrafts((current) => ({
+                          ...current,
+                          [row.id]: e.target.value,
+                        }))
+                      }
+                      placeholder="Write your reply…"
+                    />
+                    <button
+                      className="btn btn-primary"
+                      disabled={
+                        sending === row.id || !(drafts[row.id] || "").trim()
+                      }
+                      onClick={() => void sendReply(row)}
+                    >
+                      {sending === row.id ? "Sending…" : "Send reply"}
+                    </button>
+                  </div>
+                )}
+              </article>
+            );
+          })
+        ) : (
+          <div className="card tickets-empty">
+            <b>No support messages yet</b>
+            <span>
+              When you send a ticket, your message and every reply from NightBox
+              support will appear here.
+            </span>
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+function LiveSettings() {
+  const token =
+    typeof window !== "undefined"
+      ? localStorage.getItem("nightbox-token")
+      : null;
+  const [profile, setProfile] = useState<
+    Awaited<ReturnType<typeof getCreatorProfile>>["profile"] | null
+  >(null);
+  const [status, setStatus] = useState("");
+  useEffect(() => {
+    if (token)
+      getCreatorProfile(token)
+        .then((data) => setProfile(data.profile))
+        .catch(() => setStatus("Unable to load creator profile"));
+  }, [token]);
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!token || !profile) return;
+    try {
+      const result = await updateCreatorProfile(token, {
+        displayName: profile.displayName,
+        bio: profile.bio,
+        avatarUrl: profile.avatarUrl,
+        brandColor: profile.brandColor,
+      });
+      setProfile(result.profile);
+      setStatus("Profile and branding saved");
+    } catch (error) {
+      setStatus(
+        error instanceof Error ? error.message : "Unable to save profile",
+      );
+    }
+  };
+  return (
+    <>
+      <AppTitle eyebrow="ACCOUNT" title="Settings" />
+      <form className="card compact-form" onSubmit={save}>
+        <div>
+          <h2>Creator profile & branding</h2>
+          <p>
+            These details are available to your creator profile and can be used
+            with branded conversion links.
+          </p>
+        </div>
+        {profile ? (
+          <>
+            <label>
+              Display name
+              <input
+                value={profile.displayName}
+                maxLength={80}
+                onChange={(e) =>
+                  setProfile({ ...profile, displayName: e.target.value })
+                }
+              />
+            </label>
+            <label>
+              Bio
+              <textarea
+                value={profile.bio}
+                maxLength={280}
+                rows={4}
+                onChange={(e) =>
+                  setProfile({ ...profile, bio: e.target.value })
+                }
+              />
+            </label>
+            <label>
+              Avatar URL
+              <input
+                value={profile.avatarUrl || ""}
+                onChange={(e) =>
+                  setProfile({ ...profile, avatarUrl: e.target.value || null })
+                }
+                placeholder="https://…"
+              />
+            </label>
+            <label>
+              Brand color
+              <input
+                type="color"
+                value={profile.brandColor}
+                onChange={(e) =>
+                  setProfile({ ...profile, brandColor: e.target.value })
+                }
+              />
+            </label>
+            <small>Public profile: /creator/{profile.publicSlug}</small>
+            <button className="btn btn-primary">Save profile</button>
+          </>
+        ) : (
+          <p>{status || "Loading profile…"}</p>
+        )}
+        {status && <p>{status}</p>}
+      </form>
+      <div className="card empty-state security-card">
+        <h2>Account security</h2>
+        <p>
+          Authentication, creator ownership, API keys and earnings permissions
+          are managed securely by NightBox.
+        </p>
+      </div>
+    </>
+  );
+}
+function CreatorPublicProfile({ slug }: { slug: string }) {
+  const [profile, setProfile] = useState<
+    Awaited<ReturnType<typeof getPublicCreatorProfile>>["profile"] | null
+  >(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    getPublicCreatorProfile(slug)
+      .then((result) => setProfile(result.profile))
+      .catch((reason) =>
+        setError(
+          reason instanceof Error ? reason.message : "Profile not found",
+        ),
+      );
+  }, [slug]);
+  if (error)
+    return (
+      <main className="public-site">
+        <section className="mini-cta">
+          <h2>{error}</h2>
+          <p>This creator profile is unavailable.</p>
+        </section>
+      </main>
+    );
+  if (!profile)
+    return (
+      <main className="public-site">
+        <section className="mini-cta">
+          <h2>Loading creator profile…</h2>
+        </section>
+      </main>
+    );
+  return (
+    <main className="public-site">
+      <section
+        className="page-hero"
+        style={{ borderColor: profile.brandColor }}
+      >
+        <Pill tone="orange">CREATOR PROFILE</Pill>
+        <h1>{profile.displayName || "NightBox creator"}</h1>
+        <p>{profile.bio || "Creator profile on NightBox."}</p>
+        <small>{profile.email}</small>
+      </section>
+    </main>
+  );
+}
+function LiveAdminTickets({ toast }: { toast: (s: string) => void }) {
+  const [rows, setRows] = useState<AdminTicket[]>([]);
+  const load = async () => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) {
+      toast("Admin session expired. Please sign in again.");
+      return;
+    }
+    try {
+      const result = await getAdminTickets(token);
+      setRows(result.tickets);
+    } catch (error) {
+      toast(
+        error instanceof Error ? error.message : "Unable to load support queue",
+      );
+      setRows([]);
+    }
+  };
+  useEffect(() => {
+    void load();
+  }, []);
+  const update = async (row: AdminTicket) => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) {
+      toast("Admin session expired. Please sign in again.");
+      return;
+    }
+    try {
+      await updateAdminTicket(
+        token,
+        row.id,
+        row.status,
+        (row.adminNote || "").trim(),
+      );
+      toast("Reply and ticket status saved");
+      await load();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Unable to update ticket");
+    }
+  };
+  const remove = async (row: AdminTicket) => {
+    if (
+      !window.confirm(`Delete ticket “${row.subject}”? This cannot be undone.`)
+    )
+      return;
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) return;
+    try {
+      await deleteAdminTicket(token, row.id);
+      setRows((current) => current.filter((item) => item.id !== row.id));
+      toast("Ticket deleted");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Unable to delete ticket");
+    }
+  };
+  return (
+    <>
+      <AppTitle
+        eyebrow="SUPPORT OPERATIONS"
+        title="Support queue"
+        action={
+          <button className="btn btn-dark" onClick={load}>
+            Refresh
+          </button>
+        }
+      />
+      <DataTable
+        headers={[
+          "USER",
+          "SUBJECT",
+          "CONVERSATION",
+          "REPLY TO CREATOR",
+          "STATUS",
+          "ACTION",
+        ]}
+        rows={rows.map((row) => {
+          const messages = row.messages?.length
+            ? row.messages
+            : [
+                {
+                  authorType: "creator" as const,
+                  message: row.message,
+                  createdAt: row.createdAt,
+                },
+                ...(row.adminNote
+                  ? [
+                      {
+                        authorType: "admin" as const,
+                        message: row.adminNote,
+                        createdAt: row.updatedAt,
+                      },
+                    ]
+                  : []),
+              ];
+          return [
+            row.email,
+            row.subject,
+            <div className="admin-ticket-thread" key={`thread-${row.id}`}>
+              {messages.map((item, index) => (
+                <p
+                  className={
+                    item.authorType === "admin"
+                      ? "admin-thread-reply"
+                      : "admin-thread-message"
+                  }
+                  key={item.id || `${row.id}-${index}`}
+                >
+                  <span className="admin-thread-heading">
+                    <b>
+                      {item.authorType === "admin"
+                        ? "NightBox support"
+                        : "Creator"}
+                    </b>
+                    <time dateTime={item.createdAt} title={item.createdAt}>
+                      {formatSupportTimestamp(item.createdAt)}
+                    </time>
+                  </span>
+                  <span className="admin-thread-body">{item.message}</span>
+                </p>
+              ))}
+            </div>,
+            <textarea
+              key={`reply-${row.id}`}
+              className="admin-ticket-reply"
+              aria-label={`Reply to ${row.email}`}
+              rows={3}
+              value={row.adminNote || ""}
+              placeholder="Write a reply the creator can see…"
+              onChange={(e) =>
+                setRows((current) =>
+                  current.map((item) =>
+                    item.id === row.id
+                      ? { ...item, adminNote: e.target.value }
+                      : item,
+                  ),
+                )
+              }
+            />,
+            <select
+              key={`status-${row.id}`}
+              value={row.status}
+              onChange={(e) =>
+                setRows((current) =>
+                  current.map((item) =>
+                    item.id === row.id
+                      ? { ...item, status: e.target.value }
+                      : item,
+                  ),
+                )
+              }
+            >
+              <option>open</option>
+              <option>in_progress</option>
+              <option>resolved</option>
+              <option>closed</option>
+            </select>,
+            <span className="admin-ticket-actions" key={`actions-${row.id}`}>
+              <button onClick={() => update(row)}>Save reply</button>
+              <button className="danger-link" onClick={() => void remove(row)}>
+                Delete
+              </button>
+            </span>,
+          ];
+        })}
+      />
+      {!rows.length && (
+        <div className="card empty-state">
+          <p>No support conversations to review.</p>
+        </div>
+      )}
+    </>
+  );
+}
+function LiveUserEvents({
+  token,
+  toast,
+}: {
+  token: string;
+  toast: (s: string) => void;
+}) {
+  const [events, setEvents] = useState<EventRecord[]>([]);
+  useEffect(() => {
+    getEvents()
+      .then((x) => setEvents(Array.isArray(x.events) ? x.events : []))
+      .catch(() => setEvents([]));
+  }, []);
+  return (
+    <>
+      <AppTitle eyebrow="COMMUNITY" title="Events" />
+      <CreatorRewardMilestones token={token} toast={toast} />
+      <div className="events-history">
+        <DataTable
+          headers={["EVENT", "DETAILS", "REWARD"]}
+          rows={events.map((event) => [
+            event.title,
+            event.description,
+            event.rewardNote || "See event details",
+          ])}
+        />
+      </div>
+      {!events.length && (
+        <div className="card empty-state">
+          <p>No active events are currently published.</p>
+        </div>
+      )}
+    </>
+  );
+}
+function LiveAdminReports({ toast }: { toast: (s: string) => void }) {
+  const [rows, setRows] = useState<AdminReport[]>([]);
+  const load = () => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (token)
+      getAdminReports(token)
+        .then((x) => setRows(x.reports))
+        .catch(() => setRows([]));
+  };
+  useEffect(load, []);
+  const update = async (row: AdminReport) => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) return;
+    try {
+      await updateAdminReport(token, row.id, row.status, row.adminNote || "");
+      toast("Report updated");
+      load();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Unable to update report");
+    }
+  };
+  return (
+    <>
+      <AppTitle
+        eyebrow="TRUST & SAFETY"
+        title="Reports and DMCA"
+        action={
+          <button className="btn btn-dark" onClick={load}>
+            Refresh
+          </button>
+        }
+      />
+      <DataTable
+        headers={["REPORTER", "REASON", "VIDEO", "STATUS", "ACTION"]}
+        rows={rows.map((row) => [
+          row.reporterEmail,
+          row.reason,
+          row.videoUrl || row.videoId || "Not specified",
+          <select
+            key={row.id}
+            value={row.status}
+            onChange={(e) => {
+              row.status = e.target.value;
+              setRows([...rows]);
+            }}
+          >
+            <option>open</option>
+            <option>in_review</option>
+            <option>resolved</option>
+            <option>rejected</option>
+          </select>,
+          <button key={row.id} onClick={() => update(row)}>
+            Save
+          </button>,
+        ])}
+      />
+      {!rows.length && (
+        <div className="card empty-state">
+          <p>No reports are currently pending.</p>
+        </div>
+      )}
+    </>
+  );
+}
+function LiveAdminEvents({ toast }: { toast: (s: string) => void }) {
+  const [rows, setRows] = useState<AdminEvent[]>([]);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const load = () => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (token)
+      getAdminEvents(token)
+        .then((x) => setRows(x.events))
+        .catch(() => setRows([]));
+  };
+  useEffect(load, []);
+  const create = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) return;
+    try {
+      await createAdminEvent(token, { title, description, active: 1 });
+      setTitle("");
+      setDescription("");
+      toast("Event published");
+      load();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Unable to publish event");
+    }
+  };
+  const toggle = async (row: AdminEvent) => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) return;
+    try {
+      await updateAdminEvent(token, row.id, row.active ? 0 : 1);
+      load();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Unable to update event");
+    }
+  };
+  return (
+    <>
+      <AppTitle eyebrow="COMMUNITY OPERATIONS" title="Events &amp; updates" />
+      <form className="card compact-form" onSubmit={create}>
+        <h2>Publish event</h2>
+        <label>
+          Title
+          <input
+            required
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+        </label>
+        <label>
+          Description
+          <textarea
+            required
+            rows={3}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </label>
+        <button className="btn btn-primary">Publish event</button>
+      </form>
+      <DataTable
+        headers={["EVENT", "DESCRIPTION", "STATUS", "ACTION"]}
+        rows={rows.map((row) => [
+          row.title,
+          row.description,
+          row.active ? "Active" : "Hidden",
+          <button key={row.id} onClick={() => toggle(row)}>
+            {row.active ? "Hide" : "Publish"}
+          </button>,
+        ])}
+      />
+    </>
+  );
+}
+function LiveAdminSettings({ toast }: { toast: (s: string) => void }) {
+  const [settings, setSettings] = useState<Record<
+    string,
+    string | boolean
+  > | null>(null);
+  const [content, setContent] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const notify = useEffectEvent(toast);
+  useEffect(() => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    Promise.resolve()
+      .then(() => {
+        if (!token) throw new Error("Administrator session missing");
+        return Promise.all([getAdminSettings(token), getAdminAdsTxt(token)]);
+      })
+      .then(([config, ads]) => {
+        setSettings(config.settings);
+        setContent(ads.content);
+      })
+      .catch(() => notify("Unable to load admin settings"))
+      .finally(() => setLoading(false));
+  }, []);
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) return;
+    setSaving(true);
+    try {
+      const result = await updateAdminAdsTxt(token, content);
+      setContent(result.content);
+      toast("ads.txt files published");
+    } catch (error) {
+      toast(
+        error instanceof Error
+          ? error.message
+          : "Unable to publish ads.txt files",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <>
+      <AppTitle eyebrow="PLATFORM" title="Settings" />
+      <div className="card settings-list">
+        {settings ? (
+          Object.entries(settings).map(([key, value]) => (
+            <div className="table-row" key={key}>
+              <b>{key}</b>
+              <span>{String(value)}</span>
+            </div>
+          ))
+        ) : (
+          <p className="empty-copy">
+            {loading
+              ? "Loading platform configuration…"
+              : "Unable to load platform configuration."}
+          </p>
+        )}
+      </div>
+      <div className="card empty-state">
+        <p>
+          Secrets are intentionally not exposed in the admin UI. Change
+          deployment values through the server environment.
+        </p>
+      </div>
+      <form className="card compact-form admin-adstxt-form" onSubmit={save}>
+        <div>
+          <h2>ads.txt publisher declarations</h2>
+          <p>
+            This single editor publishes identical plain text to{" "}
+            <a
+              href="https://nightbox.in/ads.txt"
+              target="_blank"
+              rel="noreferrer"
+            >
+              /ads.txt
+            </a>{" "}
+            and{" "}
+            <a
+              href="https://nightbox.in/app-ads.txt"
+              target="_blank"
+              rel="noreferrer"
+            >
+              /app-ads.txt
+            </a>
+            . Add only seller records provided by your advertising partners, one
+            record per line.
+          </p>
+        </div>
+        <label htmlFor="admin-ads-txt">
+          File contents
+          <textarea
+            id="admin-ads-txt"
+            rows={12}
+            maxLength={65536}
+            spellCheck={false}
+            placeholder="Paste authorized seller records from your ad network"
+            value={content}
+            onChange={(event) => setContent(event.target.value)}
+          />
+        </label>
+        <div className="ads-txt-actions">
+          <small>
+            {new TextEncoder().encode(content).length.toLocaleString()} / 65,536
+            bytes · Plain text only
+          </small>
+          <button className="btn btn-primary" disabled={loading || saving}>
+            {saving ? "Publishing…" : "Publish both files"}
+          </button>
+        </div>
+      </form>
+    </>
+  );
+}
+function LiveWithdrawal({
+  token,
+  toast,
+}: {
+  token: string;
+  toast: (s: string) => void;
+}) {
+  const [data, setData] = useState<Awaited<
+    ReturnType<typeof getCreatorWithdrawals>
+  > | null>(null);
+  const [amount, setAmount] = useState("");
+  const [method, setMethod] = useState<"UPI" | "PayPal">("UPI");
+  const [payoutAccount, setPayoutAccount] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const load = () =>
+    getCreatorWithdrawals(token)
+      .then(setData)
+      .catch(() => setData(null));
+  useEffect(() => {
+    Promise.resolve().then(load);
+  }, [token]);
+  const balance = (data?.balanceMicros || 0) / 1000000;
+  const minimum = (data?.minimumMicros || 10000000) / 1000000;
+  const eligible = balance >= minimum;
+  const progress = Math.min(100, minimum ? (balance / minimum) * 100 : 0);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const value = Number(amount);
+    if (!Number.isFinite(value) || value < minimum || value > balance) {
+      toast(`Enter an amount between ${money(minimum)} and ${money(balance)}`);
+      return;
+    }
     setSubmitting(true);
-    try{
-      await createWithdrawal(token,Math.round(value*1000000),method,payoutAccount.trim());
+    try {
+      await createWithdrawal(
+        token,
+        Math.round(value * 1000000),
+        method,
+        payoutAccount.trim(),
+      );
       toast("Withdrawal request submitted for review");
       setAmount("");
       await load();
-    }catch(error){toast(error instanceof Error?error.message:"Withdrawal failed")}
-    finally{setSubmitting(false)}
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Withdrawal failed");
+    } finally {
+      setSubmitting(false);
+    }
   };
-  return <>
-    <AppTitle eyebrow="PAYOUTS" title="Billing & payments"/>
-    <p className="withdraw-subtitle">Manage your payout method and review every withdrawal request.</p>
-    <div className="withdraw-billing-grid">
-      <form className="card payout-form withdrawal-methods" onSubmit={submit}>
-        <div className="billing-panel-head"><span className="billing-icon">▣</span><div><h2>Billing options</h2><p>Select how you want to receive your creator payouts.</p></div></div>
-        <div className="payment-methods">
-          <button type="button" className={`payment-method ${method==="UPI"?"selected":""}`} aria-pressed={method==="UPI"} onClick={()=>{setMethod("UPI");setPayoutAccount("")}}><span className="method-radio"/><span><b>UPI transfer</b><small>Fast local payout</small></span>{method==="UPI"&&<em>Selected</em>}</button>
-          <button type="button" className={`payment-method ${method==="PayPal"?"selected":""}`} aria-pressed={method==="PayPal"} onClick={()=>{setMethod("PayPal");setPayoutAccount("")}}><span className="method-radio"/><span><b>PayPal</b><small>International payout</small></span>{method==="PayPal"&&<em>Selected</em>}</button>
+  return (
+    <>
+      <AppTitle eyebrow="PAYOUTS" title="Billing & payments" />
+      <p className="withdraw-subtitle">
+        Manage your payout method and review every withdrawal request.
+      </p>
+      <div className="withdraw-billing-grid">
+        <form className="card payout-form withdrawal-methods" onSubmit={submit}>
+          <div className="billing-panel-head">
+            <span className="billing-icon">▣</span>
+            <div>
+              <h2>Billing options</h2>
+              <p>Select how you want to receive your creator payouts.</p>
+            </div>
+          </div>
+          <div className="payment-methods">
+            <button
+              type="button"
+              className={`payment-method ${method === "UPI" ? "selected" : ""}`}
+              aria-pressed={method === "UPI"}
+              onClick={() => {
+                setMethod("UPI");
+                setPayoutAccount("");
+              }}
+            >
+              <span className="method-radio" />
+              <span>
+                <b>UPI transfer</b>
+                <small>Fast local payout</small>
+              </span>
+              {method === "UPI" && <em>Selected</em>}
+            </button>
+            <button
+              type="button"
+              className={`payment-method ${method === "PayPal" ? "selected" : ""}`}
+              aria-pressed={method === "PayPal"}
+              onClick={() => {
+                setMethod("PayPal");
+                setPayoutAccount("");
+              }}
+            >
+              <span className="method-radio" />
+              <span>
+                <b>PayPal</b>
+                <small>International payout</small>
+              </span>
+              {method === "PayPal" && <em>Selected</em>}
+            </button>
+          </div>
+          <label className="payout-detail-label">
+            {method === "UPI" ? "UPI ID" : "PayPal email"}
+            <input
+              required
+              type={method === "UPI" ? "text" : "email"}
+              autoComplete={method === "UPI" ? "off" : "email"}
+              inputMode={method === "UPI" ? "email" : "email"}
+              maxLength={254}
+              value={payoutAccount}
+              onChange={(e) => setPayoutAccount(e.target.value)}
+              placeholder={method === "UPI" ? "name@bank" : "name@example.com"}
+            />
+            <small>
+              {method === "UPI"
+                ? "Enter the UPI ID where you want to receive payment."
+                : "Enter the email linked to your PayPal account."}
+            </small>
+          </label>
+          <label className="payout-detail-label">
+            Withdrawal amount (USD)
+            <input
+              required
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              type="number"
+              min={minimum}
+              max={balance}
+              step="0.01"
+              placeholder="Enter withdrawal amount in USD"
+            />
+            <small>
+              Minimum payout: {money(minimum)}. Requests are reviewed before
+              payment.
+            </small>
+          </label>
+          <button
+            className="btn btn-primary payout-submit"
+            disabled={!eligible || submitting}
+          >
+            {submitting
+              ? "Submitting…"
+              : eligible
+                ? "Request payout"
+                : "Minimum balance required"}
+          </button>
+        </form>
+        <section className="card payout-status-card">
+          <div className="billing-panel-head">
+            <span className="billing-icon status-icon">⌁</span>
+            <div>
+              <h2>Current payment status</h2>
+              <p>Your live balance and payout eligibility.</p>
+            </div>
+          </div>
+          <div className="balance-highlight">
+            <div className="balance-heading">
+              <span>
+                <b>Available balance</b>
+                <small>Minimum withdrawal: {money(minimum)}</small>
+              </span>
+              <strong>{money(balance)}</strong>
+            </div>
+            <div className="balance-progress">
+              <i style={{ width: `${progress}%` }} />
+            </div>
+            <div
+              className={`eligibility-message ${eligible ? "eligible" : ""}`}
+            >
+              {eligible
+                ? "Your balance is ready for a payout request."
+                : `Earn ${money(Math.max(0, minimum - balance))} more to unlock payout requests.`}
+            </div>
+          </div>
+          <div className="paid-summary">
+            <span className="paid-check">✓</span>
+            <span>
+              <b>Total paid out</b>
+              <small>Successfully processed payouts</small>
+            </span>
+            <strong>
+              {money(
+                (data?.withdrawals || [])
+                  .filter((row) => row.status === "paid")
+                  .reduce((sum, row) => sum + row.amountMicros / 1000000, 0),
+              )}
+            </strong>
+          </div>
+        </section>
+      </div>
+      <section className="card payout-history-card">
+        <div className="billing-panel-head">
+          <span className="billing-icon history-icon">▣</span>
+          <div>
+            <h2>Payout history</h2>
+            <p>Track requests submitted from your creator workspace.</p>
+          </div>
         </div>
-        <label className="payout-detail-label">{method==="UPI"?"UPI ID":"PayPal email"}
-          <input required type={method==="UPI"?"text":"email"} autoComplete={method==="UPI"?"off":"email"} inputMode={method==="UPI"?"email":"email"} maxLength={254} value={payoutAccount} onChange={e=>setPayoutAccount(e.target.value)} placeholder={method==="UPI"?"name@bank":"name@example.com"}/>
-          <small>{method==="UPI"?"Enter the UPI ID where you want to receive payment.":"Enter the email linked to your PayPal account."}</small>
-        </label>
-        <label className="payout-detail-label">Withdrawal amount (USD)
-          <input required value={amount} onChange={e=>setAmount(e.target.value)} type="number" min={minimum} max={balance} step="0.01" placeholder="Enter withdrawal amount in USD"/>
-          <small>Minimum payout: {money(minimum)}. Requests are reviewed before payment.</small>
-        </label>
-        <button className="btn btn-primary payout-submit" disabled={!eligible||submitting}>{submitting?"Submitting…":eligible?"Request payout":"Minimum balance required"}</button>
-      </form>
-      <section className="card payout-status-card"><div className="billing-panel-head"><span className="billing-icon status-icon">⌁</span><div><h2>Current payment status</h2><p>Your live balance and payout eligibility.</p></div></div><div className="balance-highlight"><div className="balance-heading"><span><b>Available balance</b><small>Minimum withdrawal: {money(minimum)}</small></span><strong>{money(balance)}</strong></div><div className="balance-progress"><i style={{width:`${progress}%`}}/></div><div className={`eligibility-message ${eligible?"eligible":""}`}>{eligible?"Your balance is ready for a payout request.":`Earn ${money(Math.max(0,minimum-balance))} more to unlock payout requests.`}</div></div><div className="paid-summary"><span className="paid-check">✓</span><span><b>Total paid out</b><small>Successfully processed payouts</small></span><strong>{money((data?.withdrawals||[]).filter(row=>row.status==="paid").reduce((sum,row)=>sum+row.amountMicros/1000000,0))}</strong></div></section>
-    </div>
-    <section className="card payout-history-card"><div className="billing-panel-head"><span className="billing-icon history-icon">▣</span><div><h2>Payout history</h2><p>Track requests submitted from your creator workspace.</p></div></div><div className="withdraw-history"><DataTable headers={["REQUEST","AMOUNT","METHOD","PAYOUT ACCOUNT","STATUS","REQUESTED"]} rows={(data?.withdrawals||[]).map(row=>[row.id.slice(0,8),money(row.amountMicros/1000000),row.method,row.payoutAccount||"Not provided",row.status,new Date(row.requestedAt).toLocaleDateString()])}/></div></section>
-  </>;
+        <div className="withdraw-history">
+          <DataTable
+            headers={[
+              "REQUEST",
+              "AMOUNT",
+              "METHOD",
+              "PAYOUT ACCOUNT",
+              "STATUS",
+              "REQUESTED",
+            ]}
+            rows={(data?.withdrawals || []).map((row) => [
+              row.id.slice(0, 8),
+              money(row.amountMicros / 1000000),
+              row.method,
+              row.payoutAccount || "Not provided",
+              row.status,
+              new Date(row.requestedAt).toLocaleDateString(),
+            ])}
+          />
+        </div>
+      </section>
+    </>
+  );
 }
-function LiveBots({token,toast}:{token:string;toast:(s:string)=>void}){
-  const [keys,setKeys]=useState<Array<{id:string;prefix:string;createdAt:string;lastUsedAt:string|null;revokedAt:string|null}>>([]);
-  const [newKey,setNewKey]=useState("");
-  const [copiedKey,setCopiedKey]=useState<string|null>(null);
-  const bots=[
-    {name:"Nightbox connection",handle:"nightbox_connbot",description:"Link this Telegram chat to your creator account.",comingSoon:false},
-    {name:"Nightbox Files upload bot",handle:"nightbox_uploadbot",description:"Send supported video or document uploads.",comingSoon:false},
-    {name:"NIghtheast to nightbox converter",handle:"nh_to_nb_bot",description:"Submit a supported Nightheast video link.",comingSoon:false},
-    {name:"Nightbox to Nightbox",handle:"nb_to_nbbot",description:"Submit a supported video link.",comingSoon:false},
-    {name:"TB to Nightbox converter",handle:"tb_to_nb_bot",description:"Submit a supported TeraBox video link.",comingSoon:true},
-    {name:"DW to Nightbox converter",handle:"dw_to_nb_bot",description:"Submit a supported Diskwala video link.",comingSoon:true},
+function LiveBots({
+  token,
+  toast,
+}: {
+  token: string;
+  toast: (s: string) => void;
+}) {
+  const [keys, setKeys] = useState<
+    Array<{
+      id: string;
+      prefix: string;
+      createdAt: string;
+      lastUsedAt: string | null;
+      revokedAt: string | null;
+    }>
+  >([]);
+  const [newKey, setNewKey] = useState("");
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const bots = [
+    {
+      name: "Nightbox connection",
+      handle: "nightbox_connbot",
+      description: "Link this Telegram chat to your creator account.",
+      comingSoon: false,
+    },
+    {
+      name: "Nightbox Files upload bot",
+      handle: "nightbox_uploadbot",
+      description: "Send supported video or document uploads.",
+      comingSoon: false,
+    },
+    {
+      name: "NIghtheast to nightbox converter",
+      handle: "nh_to_nb_bot",
+      description: "Submit a supported Nightheast video link.",
+      comingSoon: false,
+    },
+    {
+      name: "Nightbox to Nightbox",
+      handle: "nb_to_nbbot",
+      description: "Submit a supported video link.",
+      comingSoon: false,
+    },
+    {
+      name: "TB to Nightbox converter",
+      handle: "tb_to_nb_bot",
+      description: "Submit a supported TeraBox video link.",
+      comingSoon: true,
+    },
+    {
+      name: "DW to Nightbox converter",
+      handle: "dw_to_nb_bot",
+      description: "Submit a supported Diskwala video link.",
+      comingSoon: true,
+    },
   ];
-  const load=()=>getCreatorApiKeys(token).then(x=>setKeys(x.keys)).catch(()=>setKeys([]));
-  useEffect(()=>{load()},[token]);
-  const create=async()=>{try{const result=await createCreatorApiKey(token);setNewKey(result.key.value);toast("Key created. Copy it now; it will not be shown again.");load()}catch(error){toast(error instanceof Error?error.message:"Unable to create key")}};
-  const copyKey=async()=>{try{await copyTextToClipboard(newKey);toast("API key copied. Keep it private.")}catch{toast("Clipboard unavailable. Copy the key shown on screen.")}};
-  const copyConnectCommand=async()=>{try{await copyTextToClipboard(`/connect ${newKey}`);toast("Connect command copied. Paste it in the NightBox connection bot chat.")}catch{toast("Clipboard unavailable. Copy the command shown on screen.")}};
-  const copyKeyPrefix=async(prefix:string)=>{try{await copyTextToClipboard(prefix);setCopiedKey(prefix);window.setTimeout(()=>setCopiedKey(current=>current===prefix?null:current),1600);toast("Key prefix copied") }catch{toast("Clipboard unavailable. Select and copy the key prefix manually.")}};
-  return <>
-    <AppTitle eyebrow="AUTOMATION" title="Bots & API" action={<button className="btn btn-primary" onClick={create}>Create API key</button>}/>
-    {newKey&&<div className="card api-key-created"><div><span>ONE-TIME API KEY</span><h2>Your connection key is ready</h2><p>Copy it now. NightBox will not show this secret again. Use the connection command below in Telegram.</p></div><div className="api-key-value"><code>{newKey}</code><button className="btn btn-dark" onClick={copyKey}>Copy key</button></div><div className="api-connect-command"><small>Send this in @nightbox_connbot</small><code>/connect {newKey}</code></div><div className="plan-actions"><button className="btn btn-dark" onClick={copyConnectCommand}>Copy connect command</button><a className="btn btn-primary" href="https://t.me/nightbox_connbot" target="_blank" rel="noreferrer">Open Connection bot ↗</a></div></div>}
-    <section className="telegram-bot-grid" aria-label="NightBox Telegram bots">
-      {bots.map(bot=><article className="telegram-bot-card" key={bot.handle}>
-        <div><span>TELEGRAM BOT</span><h2>{bot.name}</h2><p>@{bot.handle}</p><small>{bot.description}</small></div>
-        {bot.comingSoon?<button className="btn btn-dark btn-coming-soon" type="button" disabled aria-disabled="true" title="This bot will be available soon">Coming soon</button>:<a className="btn btn-dark" href={`https://t.me/${bot.handle}`} target="_blank" rel="noreferrer">Open in Telegram ↗</a>}
-      </article>)}
-    </section>
-    <div className="card bot-connect-help"><span className="bot-help-kicker">QUICK SETUP</span><h2>Connect NightBox to Telegram</h2><p><b>1.</b> Create an API key and open the Connection bot.</p><p><b>2.</b> Send <code>/connect YOUR_API_KEY</code>.</p><p><b>3.</b> Open an upload or converter bot and send <code>/start</code>.</p><small>Keep your API key private. It gives Telegram access to your creator workspace.</small></div>
-    <div className="bot-keys-table"><p className="api-key-prefix-note"><b>Important:</b> KEY PREFIX is only an identifier and cannot connect a Telegram bot. Create a new API key to receive the complete one-time secret, then use <b>Copy key</b> or <b>Copy connect command</b>.</p><DataTable headers={["KEY PREFIX","CREATED","LAST USED","STATUS","ACTION"]} rows={keys.map(key=>[key.prefix,new Date(key.createdAt).toLocaleDateString(),key.lastUsedAt?new Date(key.lastUsedAt).toLocaleString():"Never",key.revokedAt?"Revoked":"Active",<button key={key.prefix} className="api-key-copy" type="button" onClick={()=>void copyKeyPrefix(key.prefix)} aria-label={`Copy key prefix ${key.prefix}`}>{copiedKey===key.prefix?"Copied":"Copy"}</button>])}/></div>
-  </>;
-}
-type OverviewPoint = {date:string;views:number;earningsMicros:number};
-function localDateKey(date:Date){const year=date.getFullYear();const month=String(date.getMonth()+1).padStart(2,"0");const day=String(date.getDate()).padStart(2,"0");return `${year}-${month}-${day}`}
-function OverviewChart({title,kind,rows}:{title:string;kind:"views"|"earnings";rows:OverviewPoint[]}){const values=rows.map(row=>kind==="views"?row.views:row.earningsMicros/1000000);const max=Math.max(...values,kind==="views"?1:.01);const points=values.map((value,index)=>`${20+(index*270)/Math.max(values.length-1,1)},${128-(value/max)*88}`).join(" ");const active=values.some(value=>value>0);const formatValue=(value:number)=>kind==="views"?value.toLocaleString():money(value);const total=values.reduce((sum,value)=>sum+value,0);return <section className="card overview-chart"><header><div><span>{kind==="views"?"REACH":"REVENUE"}</span><h2>{title}</h2><small className="overview-chart-total">7-day total: {formatValue(total)}</small></div><b>Last 7 days</b></header><div className="overview-chart-canvas">{kind==="views"?<svg viewBox="0 0 310 150" role="img" aria-label="Views over the last 7 days"><path d={`M20 128 L${points.replaceAll(" "," L")} L290 128 Z`} className="chart-area"/><polyline points={points} className="chart-line"/><line x1="20" y1="128" x2="290" y2="128" className="chart-axis"/>{values.map((value,index)=>{const cx=20+(index*270)/Math.max(values.length-1,1);const cy=128-(value/max)*88;return <g key={rows[index].date}><title>{rows[index].date}: {formatValue(value)}</title><circle cx={cx} cy={cy} r="3.5" className="chart-dot"/><text x={cx} y={Math.max(cy-9,12)} textAnchor="middle" className="chart-value">{formatValue(value)}</text></g>})}</svg>:<div className="overview-bars">{values.map((value,index)=><div className="overview-bar-item" key={rows[index].date} title={`${rows[index].date}: ${formatValue(value)}`}><span className="overview-bar-value">{formatValue(value)}</span><i style={{height:`${Math.max(value?value/max*100:3,3)}%`}}/></div>)}</div>}</div><div className="overview-chart-labels">{rows.map(row=><span key={row.date}>{new Date(`${row.date}T00:00:00`).toLocaleDateString("en-US",{weekday:"short"})}</span>)}</div>{!active&&<small className="overview-chart-empty">No qualified {kind} yet. Activity will appear here automatically.</small>}</section>}
-function UserOverview({go,files,token,toast}:{go:(p:string)=>void,files:FileItem[],token:string,toast:(s:string)=>void}){const [analytics,setAnalytics]=useState<CreatorAnalyticsData>({summary:{views:0,earningsMicros:0},countries:[],rates:[]});const [dailyActivity,setDailyActivity]=useState<OverviewPoint[]>([]);useEffect(()=>{getCreatorAnalytics(token).then(setAnalytics).catch(()=>{});getCreatorOverview(token).then(result=>setDailyActivity(result.dailyActivity)).catch(()=>setDailyActivity([]))},[token,files.length]);const cpm=effectiveCpm(analytics);const defaultCpm=configuredCpm(analytics.rates);const configuredRates=analytics.rates.length?analytics.rates:[{country:"ZZ",cpmCents:defaultCpm}];const chartRows=Array.from({length:7},(_,index)=>{const day=new Date();day.setHours(0,0,0,0);day.setDate(day.getDate()-6+index);const date=localDateKey(day);const row=dailyActivity.find(item=>item.date===date);return {date,views:row?.views??0,earningsMicros:row?.earningsMicros??0}});return <><AppTitle eyebrow="CREATOR WORKSPACE" title="Your workspace" action={<button className="btn btn-primary" onClick={()=>go("/user/upload")}>↑ Upload files</button>}/><section className="overview-hero"><div><span>YOUR CREATOR CLOUD</span><h2>Make your next file work harder.</h2><p>Upload, share and track your creator library from one focused workspace.</p></div><div className="overview-actions"><button className="btn btn-white" onClick={()=>go("/user/upload")}>Upload a video →</button><button className="btn btn-ghost-light" onClick={()=>go("/user/files")}>Browse files</button></div></section><div className="metrics"><Metric icon="$" label="Recorded earnings" value={money(analytics.summary.earningsMicros/1000000)}/><Metric icon="◉" label="Verified views" value={analytics.summary.views.toLocaleString()}/><Metric icon="▱" label="Uploaded videos" value={String(files.length)}/><Metric icon="↗" label="Downloads" value="Not tracked"/></div><div className="overview-analytics-grid"><OverviewChart title="Views analytics" kind="views" rows={chartRows}/><OverviewChart title="Earnings analytics" kind="earnings" rows={chartRows}/></div><section className="card monetization-summary"><div><span className="metric-icon">$</span><div><b>{money(defaultCpm/100)} CPM for all countries</b><small>{cpm===null?"Default payout rate for every country · $10 per 1,000 eligible views.":`Your recorded effective rate is ${money(cpm)} per 1,000 verified views.`}</small></div></div><button className="btn btn-outline" onClick={()=>go("/user/analytics")}>View country rates →</button></section><section className="card creator-rate-preview"><div className="creator-rate-heading"><div><span>TRANSPARENT MONETIZATION</span><h2>Country CPM rates</h2><p>Every country starts at $10.00 per 1,000 eligible views.</p></div><button className="btn btn-outline" onClick={()=>go("/user/analytics")}>See all rates →</button></div><div className="creator-rate-chips">{configuredRates.slice(0,4).map(rate=><span key={rate.country}><b>{displayRateCountry(rate.country)}</b><strong>{money(rate.cpmCents/100)}</strong><small>CPM / 1,000 views</small></span>)}</div><small className="creator-rate-footnote">All countries use the $10.00 default unless NightBox adds a specific country override. Past eligible views keep their recorded rate.</small></section><div className="card recent"><div className="card-head"><div><b>Recent videos</b><span>Your latest creator uploads</span></div><button onClick={()=>go("/user/files")}>View all →</button></div>{files.length?<FileRows files={files.slice(0,4)} toast={toast}/>:<div className="overview-empty"><span>▱</span><div><h3>Your library is ready</h3><p>Upload your first video to start building your creator library.</p></div><button className="btn btn-outline" onClick={()=>go("/user/upload")}>Upload first video</button></div>}</div></>}
-function PremiumStatus(){return <section className="premium-coming-soon" aria-labelledby="premium-title"><div className="premium-orbit premium-orbit-one"/><div className="premium-orbit premium-orbit-two"/><div className="premium-spark">✦</div><div className="premium-copy"><span className="pill pill-orange">NEXT IN THE WORKSPACE</span><h1 id="premium-title">Premium is<br/><em>coming soon.</em></h1><p>We are shaping a smarter creator upgrade with better reach, deeper insights and more ways to grow. Plans will appear here when the experience is ready.</p><div className="premium-signals"><span>Creator-first tools</span><span>Early access updates</span><span>Simple, transparent plans</span></div></div><div className="premium-visual" aria-hidden="true"><div className="premium-glow"/><div className="premium-cube"><b>NB</b><i>PREMIUM</i></div><span className="premium-float premium-float-top">✦ 01</span><span className="premium-float premium-float-bottom">SOON</span></div></section>}
-function FileRows({files,go,toast}:{files:FileItem[];go?:(path:string)=>void;toast:(s:string)=>void}){const [openId,setOpenId]=useState<string|number|null>(null);const copyLink=async(link:string)=>{try{await copyTextToClipboard(link);toast("Link copied")}catch{toast("Clipboard unavailable. Select and copy the link manually.")}};return <div className="file-rows">{files.map(f=><div key={f.id}><span className="type-box" style={{background:f.color}}>{f.type}</span><span className="file-name"><b>{f.name}</b><small>{f.size} · {f.updated}</small></span><span><b>{f.views.toLocaleString()}</b><small>Views</small></span><span><b>{money(f.earned)}</b><small>Earned</small></span><Pill tone={videoStatusIsActive(f.status)?"green":"orange"}>{videoStatusLabel(f.status)}</Pill>{f.link&&<button onClick={()=>void copyLink(f.link!)}>Copy link</button>}<span className="file-row-actions"><button className="file-more" aria-label={`More actions for ${f.name}`} aria-expanded={openId===f.id} onClick={()=>setOpenId(openId===f.id?null:f.id)}>•••</button>{openId===f.id&&<div className="file-row-menu" role="menu"><button onClick={()=>go?.("/user/files")}>Open in My files</button>{f.link&&<button onClick={()=>{void copyLink(f.link!);setOpenId(null)}}>Copy link</button>}</div>}</span></div>)}</div>}
-function FilesTable({files,saveFiles,toast,token,go}:{files:FileItem[],saveFiles:(x:FileItem[])=>void,toast:(s:string)=>void,token:string,go:(p:string)=>void}){return <><CreatorFileManager token={token} toast={toast}/><CreatorVideosTable files={files} saveFiles={saveFiles} toast={toast} token={token} go={go}/></>}
-function CreatorVideosTable({files,saveFiles,toast,token,go}:{files:FileItem[],saveFiles:(x:FileItem[])=>void,toast:(s:string)=>void,token:string,go:(p:string)=>void}){const [q,setQ]=useState("");const shown=files.filter(f=>f.name.toLowerCase().includes(q.toLowerCase()));const remove=async(id:string)=>{try{await deleteCreatorVideo(token,id);saveFiles(files.filter(x=>String(x.id)!==id));toast("Video deleted")}catch(error){toast(error instanceof Error?error.message:"Unable to delete video")}};const share=async(file:FileItem)=>{let link=file.link;try{if(!link){const result=await createCreatorVideoLink(token,String(file.id));link=result.link.url;saveFiles(files.map(item=>item.id===file.id?{...item,link}:item))}await copyTextToClipboard(link);toast("Link copied")}catch(error){toast(error instanceof Error?error.message:"Unable to create or copy link")}};return <><AppTitle eyebrow="VIDEO LIBRARY" title="Creator videos" action={<button className="btn btn-primary" onClick={()=>go("/user/upload")}>↑ Upload video</button>}/><div className="toolbar"><div className="search">⌕<input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search videos…"/></div><select><option>All formats</option><option>Video</option></select><select><option>Recently updated</option><option>Most viewed</option></select></div><div className="card files-table"><div className="table-head"><span>VIDEO</span><span>STATUS</span><span>VIEWS</span><span>EARNED</span><span>UPDATED</span><span/></div>{shown.map(f=><div className="table-row" key={f.id}><span className="file-cell"><i className="type-box" style={{background:f.color}}>{f.type}</i><b>{f.name}<small>{f.size}</small></b></span><Pill tone={videoStatusIsActive(f.status)?"green":"orange"}>{videoStatusLabel(f.status)}</Pill><span>{f.views.toLocaleString()}</span><b>{money(f.earned)}</b><span>{f.updated}</span><button onClick={()=>share(f)}>{f.link?"Copy link":"Create link"}</button><button onClick={()=>remove(String(f.id))}>Delete</button></div>)}</div></>}
-function Analytics({token}:{token:string}){const [data,setData]=useState<CreatorAnalyticsData|null>(null);const [dailyActivity,setDailyActivity]=useState<OverviewPoint[]>([]);const [failed,setFailed]=useState(false);useEffect(()=>{let active=true;Promise.all([getCreatorAnalytics(token),getCreatorOverview(token,"all")]).then(([analytics,overview])=>{if(active){setData(analytics);setDailyActivity(overview.dailyActivity);setFailed(false)}}).catch(()=>{if(active)setFailed(true)});return()=>{active=false}},[token]);if(!data)return <><AppTitle eyebrow="PERFORMANCE" title="Analytics"/><div className="card empty-state"><h2>{failed?"Analytics could not be loaded":"Loading country rates and analytics"}</h2><p>{failed?"We could not reach your creator analytics. Check your connection and try again.":"Your configured country CPM and eligible-view performance will appear here."}</p>{failed&&<button className="btn btn-outline" onClick={()=>{setData(null);setFailed(false);Promise.all([getCreatorAnalytics(token),getCreatorOverview(token,"all")]).then(([analytics,overview])=>{setData(analytics);setDailyActivity(overview.dailyActivity)}).catch(()=>setFailed(true))}}>Try again</button>}</div></>;const rates=data.rates.length?data.rates:[{country:"ZZ",cpmCents:1000}];return <><AppTitle eyebrow="PERFORMANCE" title="Analytics"/><div className="metrics three"><Metric icon="◉" label="Eligible views" value={data.summary.views.toLocaleString()}/><Metric icon="$" label="Recorded earnings" value={money(data.summary.earningsMicros/1000000)}/><Metric icon="◎" label="Countries with views" value={String(data.countries.length)}/></div><section className="card creator-rates-table"><div className="creator-section-heading"><div><span>ACTIVE MONETIZATION RULES</span><h2>Country CPM rates</h2><p>Every country uses the $10.00 default per 1,000 eligible views unless a specific override is configured.</p></div><strong className="rate-highlight">$10.00 <small>CPM / 1,000 views</small></strong></div><div className="creator-rates-grid"><div className="creator-rates-head"><span>COUNTRY</span><span>CPM · USD / 1,000 ELIGIBLE VIEWS</span><span>RATE</span></div>{rates.map(rate=><div className="creator-rates-row" key={rate.country}><b>{displayRateCountry(rate.country)}</b><span>{money(rate.cpmCents/100)}</span><i>{rate.country==="ZZ"?"All-country default":"Country-specific"}</i></div>)}</div><small className="creator-rate-footnote">The $10.00 default applies to countries without a specific override. Previous eligible views keep the rate recorded when they qualified.</small></section><section className="card creator-rates-table creator-performance-table"><div className="creator-section-heading"><div><span>YOUR VERIFIED PERFORMANCE</span><h2>Views and earnings by viewer country</h2></div></div><div className="card files-table analytics-table"><div className="table-head"><span>COUNTRY</span><span>VIEWS</span><span>CPM</span><span>EARNED</span></div>{data.countries.length?data.countries.map(row=><div className="table-row" key={row.country}><b>{countryName(row.country)}</b><span>{row.views.toLocaleString()}</span><span>{money(row.cpmCents/100||1000/100)}</span><b>{money(row.earningsMicros/1000000)}</b></div>):<p className="empty-copy">No eligible views yet. Your $10.00 default CPM is ready for every country.</p>}</div><p className="creator-rate-footnote">Unknown country means location was not recorded when that view qualified. Past records cannot be assigned to a country reliably.</p></section><section className="card creator-rates-table creator-daily-activity"><div className="creator-section-heading"><div><span>DAILY BREAKDOWN</span><h2>Daily views and earnings · all dates</h2><p>UTC dates from the first recorded qualified view.</p></div></div><div className="card files-table analytics-table"><div className="table-head"><span>DATE</span><span>VIEWS</span><span>CPM</span><span>EARNED</span></div>{dailyActivity.length?[...dailyActivity].reverse().map(row=><div className="table-row" key={row.date}><b>{new Date(`${row.date}T00:00:00`).toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"})}</b><span>{row.views.toLocaleString()}</span><span>{row.views?money(row.earningsMicros/1000000/row.views*1000):"—"}</span><b>{money(row.earningsMicros/1000000)}</b></div>):<p className="empty-copy">No qualified views or earnings recorded yet.</p>}</div></section></>}
-
-function Earnings({token}:{token:string}){const [analytics,setAnalytics]=useState<CreatorAnalyticsData>({summary:{views:0,earningsMicros:0},countries:[],rates:[]});const [withdrawals,setWithdrawals]=useState<Array<{id:string;amountMicros:number;method:string;status:string;requestedAt:string}>>([]);useEffect(()=>{getCreatorAnalytics(token).then(setAnalytics).catch(()=>{});getCreatorWithdrawals(token).then(x=>setWithdrawals(x.withdrawals)).catch(()=>setWithdrawals([]))},[token]);const summary=analytics.summary;const cpm=effectiveCpm(analytics);const paid=withdrawals.filter(row=>row.status.toLowerCase()==="completed").reduce((sum,row)=>sum+row.amountMicros/1000000,0);const pending=withdrawals.filter(row=>row.status.toLowerCase()!=="completed").reduce((sum,row)=>sum+row.amountMicros/1000000,0);return <><AppTitle eyebrow="CREATOR WALLET" title="Earnings"/><p className="withdraw-subtitle">Follow your recorded earnings, payout progress, and payment history in one place.</p><section className="wallet-hero earnings-hero"><div><span>TOTAL RECORDED EARNINGS</span><b>{money(summary.earningsMicros/1000000)}</b><small>Based on qualified views recorded by NightBox</small></div><div><span><b>{summary.views.toLocaleString()}</b><small>Qualified views</small></span><span><b>{cpm===null?"—":money(cpm)}</b><small>Effective CPM</small></span><span><b>{money(paid)}</b><small>Paid out</small></span><span><b>{money(pending)}</b><small>In review</small></span></div></section><div className="metrics three earnings-metrics"><Metric icon="◉" label="Qualified views" value={summary.views.toLocaleString()}/><Metric icon="$" label="Recorded earnings" value={money(summary.earningsMicros/1000000)}/><Metric icon="↗" label="Completed payouts" value={money(paid)}/></div><section className="card ledger earnings-ledger"><div className="card-head"><div><b>Payment history</b><span>Recent payout requests and their status</span></div></div>{withdrawals.length?withdrawals.map(row=><div key={row.id}><span className="ledger-icon">$</span><span><b>{row.method} payout</b><small>{new Date(row.requestedAt).toLocaleDateString()} · Request {row.id.slice(0,8)}</small></span><b className={row.status.toLowerCase()==="completed"?"positive":""}>{money(row.amountMicros/1000000)}</b><span><Pill tone={row.status.toLowerCase()==="completed"?"green":"orange"}>{row.status}</Pill></span></div>):<div className="earnings-empty"><span>↗</span><div><b>No payouts yet</b><small>Your payment history will appear here after you submit a withdrawal request.</small></div></div>}</section></>}
-
-function LiveAdminLogin({go,setAuth,toast}:{go:(p:string)=>void,setAuth:(v:boolean)=>void,toast:(s:string)=>void}){const submit=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const data=new FormData(e.currentTarget);try{const result=await adminLogin(String(data.get("email")),String(data.get("password")));sessionStorage.setItem("nightbox-admin-token",result.token);sessionStorage.setItem("nightbox-admin","1");setAuth(true);toast("Secure admin session started");go("/admin/dashboard")}catch(error){toast(error instanceof Error?error.message:"Administrator login failed")}};return <div className="admin-login"><div className="admin-login-brand"><Brand dark go={go}/><Pill tone="orange">OPERATIONS CONSOLE</Pill></div><form onSubmit={submit}><span className="shield">◆</span><h1>Administrator access</h1><p>Use the administrator credentials configured on the backend.</p><label>Admin email<input name="email" required type="email" placeholder="admin@example.com"/></label><label>Password<input name="password" required type="password"/></label><button className="btn btn-primary btn-block">Enter command center →</button><small>Admin authentication is server-side and requires configured environment credentials.</small></form><button className="admin-back" onClick={()=>go("/")}>← Return to NightBox website</button></div>}
-
-function AdminApp({route,go,auth,setAuth,toast}:{route:string,go:(p:string)=>void,auth:boolean,setAuth:(v:boolean)=>void,toast:(s:string)=>void}){const [drawerOpen,setDrawerOpen]=useState(false);const [sidebarCollapsed,setSidebarCollapsed]=useState(false);if(route==="/admin/login"||!auth)return <LiveAdminLogin go={go} setAuth={setAuth} toast={toast}/>;const navigate=(p:string)=>{setDrawerOpen(false);go(p)};const openSidebar=()=>{setSidebarCollapsed(false);setDrawerOpen(true)};return <div className={`app-shell admin-app ${sidebarCollapsed?"sidebar-collapsed":""}`}><Sidebar nav={adminNav} route={route} go={navigate} admin open={drawerOpen} close={()=>setDrawerOpen(false)} collapsed={sidebarCollapsed} toggleCollapse={()=>setSidebarCollapsed(value=>!value)}/><div className="app-main"><Topbar go={navigate} admin onMenu={openSidebar}/><div className="app-content">
-{route==="/admin/dashboard"&&<AdminDashboard go={navigate}/>}
-{route==="/admin/analytics"&&<AdminAnalytics/>}
-{route==="/admin/traffic"&&<AdminTraffic/>}
-{route==="/admin/users"&&<LiveAdminUsers toast={toast} view="all"/>}
-{route==="/admin/creators"&&<LiveAdminUsers toast={toast} view="creators"/>}
-{route==="/admin/admins"&&<LiveAdminUsers toast={toast} view="admins"/>}
-{route==="/admin/earnings"&&<AdminEarnings go={navigate}/>}
-{route==="/admin/referrals"&&<AdminReferrals/>}
-{route==="/admin/files"&&<LiveAdminFiles toast={toast}/>}{route==="/admin/revenue"&&<LiveAdminRevenue toast={toast}/>}{route==="/admin/withdrawals"&&<AdminPayoutRequests toast={toast}/>}{route==="/admin/reports"&&<LiveAdminReports toast={toast}/>}{route==="/admin/tickets"&&<LiveAdminTickets toast={toast}/>}{route==="/admin/events"&&<LiveAdminEvents toast={toast}/>}
-{route==="/admin/payments"&&<><LiveAdminPayments/><AdminPaymentActions toast={toast}/><LiveAdminPlans toast={toast}/></>}
-{route==="/admin/rewards"&&<><AppTitle eyebrow="FINANCE · CREATOR PROGRAM" title="Bonuses & rewards"/><AdminRewardMilestones toast={toast}/></>}
-{route==="/admin/views"&&<><AppTitle eyebrow="ANALYTICS · QUALITY CONTROL" title="View review queue"/><LiveAdminViews toast={toast}/></>}
-{route==="/admin/bot-activity"&&<LiveAdminBotActivity/>}{route==="/admin/settings"&&<LiveAdminSettings toast={toast}/>}</div></div></div>}
-
-function LiveAdminBotActivity(){
-  type BotEvent=Awaited<ReturnType<typeof getAdminBotEvents>>["events"][number];
-  const [events,setEvents]=useState<BotEvent[]>([]);
-  const [error,setError]=useState("");
-  const [loading,setLoading]=useState(true);
-  const load=()=>{
-    const token=sessionStorage.getItem("nightbox-admin-token");
-    if(!token){setError("Admin session expired");setLoading(false);return}
-    setLoading(true);
-    getAdminBotEvents(token).then(result=>{setEvents(result.events);setError("")}).catch(reason=>setError(reason instanceof Error?reason.message:"Unable to load bot activity")).finally(()=>setLoading(false));
+  const load = () =>
+    getCreatorApiKeys(token)
+      .then((x) => setKeys(x.keys))
+      .catch(() => setKeys([]));
+  useEffect(() => {
+    load();
+  }, [token]);
+  const create = async () => {
+    try {
+      const result = await createCreatorApiKey(token);
+      setNewKey(result.key.value);
+      toast("Key created. Copy it now; it will not be shown again.");
+      load();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Unable to create key");
+    }
   };
-  useEffect(()=>{Promise.resolve().then(load)},[]);
-  return <><AppTitle eyebrow="SYSTEM · TELEGRAM INTEGRATIONS" title="Bot activity" action={<button className="btn btn-dark" onClick={load}>Refresh log</button>}/><p className="withdraw-subtitle">Recent bot events recorded by NightBox. Sensitive raw error details are not shown here.</p><section className="card admin-table"><div className="card-head"><div><b>Recent bot events</b><span>Latest 100 backend-recorded actions</span></div></div>{error?<p className="empty-copy">{error}</p>:loading?<p className="empty-copy">Loading bot activity…</p>:events.length?<><div className="admin-table-head"><span>BOT</span><span>CREATOR</span><span>EVENT</span><span>REFERENCE</span><span>STATUS</span><span>TIME</span></div>{events.map(event=><div className="admin-table-row" key={event.id}><span>{event.botName}</span><span>{event.email||"Unlinked account"}</span><span>{event.eventType}</span><span>{event.videoId||event.externalId||"—"}</span><span><Pill tone={event.status.toLowerCase()==="completed"||event.status.toLowerCase()==="success"?"green":"orange"}>{event.status}</Pill></span><span>{new Date(event.createdAt).toLocaleString()}</span></div>)}</>:<p className="empty-copy">No bot events have been recorded yet.</p>}</section></>;
-}
-function AdminDashboard({go}:{go:(path:string)=>void}){
-  const dateValue=(value:Date)=>`${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,"0")}-${String(value.getDate()).padStart(2,"0")}`;
-  const endDefault=dateValue(new Date());
-  const startDefault=(()=>{const value=new Date();value.setDate(value.getDate()-29);return dateValue(value)})();
-  type Overview=Awaited<ReturnType<typeof getAdminOverview>>;
-  const [overview,setOverview]=useState<Overview|null>(null);
-  const [status,setStatus]=useState("loading");
-  const [dateFrom,setDateFrom]=useState(startDefault);
-  const [dateTo,setDateTo]=useState(endDefault);
-  const [appliedFrom,setAppliedFrom]=useState(startDefault);
-  const [appliedTo,setAppliedTo]=useState(endDefault);
-  const [refreshTick,setRefreshTick]=useState(0);
-  useEffect(()=>{
-    let active=true;
-    const load=()=>{
-      const token=sessionStorage.getItem("nightbox-admin-token");
-      if(!token){setStatus("error");return}
-      getAdminOverview(token,appliedFrom,appliedTo).then(data=>{if(active){setOverview(data);setStatus("ready")}}).catch(()=>{if(active)setStatus("error")});
-    };
-    Promise.resolve().then(load);
-    const timer=window.setInterval(load,10000);
-    return ()=>{active=false;window.clearInterval(timer)};
-  },[appliedFrom,appliedTo,refreshTick]);
-  const validRange=dateFrom<=dateTo&&dateTo<=endDefault;
-  const applyDates=()=>{if(!validRange)return;setAppliedFrom(dateFrom);setAppliedTo(dateTo)};
-  const clearDates=()=>{setDateFrom(startDefault);setDateTo(endDefault);setAppliedFrom(startDefault);setAppliedTo(endDefault)};
-  const dailyRows=overview?.dailyActivity||[];
-  const creatorRows=overview?.recentCreators||[];
-  return <>
-    <header className="admin-dashboard-heading">
-      <div><span>ANALYTICS · NIGHTBOX OPERATIONS</span><h1>Super Admin Overview</h1><p>Live platform activity, creator growth, and qualified-view earnings.</p></div>
-      <div className="admin-overview-actions"><small>Updated {overview?.updatedAt?new Date(overview.updatedAt).toLocaleTimeString():"—"}</small><button className="btn btn-dark" onClick={()=>setRefreshTick(value=>value+1)}>Refresh</button></div>
-    </header>
-    <section className="admin-overview-toolbar card">
-      <div><b>Filter by date</b><small>Daily activity and earnings in the selected period</small></div>
-      <label>Start date<input type="date" value={dateFrom} max={dateTo} onChange={event=>setDateFrom(event.target.value)}/></label>
-      <span className="admin-filter-to">to</span>
-      <label>End date<input type="date" value={dateTo} min={dateFrom} max={endDefault} onChange={event=>setDateTo(event.target.value)}/></label>
-      <button className="btn btn-primary" disabled={!validRange} onClick={applyDates}>Apply</button>
-      <button className="btn btn-light" onClick={clearDates}>Clear</button>
-    </section>
-    <div className="admin-realtime-note"><i className={status==="ready"?"online":"offline"}/>{status==="error"?"Could not load live admin data. Check the session or backend connection.":"Live NightBox data · refreshes automatically every 10 seconds."}</div>
-    <section className="admin-overview-metrics" aria-label="Platform metrics">
-      <article className="card admin-overview-metric"><span className="admin-overview-icon people">♙</span><small>Total Creators</small><b>{overview?overview.creators.toLocaleString():"—"}</b><em>Registered creator accounts</em></article>
-      <article className="card admin-overview-metric"><span className="admin-overview-icon users">◉</span><small>Registered Accounts</small><b>{overview?overview.users.toLocaleString():"—"}</b><em>All NightBox accounts</em></article>
-      <article className="card admin-overview-metric"><span className="admin-overview-icon views">◷</span><small>Qualified Views</small><b>{overview?overview.qualifiedViews.toLocaleString():"—"}</b><em>{appliedFrom} to {appliedTo}</em></article>
-      <article className="card admin-overview-metric"><span className="admin-overview-icon earnings">$</span><small>Creator Earnings</small><b>{overview?money(overview.earningsMicros/1_000_000):"—"}</b><em>Qualified-view ledger · selected period</em></article>
-    </section>
-    <section className="admin-overview-section card">
-      <div className="admin-section-heading"><div><span>PLATFORM ACTIVITY</span><h2>Daily Activity</h2></div><small>{appliedFrom} — {appliedTo}</small></div>
-      <div className="admin-overview-table-wrap"><table className="admin-overview-table"><thead><tr><th>Date</th><th>Qualified Views</th><th>Earnings</th><th>Active Creators</th></tr></thead><tbody>{dailyRows.map(row=><tr key={row.date}><td>{new Date(`${row.date}T00:00:00`).toLocaleDateString()}</td><td>{row.qualifiedViews.toLocaleString()}</td><td>{money(row.earningsMicros/1_000_000)}</td><td>{row.activeCreators.toLocaleString()}</td></tr>)}</tbody></table>{status==="loading"?<p className="admin-overview-empty">Loading daily activity…</p>:status==="error"?<p className="admin-overview-empty">Daily activity could not be loaded.</p>:dailyRows.length===0?<p className="admin-overview-empty">No qualified views in this date range.</p>:null}</div>
-    </section>
-    <section className="admin-overview-section card">
-      <div className="admin-section-heading"><div><span>CREATOR DIRECTORY</span><h2>Recent Creators</h2></div><button className="admin-text-action" onClick={()=>go("/admin/users")}>Manage creators →</button></div>
-      <div className="admin-overview-table-wrap"><table className="admin-overview-table"><thead><tr><th>Creator</th><th>Joined</th><th>Videos</th><th>Qualified Views</th><th>Today Earnings</th><th>Lifetime Earnings</th></tr></thead><tbody>{creatorRows.map(creator=><tr key={creator.id}><td><b>{creator.email}</b></td><td>{new Date(creator.createdAt).toLocaleDateString()}</td><td>{creator.videos.toLocaleString()}</td><td>{creator.qualifiedViews.toLocaleString()}</td><td><b className={creator.todayEarningsMicros>0?"positive":""}>{money(creator.todayEarningsMicros/1_000_000)}</b></td><td>{money(creator.earningsMicros/1_000_000)}</td></tr>)}</tbody></table>{status==="loading"?<p className="admin-overview-empty">Loading creators…</p>:creatorRows.length===0?<p className="admin-overview-empty">No creator accounts yet.</p>:null}</div>
-    </section>
-  </>;
-}
-function adminDate(value:Date){return `${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,"0")}-${String(value.getDate()).padStart(2,"0")}`}
-function AdminTrendChart({title,points,color,format}:{title:string;points:Array<{date:string;value:number}>;color:string;format:(value:number)=>string}){const values=points.slice(-14);const max=Math.max(1,...values.map(point=>point.value));const plotted=values.map((point,index)=>({ ...point,x:values.length<2?300:index*600/(values.length-1)+30,y:148-point.value/max*116 }));const line=plotted.map(point=>`${point.x},${point.y}`).join(" ");const area=plotted.length?`30,148 ${line} 630,148`:"";return <section className="card admin-chart-card"><header><div><span>LAST 14 ACTIVE DAYS</span><h2>{title}</h2></div><b>{format(values.reduce((sum,point)=>sum+point.value,0))}</b></header>{plotted.length?<><svg viewBox="0 0 660 180" role="img" aria-label={`${title} daily trend`} preserveAspectRatio="none"><defs><linearGradient id={`fill-${title.replace(/\\W/g,"")}`} x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity=".25"/><stop offset="100%" stopColor={color} stopOpacity="0"/></linearGradient></defs><path d={`M ${area} Z`} fill={`url(#fill-${title.replace(/\\W/g,"")})`}/><polyline points={line} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>{plotted.map(point=><circle key={point.date} cx={point.x} cy={point.y} r="3.5" fill={color}><title>{point.date}: {format(point.value)}</title></circle>)}</svg><div className="admin-chart-labels"><span>{values[0]?.date}</span><span>{values.at(-1)?.date}</span></div></>:<p className="admin-chart-empty">No recorded activity in this date range.</p>}</section>}
-function useAdminDateRange(){const [range]=useState(()=>{const end=new Date();const start=new Date();start.setDate(start.getDate()-29);return{start:adminDate(start),end:adminDate(end)}});return range}
-function AdminAnalytics(){
-  const range=useAdminDateRange();
-  const [data,setData]=useState<Awaited<ReturnType<typeof getAdminOverview>>|null>(null);
-  const [users,setUsers]=useState<AdminUser[]>([]);
-  const [error,setError]=useState("");
-  const [refreshTick,setRefreshTick]=useState(0);
-  useEffect(()=>{
-    let active=true;
-    const load=()=>{
-      const token=sessionStorage.getItem("nightbox-admin-token");
-      if(!token){setError("Admin session expired");return}
-      Promise.all([getAdminOverview(token,range.start,range.end),getAdminUsers(token)])
-        .then(([overview,userResult])=>{if(active){setData(overview);setUsers(userResult.users);setError("")}})
-        .catch(reason=>{if(active)setError(reason instanceof Error?reason.message:"Unable to load analytics")});
-    };
-    Promise.resolve().then(load);
-    const timer=window.setInterval(load,10000);
-    return()=>{active=false;window.clearInterval(timer)};
-  },[range.start,range.end,refreshTick]);
-  const dates=Array.from({length:7},(_,index)=>{const day=new Date(`${range.end}T12:00:00`);day.setDate(day.getDate()-(6-index));return adminDate(day)});
-  const registrations=dates.map(date=>({date,value:users.filter(user=>user.createdAt.slice(0,10)===date).length}));
-  const creators=[...(data?.recentCreators||[])].sort((a,b)=>b.qualifiedViews-a.qualifiedViews).slice(0,5);
-  return <>
-    <AppTitle eyebrow="ANALYTICS · LIVE CHARTS" title="Analytics overview" action={<button className="btn btn-dark" onClick={()=>setRefreshTick(value=>value+1)}>Refresh</button>}/>
-    <p className="admin-page-note">Live account growth, eligible-view performance and creator earnings · refreshed every 10 seconds.</p>
-    {error?<div className="card empty-state"><p>{error}</p></div>:<>
-      <div className="admin-dark-metrics">
-        <article className="card"><span>CREATORS</span><b>{data?.creators.toLocaleString()??"—"}</b><small>Creator accounts</small></article>
-        <article className="card"><span>ACCOUNTS</span><b>{data?.users.toLocaleString()??"—"}</b><small>All registered accounts</small></article>
-        <article className="card"><span>QUALIFIED VIEWS</span><b>{data?.qualifiedViews.toLocaleString()??"—"}</b><small>{range.start} – {range.end}</small></article>
-        <article className="card"><span>CREATOR EARNINGS</span><b>{data?money(data.earningsMicros/1_000_000):"—"}</b><small>Recorded view ledger</small></article>
+  const copyKey = async () => {
+    try {
+      await copyTextToClipboard(newKey);
+      toast("API key copied. Keep it private.");
+    } catch {
+      toast("Clipboard unavailable. Copy the key shown on screen.");
+    }
+  };
+  const copyConnectCommand = async () => {
+    try {
+      await copyTextToClipboard(`/connect ${newKey}`);
+      toast(
+        "Connect command copied. Paste it in the NightBox connection bot chat.",
+      );
+    } catch {
+      toast("Clipboard unavailable. Copy the command shown on screen.");
+    }
+  };
+  const copyKeyPrefix = async (prefix: string) => {
+    try {
+      await copyTextToClipboard(prefix);
+      setCopiedKey(prefix);
+      window.setTimeout(
+        () => setCopiedKey((current) => (current === prefix ? null : current)),
+        1600,
+      );
+      toast("Key prefix copied");
+    } catch {
+      toast("Clipboard unavailable. Select and copy the key prefix manually.");
+    }
+  };
+  return (
+    <>
+      <AppTitle
+        eyebrow="AUTOMATION"
+        title="Bots & API"
+        action={
+          <button className="btn btn-primary" onClick={create}>
+            Create API key
+          </button>
+        }
+      />
+      {newKey && (
+        <div className="card api-key-created">
+          <div>
+            <span>ONE-TIME API KEY</span>
+            <h2>Your connection key is ready</h2>
+            <p>
+              Copy it now. NightBox will not show this secret again. Use the
+              connection command below in Telegram.
+            </p>
+          </div>
+          <div className="api-key-value">
+            <code>{newKey}</code>
+            <button className="btn btn-dark" onClick={copyKey}>
+              Copy key
+            </button>
+          </div>
+          <div className="api-connect-command">
+            <small>Send this in @nightbox_connbot</small>
+            <code>/connect {newKey}</code>
+          </div>
+          <div className="plan-actions">
+            <button className="btn btn-dark" onClick={copyConnectCommand}>
+              Copy connect command
+            </button>
+            <a
+              className="btn btn-primary"
+              href="https://t.me/nightbox_connbot"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open Connection bot ↗
+            </a>
+          </div>
+        </div>
+      )}
+      <section
+        className="telegram-bot-grid"
+        aria-label="NightBox Telegram bots"
+      >
+        {bots.map((bot) => (
+          <article className="telegram-bot-card" key={bot.handle}>
+            <div>
+              <span>TELEGRAM BOT</span>
+              <h2>{bot.name}</h2>
+              <p>@{bot.handle}</p>
+              <small>{bot.description}</small>
+            </div>
+            {bot.comingSoon ? (
+              <button
+                className="btn btn-dark btn-coming-soon"
+                type="button"
+                disabled
+                aria-disabled="true"
+                title="This bot will be available soon"
+              >
+                Coming soon
+              </button>
+            ) : (
+              <a
+                className="btn btn-dark"
+                href={`https://t.me/${bot.handle}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open in Telegram ↗
+              </a>
+            )}
+          </article>
+        ))}
+      </section>
+      <div className="card bot-connect-help">
+        <span className="bot-help-kicker">QUICK SETUP</span>
+        <h2>Connect NightBox to Telegram</h2>
+        <p>
+          <b>1.</b> Create an API key and open the Connection bot.
+        </p>
+        <p>
+          <b>2.</b> Send <code>/connect YOUR_API_KEY</code>.
+        </p>
+        <p>
+          <b>3.</b> Open an upload or converter bot and send <code>/start</code>
+          .
+        </p>
+        <small>
+          Keep your API key private. It gives Telegram access to your creator
+          workspace.
+        </small>
       </div>
-      <div className="admin-analytics-grid">
-        <AdminGrowthChart points={registrations}/>
-        <AdminUnavailableChart title="Watch Time Trends" unit="minutes" detail="Watch-time duration is not currently collected." icon="▶"/>
-        <AdminCreatorChart creators={creators}/>
-        <AdminUnavailableChart title="Device Distribution" unit="devices" detail="Device and browser type are not currently collected." icon="◔"/>
+      <div className="bot-keys-table">
+        <p className="api-key-prefix-note">
+          <b>Important:</b> KEY PREFIX is only an identifier and cannot connect
+          a Telegram bot. Create a new API key to receive the complete one-time
+          secret, then use <b>Copy key</b> or <b>Copy connect command</b>.
+        </p>
+        <DataTable
+          headers={["KEY PREFIX", "CREATED", "LAST USED", "STATUS", "ACTION"]}
+          rows={keys.map((key) => [
+            key.prefix,
+            new Date(key.createdAt).toLocaleDateString(),
+            key.lastUsedAt
+              ? new Date(key.lastUsedAt).toLocaleString()
+              : "Never",
+            key.revokedAt ? "Revoked" : "Active",
+            <button
+              key={key.prefix}
+              className="api-key-copy"
+              type="button"
+              onClick={() => void copyKeyPrefix(key.prefix)}
+              aria-label={`Copy key prefix ${key.prefix}`}
+            >
+              {copiedKey === key.prefix ? "Copied" : "Copy"}
+            </button>,
+          ])}
+        />
       </div>
-    </>}
-  </>;
+    </>
+  );
 }
-function AdminGrowthChart({points}:{points:Array<{date:string;value:number}>}){
-  const max=Math.max(1,...points.map(point=>point.value));
-  const plotted=points.map((point,index)=>({...point,x:30+index*600/Math.max(points.length-1,1),y:150-point.value/max*116}));
-  const line=plotted.map(point=>`${point.x},${point.y}`).join(" ");
-  const area=plotted.length?`30,150 ${line} 630,150`:"";
-  return <section className="card admin-chart-card admin-visual-chart"><header><div><span>LAST 7 DAYS</span><h2>User Growth Trends</h2></div><b>{points.reduce((sum,point)=>sum+point.value,0).toLocaleString()}</b></header>{points.length?<><svg viewBox="0 0 660 180" role="img" aria-label="New user accounts created per day for the last seven days" preserveAspectRatio="none"><defs><linearGradient id="admin-growth-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#368cf4" stopOpacity=".72"/><stop offset="100%" stopColor="#368cf4" stopOpacity="0"/></linearGradient></defs><g className="admin-visual-gridlines"><path d="M30 34H630M30 72H630M30 111H630M30 150H630"/></g><path d={`M ${area} Z`} fill="url(#admin-growth-fill)"/><polyline points={line} fill="none" stroke="#368cf4" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>{plotted.map(point=><circle key={point.date} cx={point.x} cy={point.y} r="3" fill="#54a4ff"><title>{point.date}: {point.value} new accounts</title></circle>)}</svg><div className="admin-chart-labels">{points.map(point=><span key={point.date}>{new Date(`${point.date}T12:00:00`).toLocaleDateString(undefined,{month:"short",day:"numeric"})}</span>)}</div></>:<p className="admin-chart-empty">No account registration data available.</p>}</section>;
+type OverviewPoint = { date: string; views: number; earningsMicros: number };
+function localDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
-function AdminCreatorChart({creators}:{creators:Array<Awaited<ReturnType<typeof getAdminOverview>>["recentCreators"][number]>}){
-  const maxViews=Math.max(1,...creators.map(creator=>creator.qualifiedViews));
-  const maxEarnings=Math.max(1,...creators.map(creator=>creator.earningsMicros));
-  const plotted=creators.map((creator,index)=>({creator,x:70+index*125,bar:150-creator.qualifiedViews/maxViews*112,line:150-creator.earningsMicros/maxEarnings*112}));
-  const earningsLine=plotted.map(point=>`${point.x+20},${point.line}`).join(" ");
-  return <section className="card admin-chart-card admin-visual-chart"><header><div><span>TOP 5 · RECENT CREATOR ACCOUNTS</span><h2>Top Creators Performance</h2></div></header>{creators.length?<><svg viewBox="0 0 660 180" role="img" aria-label="Eligible views and recorded earnings for top creators" preserveAspectRatio="none"><g className="admin-visual-gridlines"><path d="M30 38H630M30 75H630M30 112H630M30 150H630"/></g>{plotted.map(({creator,x,bar})=><rect key={creator.id} x={x} y={bar} width="42" height={150-bar} rx="4" fill="#a64df0"><title>{creator.email}: {creator.qualifiedViews.toLocaleString()} qualified views</title></rect>)}<polyline points={earningsLine} fill="none" stroke="#f0a900" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>{plotted.map(({creator,x,line})=><circle key={`${creator.id}-earnings`} cx={x+20} cy={line} r="4" fill="#f0a900" stroke="#171719" strokeWidth="2"><title>{creator.email}: {money(creator.earningsMicros/1_000_000)} earnings</title></circle>)}</svg><div className="admin-chart-labels admin-creator-labels">{plotted.map(({creator})=><span key={creator.id} title={creator.email}>{creator.email.split("@")[0]}</span>)}</div><div className="admin-visual-legend"><span><i className="views"/>Qualified views</span><span><i className="earnings"/>Earnings</span></div></>:<p className="admin-chart-empty">Creator performance will appear once creators have qualified views.</p>}</section>;
+function OverviewChart({
+  title,
+  kind,
+  rows,
+}: {
+  title: string;
+  kind: "views" | "earnings";
+  rows: OverviewPoint[];
+}) {
+  const values = rows.map((row) =>
+    kind === "views" ? row.views : row.earningsMicros / 1000000,
+  );
+  const max = Math.max(...values, kind === "views" ? 1 : 0.01);
+  const points = values
+    .map(
+      (value, index) =>
+        `${20 + (index * 270) / Math.max(values.length - 1, 1)},${128 - (value / max) * 88}`,
+    )
+    .join(" ");
+  const active = values.some((value) => value > 0);
+  const formatValue = (value: number) =>
+    kind === "views" ? value.toLocaleString() : money(value);
+  const total = values.reduce((sum, value) => sum + value, 0);
+  return (
+    <section className="card overview-chart">
+      <header>
+        <div>
+          <span>{kind === "views" ? "REACH" : "REVENUE"}</span>
+          <h2>{title}</h2>
+          <small className="overview-chart-total">
+            7-day total: {formatValue(total)}
+          </small>
+        </div>
+        <b>Last 7 days</b>
+      </header>
+      <div className="overview-chart-canvas">
+        {kind === "views" ? (
+          <svg
+            viewBox="0 0 310 150"
+            role="img"
+            aria-label="Views over the last 7 days"
+          >
+            <path
+              d={`M20 128 L${points.replaceAll(" ", " L")} L290 128 Z`}
+              className="chart-area"
+            />
+            <polyline points={points} className="chart-line" />
+            <line x1="20" y1="128" x2="290" y2="128" className="chart-axis" />
+            {values.map((value, index) => {
+              const cx = 20 + (index * 270) / Math.max(values.length - 1, 1);
+              const cy = 128 - (value / max) * 88;
+              return (
+                <g key={rows[index].date}>
+                  <title>
+                    {rows[index].date}: {formatValue(value)}
+                  </title>
+                  <circle cx={cx} cy={cy} r="3.5" className="chart-dot" />
+                  <text
+                    x={cx}
+                    y={Math.max(cy - 9, 12)}
+                    textAnchor="middle"
+                    className="chart-value"
+                  >
+                    {formatValue(value)}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+        ) : (
+          <div className="overview-bars">
+            {values.map((value, index) => (
+              <div
+                className="overview-bar-item"
+                key={rows[index].date}
+                title={`${rows[index].date}: ${formatValue(value)}`}
+              >
+                <span className="overview-bar-value">{formatValue(value)}</span>
+                <i
+                  style={{
+                    height: `${Math.max(value ? (value / max) * 100 : 3, 3)}%`,
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="overview-chart-labels">
+        {rows.map((row) => (
+          <span key={row.date}>
+            {new Date(`${row.date}T00:00:00`).toLocaleDateString("en-US", {
+              weekday: "short",
+            })}
+          </span>
+        ))}
+      </div>
+      {!active && (
+        <small className="overview-chart-empty">
+          No qualified {kind} yet. Activity will appear here automatically.
+        </small>
+      )}
+    </section>
+  );
 }
-function AdminUnavailableChart({title,unit,detail,icon}:{title:string;unit:string;detail:string;icon:string}){return <section className="card admin-chart-card admin-visual-chart admin-unavailable-chart"><header><div><span>{unit.toUpperCase()}</span><h2>{title}</h2></div><i>{icon}</i></header><div className="admin-unavailable-state"><span>{icon}</span><b>No {unit} metrics available</b><p>{detail}</p></div></section>}
-function AdminTraffic(){const range=useAdminDateRange();const [data,setData]=useState<Awaited<ReturnType<typeof getAdminTraffic>>|null>(null);const [error,setError]=useState("");const load=()=>{const token=sessionStorage.getItem("nightbox-admin-token");if(token)getAdminTraffic(token,range.start,range.end).then(result=>{setData(result);setError("")}).catch(reason=>setError(reason instanceof Error?reason.message:"Unable to load traffic data"))};useEffect(()=>{Promise.resolve().then(load);const timer=window.setInterval(load,10000);return()=>window.clearInterval(timer)},[range.start,range.end]);return <><AppTitle eyebrow="ANALYTICS · TRAFFIC & LOAD" title="Share traffic" action={<button className="btn btn-dark" onClick={load}>Refresh</button>}/><p className="admin-page-note">Tracked visits to NightBox creator share links. IP addresses are not exposed; only distinct-IP counts are shown.</p>{error?<div className="card empty-state"><p>{error}</p></div>:<><div className="admin-dark-metrics"><article className="card"><span>SHARE SESSIONS</span><b>{data?.sessions.toLocaleString()??"—"}</b><small>{range.start} – {range.end}</small></article><article className="card"><span>QUALIFIED</span><b>{data?.qualified.toLocaleString()??"—"}</b><small>Counted for earnings</small></article><article className="card"><span>FILTERED</span><b>{data?.filtered.toLocaleString()??"—"}</b><small>Did not qualify</small></article><article className="card"><span>DISTINCT IPs</span><b>{data?.uniqueIps.toLocaleString()??"—"}</b><small>Hashed/IP-deduplicated only</small></article></div><div className="admin-table-card card"><div className="admin-section-heading"><div><span>SHARE-LINK TRAFFIC</span><h2>Daily sessions</h2></div><small>Updated {data?.updatedAt?new Date(data.updatedAt).toLocaleTimeString():"—"}</small></div><div className="admin-overview-table-wrap"><table className="admin-overview-table"><thead><tr><th>Date</th><th>Sessions</th><th>Qualified</th><th>Distinct IPs</th><th>Qualification rate</th></tr></thead><tbody>{data?.dailyActivity.map(row=><tr key={row.date}><td>{new Date(`${row.date}T00:00:00`).toLocaleDateString()}</td><td>{row.sessions.toLocaleString()}</td><td>{row.qualified.toLocaleString()}</td><td>{row.uniqueIps.toLocaleString()}</td><td>{row.sessions?`${(row.qualified/row.sessions*100).toFixed(1)}%`:"—"}</td></tr>)}</tbody></table>{!data?.dailyActivity.length&&<p className="admin-overview-empty">No share-link sessions recorded in this range.</p>}</div></div><p className="admin-data-hint">This service records share-link session traffic, not VPS CPU, memory or network-load history. Those infrastructure metrics are not currently collected.</p></>}</>}
-function AdminEarnings({go}:{go:(path:string)=>void}){const range=useAdminDateRange();const [data,setData]=useState<Awaited<ReturnType<typeof getAdminOverview>>|null>(null);const [rates,setRates]=useState<Array<{country:string;cpmCents:number}>>([]);const [error,setError]=useState("");useEffect(()=>{const token=sessionStorage.getItem("nightbox-admin-token");if(!token){Promise.resolve().then(()=>setError("Admin session expired"));return}Promise.all([getAdminOverview(token,range.start,range.end),getAdminCpm(token)]).then(([overview,cpm])=>{setData(overview);setRates(cpm.rates)}).catch(reason=>setError(reason instanceof Error?reason.message:"Unable to load earnings"))},[range.start,range.end]);return <><AppTitle eyebrow="FINANCE · EARNINGS" title="Creator earnings" action={<button className="btn btn-outline admin-outline" onClick={()=>go("/admin/revenue")}>CPM & view rules →</button>}/><p className="admin-page-note">Actual creator earnings recorded against qualified share-link views · {range.start} – {range.end}</p>{error?<div className="card empty-state"><p>{error}</p></div>:<><div className="admin-dark-metrics"><article className="card"><span>CREATOR EARNINGS</span><b>{data?money(data.earningsMicros/1_000_000):"—"}</b><small>Selected 30-day period</small></article><article className="card"><span>QUALIFIED VIEWS</span><b>{data?.qualifiedViews.toLocaleString()??"—"}</b><small>Eligible view sessions</small></article><article className="card"><span>PENDING PAYOUTS</span><b>{data?.pendingWithdrawals.toLocaleString()??"—"}</b><small>Requests awaiting review</small></article></div><AdminTrendChart title="Daily earnings" points={[...(data?.dailyActivity||[])].reverse().map(row=>({date:row.date,value:row.earningsMicros/1_000_000}))} color="#39b86b" format={money}/><div className="admin-table-card card"><div className="admin-section-heading"><div><span>ACTIVE RATE CONFIGURATION</span><h2>Country CPM</h2></div><button className="admin-text-action" onClick={()=>go("/admin/revenue")}>Manage rates →</button></div><div className="admin-overview-table-wrap"><table className="admin-overview-table"><thead><tr><th>Country</th><th>CPM / 1,000 eligible views</th><th>Rate type</th></tr></thead><tbody>{rates.map(rate=><tr key={rate.country}><td><b>{rate.country}</b></td><td>{money(rate.cpmCents/100)}</td><td>{rate.country==="ZZ"?"Fallback":"Country override"}</td></tr>)}</tbody></table></div></div></>}</>}
-function AdminReferrals(){const [rows,setRows]=useState<Awaited<ReturnType<typeof getAdminReferrals>>["referrals"]>([]);const [error,setError]=useState("");const load=()=>{const token=sessionStorage.getItem("nightbox-admin-token");if(!token){setError("Admin session expired");return}getAdminReferrals(token).then(data=>{setRows(data.referrals);setError("")}).catch(reason=>setError(reason instanceof Error?reason.message:"Unable to load referral ledger"))};useEffect(()=>{Promise.resolve().then(load)},[]);return <><AppTitle eyebrow="FINANCE · REFERRALS" title="Referral earnings" action={<button className="btn btn-dark" onClick={load}>Refresh</button>}/><p className="admin-page-note">Original creator receives the configured referral share from qualified views on imported links.</p>{error?<div className="card empty-state"><p>{error}</p></div>:<DataTable headers={["SOURCE CREATOR","IMPORTING CREATOR","RATE","EARNED","DATE"]} rows={rows.map(row=>[row.sourceEmail,row.importingEmail,`${row.percentage}%`,money(row.amountMicros/1_000_000),new Date(row.createdAt).toLocaleString()])}/>}</>}
-function DataTable({headers,rows,actions}:{headers:string[],rows:(string|React.ReactNode)[][],actions?:boolean}){return <div className="card admin-table"><div className="admin-table-head">{headers.map(h=><span key={h}>{h}</span>)}{actions&&<span/>}</div>{rows.map((r,i)=><div className="admin-table-row" key={i}>{r.map((x,j)=><span key={j}>{x}</span>)}{actions&&<button>•••</button>}</div>)}</div>}
-function LiveAdminUsers({toast,view="all"}:{toast:(s:string)=>void;view?:"all"|"creators"|"admins"}){return <AdminAccountDirectory view={view} toast={toast}/>;}
-function LiveAdminPlans({toast}:{toast:(s:string)=>void}){const [plans,setPlans]=useState<Array<{id:string;name:string;priceMinor:number;currency:string;durationDays:number;recurring:number;active:number}>>([]);const load=()=>{const token=sessionStorage.getItem("nightbox-admin-token");if(token)getAdminPlans(token).then(x=>setPlans(x.plans)).catch(()=>setPlans([]))};useEffect(load,[]);const save=async(plan:{id:string;name:string},input:HTMLInputElement,active:HTMLInputElement)=>{const token=sessionStorage.getItem("nightbox-admin-token");if(!token)return;try{await updateAdminPlan(token,plan.id,Math.round(Number(input.value)*100),active.checked?1:0);toast(`${plan.name} plan updated`);load()}catch(error){toast(error instanceof Error?error.message:"Unable to update plan")}};return <><AppTitle eyebrow="PREMIUM" title="Subscription plans"/><DataTable headers={["PLAN","PRICE (INR)","RECURRING","ACTIVE","ACTION"]} rows={plans.map(plan=>[plan.name,<input key={plan.id} type="number" min="0" step="0.01" defaultValue={(plan.priceMinor/100).toFixed(2)}/>,plan.recurring?"Yes":"No",<input key={`active-${plan.id}`} type="checkbox" defaultChecked={Boolean(plan.active)}/>,<button key={`save-${plan.id}`} onClick={event=>{const cell=event.currentTarget.parentElement;const input=cell?.children[1] as HTMLInputElement;const active=cell?.children[3] as HTMLInputElement;if(input&&active)save(plan,input,active)}}>Save</button>])}/></>}
-function LiveAdminFiles({toast}:{toast:(s:string)=>void}){
-  type VideoRow = Awaited<ReturnType<typeof getAdminVideos>>["videos"][number];
-  const [rows,setRows]=useState<VideoRow[]>([]); const [error,setError]=useState("");
-  const load=()=>{const token=sessionStorage.getItem("nightbox-admin-token");if(!token){setError("Admin session expired");return}getAdminVideos(token).then(x=>{setRows(x.videos);setError("")}).catch(e=>setError(e instanceof Error?e.message:"Unable to load videos"))};
-  useEffect(()=>{Promise.resolve().then(load)},[]);
-  const moderate=async(row:VideoRow,action:"approve"|"reject")=>{const token=sessionStorage.getItem("nightbox-admin-token");if(!token)return;try{if(action==="approve")await approveAdminVideo(token,row.id);else{const reason=window.prompt("Rejection reason",row.rejectionReason||"")||"Video rejected by administrator";await rejectAdminVideo(token,row.id,reason)}toast(action==="approve"?"Video approved":"Video rejected");load()}catch(error){toast(error instanceof Error?error.message:"Unable to update video")}};
-  const remove=async(id:string)=>{const token=sessionStorage.getItem("nightbox-admin-token");if(!token)return;try{await deleteAdminVideo(token,id);toast("Video deleted");load()}catch(error){toast(error instanceof Error?error.message:"Unable to delete video")}};
-  return <><AppTitle eyebrow="CONTENT OPERATIONS" title="File moderation" action={<button className="btn btn-dark" onClick={load}>Refresh queue</button>}/><p className="admin-page-note">Review processing, CDN verification, copyright and approval before a video becomes playable.</p>{error?<div className="card empty-state"><h2>Unable to load files</h2><p>{error}</p></div>:<DataTable headers={["FILE / CREATOR","PROCESSING","CDN / APPROVAL","VIEWS","CREATED","ACTION"]} rows={rows.map(row=>[<span className="person" key={row.id}><i>{(row.ownerEmail||row.uploadSource).slice(0,2).toUpperCase()}</i><b>{row.title}<small>{row.ownerEmail||"System / bot"} · {row.id}{row.fileSize?` · ${(row.fileSize/1024/1024).toFixed(1)} MB`:""}</small></b></span>,<Pill key={`processing-${row.id}`} tone={row.processingStatus==="completed"?"green":row.processingStatus==="failed"?"red":"orange"}>{row.processingStage||row.processingStatus||row.playbackStatus||"queued"}</Pill>,<span key={`approval-${row.id}`}><Pill tone={row.cdnVerifiedAt?"green":"orange"}>{row.cdnVerifiedAt?"CDN verified":"CDN pending"}</Pill><small>{row.approvalStatus||"pending"} · {row.copyrightStatus||"pending"}</small></span>,row.eligibleViews.toLocaleString(),new Date(row.createdAt).toLocaleString(),<span key={`actions-${row.id}`}><button disabled={row.approvalStatus==="approved"||row.approvalStatus==="rejected"} onClick={()=>moderate(row,"approve")}>Approve</button><button disabled={row.approvalStatus==="rejected"} onClick={()=>moderate(row,"reject")}>Reject</button><button onClick={()=>remove(row.id)}>Delete</button></span>])}/>}</>}
-function LiveAdminRevenue({toast}:{toast:(s:string)=>void}){const [rates,setRates]=useState<Array<{country:string;cpmCents:number}>>([]);const [rules,setRules]=useState({eligiblePercent:100,maxViewsPerIp24h:5,minimumWatchSeconds:5});const [error,setError]=useState("");const [newCountry,setNewCountry]=useState("");const [newCpm,setNewCpm]=useState("");const load=()=>{const token=sessionStorage.getItem("nightbox-admin-token");if(!token){setError("Admin session expired");return}Promise.all([getAdminCpm(token),getAdminViewRules(token)]).then(([cpm,viewRules])=>{setRates(cpm.rates);setRules(viewRules.rules)}).catch(e=>setError(e instanceof Error?e.message:"Unable to load revenue controls"))};
-// eslint-disable-next-line react-hooks/set-state-in-effect
-useEffect(load,[]);const save=async(country:string,value:string)=>{const token=sessionStorage.getItem("nightbox-admin-token");if(!token)return;try{await updateAdminCpm(token,country,Math.round(Number(value)*100));toast(`${country} CPM updated`);load()}catch(error){toast(error instanceof Error?error.message:"Unable to update CPM")}};const add=async(e:React.FormEvent)=>{e.preventDefault();const country=newCountry.trim().toUpperCase();const amount=Number(newCpm);if(!/^[A-Z]{2}$/.test(country)||!Number.isFinite(amount)||amount<0){toast("Use a valid ISO country code and CPM");return}await save(country,String(amount));setNewCountry("");setNewCpm("")};const saveRules=async(e:React.FormEvent)=>{e.preventDefault();const token=sessionStorage.getItem("nightbox-admin-token");if(!token)return;try{await updateAdminViewRules(token,rules);toast("View earning rules updated");load()}catch(error){toast(error instanceof Error?error.message:"Unable to update view rules")}};return <><AppTitle eyebrow="MONETIZATION" title="Revenue controls"/>{error?<div className="card empty-state"><p>{error}</p></div>:<><form className="card compact-form" onSubmit={saveRules}><h2>Eligible-view rules</h2><div className="three"><label>Eligible percentage<input type="number" min="0" max="100" value={rules.eligiblePercent} onChange={e=>setRules({...rules,eligiblePercent:Number(e.target.value)})}/></label><label>Counted views per IP / link / 24h<input type="number" min="1" max="10000" value={rules.maxViewsPerIp24h} onChange={e=>setRules({...rules,maxViewsPerIp24h:Number(e.target.value)})}/></label><label>Minimum seconds<input type="number" min="5" value={rules.minimumWatchSeconds} onChange={e=>setRules({...rules,minimumWatchSeconds:Number(e.target.value)})}/></label></div><button className="btn btn-primary">Save earning rules</button></form><div className="card empty-state"><h2>Country CPM rates</h2><p>Default rate: $10 per 1,000 eligible views ($0.01 per counted view). Add a country override below; unconfigured countries use ZZ.</p><form className="three" onSubmit={add}><label>Country code<input required maxLength={2} value={newCountry} onChange={e=>setNewCountry(e.target.value)} placeholder="IN"/></label><label>CPM (USD per 1,000 views)<input required min="0" step="0.01" type="number" value={newCpm} onChange={e=>setNewCpm(e.target.value)} placeholder="10.00"/></label><button className="btn btn-dark">Add or update country</button></form></div><DataTable headers={["COUNTRY","CPM USD / 1,000","RATE TYPE","ACTION"]} rows={rates.map(rate=>[rate.country,<input key={rate.country} type="number" min="0" step="0.01" defaultValue={(rate.cpmCents/100).toFixed(2)}/>,<Pill key={`status-${rate.country}`} tone={rate.country==="ZZ"?"orange":"green"}>{rate.country==="ZZ"?"Fallback":"Country override"}</Pill>,<button key={`save-${rate.country}`} onClick={event=>{const input=(event.currentTarget.parentElement?.children[1] as HTMLInputElement);save(rate.country,input.value)}}>Save</button>])}/></>}</>}
-function LiveAdminWithdrawalsLegacy({toast}:{toast:(s:string)=>void}){const [rows,setRows]=useState<Array<{id:string;creatorId:string;email:string;amountMicros:number;currency:string;method:string;status:string;requestedAt:string}>>([]);const [error,setError]=useState("");const load=()=>{const token=sessionStorage.getItem("nightbox-admin-token");if(!token){setError("Admin session expired");return}getAdminWithdrawals(token).then(x=>setRows(x.withdrawals)).catch(e=>setError(e instanceof Error?e.message:"Unable to load withdrawals"))};
-// eslint-disable-next-line react-hooks/set-state-in-effect
-useEffect(load,[]);const update=async(id:string,status:"approved"|"paid"|"rejected")=>{const token=sessionStorage.getItem("nightbox-admin-token");if(!token)return;try{await updateAdminWithdrawal(token,id,status);toast(`Withdrawal ${status}`);load()}catch(error){toast(error instanceof Error?error.message:"Unable to update withdrawal")}};return <><AppTitle eyebrow="PAYOUT OPERATIONS" title="Withdrawals" action={<button className="btn btn-dark" onClick={load}>Refresh</button>}/>{error?<div className="card empty-state"><p>{error}</p></div>:<DataTable headers={["CREATOR","AMOUNT","METHOD","STATUS","REQUESTED","ACTION"]} rows={rows.map(row=>[row.email,money(row.amountMicros/1000000),row.method,row.status,new Date(row.requestedAt).toLocaleDateString(),row.status==="pending"?<Fragment key={row.id}><button onClick={()=>update(row.id,"approved")}>Approve</button><button onClick={()=>update(row.id,"rejected")}>Reject</button></Fragment>:row.status==="approved"?<button onClick={()=>update(row.id,"paid")}>Mark paid</button>:"-"])}/>}</>}
-function LiveAdminPayments(){const [subscriptions,setSubscriptions]=useState<AdminSubscription[]>([]);const [payments,setPayments]=useState<AdminPayment[]>([]);const [error,setError]=useState("");
-// eslint-disable-next-line react-hooks/set-state-in-effect
-useEffect(()=>{const token=sessionStorage.getItem("nightbox-admin-token");if(!token){setError("Admin session expired");return}Promise.all([getAdminSubscriptions(token),getAdminPayments(token)]).then(([s,p])=>{setSubscriptions(s.subscriptions);setPayments(p.payments)}).catch(e=>setError(e instanceof Error?e.message:"Unable to load payment records"))},[]);return <><AppTitle eyebrow="PAYMENTS" title="Subscription activity"/>{error?<div className="card empty-state"><p>{error}</p></div>:<><DataTable headers={["PLAN","STATUS","STARTED","EXPIRES","CANCELLED"]} rows={subscriptions.map(row=>[row.plan_id,row.status,row.started_at?new Date(row.started_at).toLocaleDateString():"-",row.expires_at?new Date(row.expires_at).toLocaleDateString():"-",row.cancelled_at?new Date(row.cancelled_at).toLocaleDateString():"-"])}/><div className="card empty-state"><h2>Payment ledger</h2><p>{payments.length} provider record(s) returned by the backend.</p>{payments.slice(0,10).map(row=><div className="table-row" key={row.id}><span>{row.provider_payment_id||row.id.slice(0,8)}</span><span>{row.currency} {(row.amount_minor/100).toFixed(2)}</span><Pill tone={row.status==="paid"?"green":"orange"}>{row.status}</Pill><span>{new Date(row.created_at).toLocaleDateString()}</span></div>)}</div></>}</>}
-function NotFound({go}:{go:(p:string)=>void}){return <section className="not-found"><b>404</b><h1>This NightLink drifted into space.</h1><p>The page may have moved, expired or never existed.</p><button className="btn btn-primary" onClick={()=>go("/")}>Return home</button></section>}
-function AdminPayoutRequests({toast}:{toast:(s:string)=>void}){
-  type Withdrawal=Awaited<ReturnType<typeof getAdminWithdrawals>>["withdrawals"][number];
-  const [rows,setRows]=useState<Withdrawal[]>([]); const [loading,setLoading]=useState(true); const [error,setError]=useState(""); const [busyId,setBusyId]=useState(""); const [editing,setEditing]=useState<Withdrawal|null>(null);
-  const load=async()=>{const token=sessionStorage.getItem("nightbox-admin-token");if(!token){setError("Admin session expired");setLoading(false);return}setLoading(true);setError("");try{const result=await getAdminWithdrawals(token);setRows(result.withdrawals)}catch(e){setError(e instanceof Error?e.message:"Unable to load payout requests")}finally{setLoading(false)}};
-  useEffect(()=>{Promise.resolve().then(load)},[]);
-  const update=async(id:string,status:"approved"|"paid"|"rejected")=>{const token=sessionStorage.getItem("nightbox-admin-token");if(!token){setError("Admin session expired");return}setBusyId(id);try{await updateAdminWithdrawal(token,id,status);toast(`Payout ${status}`);await load()}catch(e){toast(e instanceof Error?e.message:"Unable to update payout request")}finally{setBusyId("")}};
-  const saveAccount=async(e:React.FormEvent<HTMLFormElement>)=>{
+function UserOverview({
+  go,
+  files,
+  token,
+  toast,
+}: {
+  go: (p: string) => void;
+  files: FileItem[];
+  token: string;
+  toast: (s: string) => void;
+}) {
+  const [analytics, setAnalytics] = useState<CreatorAnalyticsData>({
+    summary: { views: 0, earningsMicros: 0 },
+    countries: [],
+    rates: [],
+  });
+  const [dailyActivity, setDailyActivity] = useState<OverviewPoint[]>([]);
+  useEffect(() => {
+    let active = true;
+    const load = () => {
+      getCreatorAnalytics(token)
+        .then((result) => { if (active) setAnalytics(result); })
+        .catch(() => {});
+      getCreatorOverview(token)
+        .then((result) => { if (active) setDailyActivity(result.dailyActivity); })
+        .catch(() => { if (active) setDailyActivity([]); });
+    };
+    void load();
+    const timer = window.setInterval(load, 10000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [token, files.length]);
+  const cpm = effectiveCpm(analytics);
+  const defaultCpm = configuredCpm(analytics.rates);
+  const configuredRates = analytics.rates.length
+    ? analytics.rates
+    : [{ country: "ZZ", cpmCents: defaultCpm }];
+  const chartRows = Array.from({ length: 7 }, (_, index) => {
+    const day = new Date();
+    day.setHours(0, 0, 0, 0);
+    day.setDate(day.getDate() - 6 + index);
+    const date = localDateKey(day);
+    const row = dailyActivity.find((item) => item.date === date);
+    return {
+      date,
+      views: row?.views ?? 0,
+      earningsMicros: row?.earningsMicros ?? 0,
+    };
+  });
+  return (
+    <>
+      <AppTitle
+        eyebrow="CREATOR WORKSPACE"
+        title="Your workspace"
+        action={
+          <button
+            className="btn btn-primary"
+            onClick={() => go("/user/upload")}
+          >
+            ↑ Upload files
+          </button>
+        }
+      />
+      <section className="overview-hero">
+        <div>
+          <span>YOUR CREATOR CLOUD</span>
+          <h2>Make your next file work harder.</h2>
+          <p>
+            Upload, share and track your creator library from one focused
+            workspace.
+          </p>
+        </div>
+        <div className="overview-actions">
+          <button className="btn btn-white" onClick={() => go("/user/upload")}>
+            Upload a video →
+          </button>
+          <button
+            className="btn btn-ghost-light"
+            onClick={() => go("/user/files")}
+          >
+            Browse files
+          </button>
+        </div>
+      </section>
+      <div className="metrics">
+        <Metric
+          icon="$"
+          label="Recorded earnings"
+          value={money(analytics.summary.earningsMicros / 1000000)}
+        />
+        <Metric
+          icon="◉"
+          label="Verified views"
+          value={analytics.summary.views.toLocaleString()}
+        />
+        <Metric icon="▱" label="Uploaded videos" value={String(files.length)} />
+        <Metric icon="↗" label="Downloads" value="Not tracked" />
+      </div>
+      <div className="overview-analytics-grid">
+        <OverviewChart title="Views analytics" kind="views" rows={chartRows} />
+        <OverviewChart
+          title="Earnings analytics"
+          kind="earnings"
+          rows={chartRows}
+        />
+      </div>
+      <section className="card monetization-summary">
+        <div>
+          <span className="metric-icon">$</span>
+          <div>
+            <b>{money(defaultCpm / 100)} CPM for all countries</b>
+            <small>
+              {cpm === null
+                ? "Default payout rate for every country · $10 per 1,000 eligible views."
+                : `Your recorded effective rate is ${money(cpm)} per 1,000 verified views.`}
+            </small>
+          </div>
+        </div>
+        <button
+          className="btn btn-outline"
+          onClick={() => go("/user/analytics")}
+        >
+          View country rates →
+        </button>
+      </section>
+      <section className="card creator-rate-preview">
+        <div className="creator-rate-heading">
+          <div>
+            <span>TRANSPARENT MONETIZATION</span>
+            <h2>Country CPM rates</h2>
+            <p>Every country starts at $10.00 per 1,000 eligible views.</p>
+          </div>
+          <button
+            className="btn btn-outline"
+            onClick={() => go("/user/analytics")}
+          >
+            See all rates →
+          </button>
+        </div>
+        <div className="creator-rate-chips">
+          {configuredRates.slice(0, 4).map((rate) => (
+            <span key={rate.country}>
+              <b>{displayRateCountry(rate.country)}</b>
+              <strong>{money(rate.cpmCents / 100)}</strong>
+              <small>CPM / 1,000 views</small>
+            </span>
+          ))}
+        </div>
+        <small className="creator-rate-footnote">
+          All countries use the $10.00 default unless NightBox adds a specific
+          country override. Past eligible views keep their recorded rate.
+        </small>
+      </section>
+      <div className="card recent">
+        <div className="card-head">
+          <div>
+            <b>Recent videos</b>
+            <span>Your latest creator uploads</span>
+          </div>
+          <button onClick={() => go("/user/files")}>View all →</button>
+        </div>
+        {files.length ? (
+          <FileRows files={files.slice(0, 4)} toast={toast} />
+        ) : (
+          <div className="overview-empty">
+            <span>▱</span>
+            <div>
+              <h3>Your library is ready</h3>
+              <p>
+                Upload your first video to start building your creator library.
+              </p>
+            </div>
+            <button
+              className="btn btn-outline"
+              onClick={() => go("/user/upload")}
+            >
+              Upload first video
+            </button>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+function PremiumStatus() {
+  return (
+    <section className="premium-coming-soon" aria-labelledby="premium-title">
+      <div className="premium-orbit premium-orbit-one" />
+      <div className="premium-orbit premium-orbit-two" />
+      <div className="premium-spark">✦</div>
+      <div className="premium-copy">
+        <span className="pill pill-orange">NEXT IN THE WORKSPACE</span>
+        <h1 id="premium-title">
+          Premium is
+          <br />
+          <em>coming soon.</em>
+        </h1>
+        <p>
+          We are shaping a smarter creator upgrade with better reach, deeper
+          insights and more ways to grow. Plans will appear here when the
+          experience is ready.
+        </p>
+        <div className="premium-signals">
+          <span>Creator-first tools</span>
+          <span>Early access updates</span>
+          <span>Simple, transparent plans</span>
+        </div>
+      </div>
+      <div className="premium-visual" aria-hidden="true">
+        <div className="premium-glow" />
+        <div className="premium-cube">
+          <b>NB</b>
+          <i>PREMIUM</i>
+        </div>
+        <span className="premium-float premium-float-top">✦ 01</span>
+        <span className="premium-float premium-float-bottom">SOON</span>
+      </div>
+    </section>
+  );
+}
+function FileRows({
+  files,
+  go,
+  toast,
+}: {
+  files: FileItem[];
+  go?: (path: string) => void;
+  toast: (s: string) => void;
+}) {
+  const [openId, setOpenId] = useState<string | number | null>(null);
+  const copyLink = async (link: string) => {
+    try {
+      await copyTextToClipboard(link);
+      toast("Link copied");
+    } catch {
+      toast("Clipboard unavailable. Select and copy the link manually.");
+    }
+  };
+  return (
+    <div className="file-rows">
+      {files.map((f) => (
+        <div key={f.id}>
+          <span className="type-box" style={{ background: f.color }}>
+            {f.type}
+          </span>
+          <span className="file-name">
+            <b>{f.name}</b>
+            <small>
+              {f.size} · {f.updated}
+            </small>
+          </span>
+          <span>
+            <b>{f.views.toLocaleString()}</b>
+            <small>Views</small>
+          </span>
+          <span>
+            <b>{money(f.earned)}</b>
+            <small>Earned</small>
+          </span>
+          <Pill tone={videoStatusIsActive(f.status) ? "green" : "orange"}>
+            {videoStatusLabel(f.status)}
+          </Pill>
+          {f.link && (
+            <button onClick={() => void copyLink(f.link!)}>Copy link</button>
+          )}
+          <span className="file-row-actions">
+            <button
+              className="file-more"
+              aria-label={`More actions for ${f.name}`}
+              aria-expanded={openId === f.id}
+              onClick={() => setOpenId(openId === f.id ? null : f.id)}
+            >
+              •••
+            </button>
+            {openId === f.id && (
+              <div className="file-row-menu" role="menu">
+                <button onClick={() => go?.("/user/files")}>
+                  Open in My files
+                </button>
+                {f.link && (
+                  <button
+                    onClick={() => {
+                      void copyLink(f.link!);
+                      setOpenId(null);
+                    }}
+                  >
+                    Copy link
+                  </button>
+                )}
+              </div>
+            )}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+function FilesTable({
+  files,
+  saveFiles,
+  toast,
+  token,
+  go,
+}: {
+  files: FileItem[];
+  saveFiles: (x: FileItem[]) => void;
+  toast: (s: string) => void;
+  token: string;
+  go: (p: string) => void;
+}) {
+  return (
+    <>
+      <CreatorFileManager token={token} toast={toast} />
+      <CreatorVideosTable
+        files={files}
+        saveFiles={saveFiles}
+        toast={toast}
+        token={token}
+        go={go}
+      />
+    </>
+  );
+}
+function CreatorVideosTable({
+  files,
+  saveFiles,
+  toast,
+  token,
+  go,
+}: {
+  files: FileItem[];
+  saveFiles: (x: FileItem[]) => void;
+  toast: (s: string) => void;
+  token: string;
+  go: (p: string) => void;
+}) {
+  const [q, setQ] = useState("");
+  const shown = files.filter((f) =>
+    f.name.toLowerCase().includes(q.toLowerCase()),
+  );
+  const remove = async (id: string) => {
+    try {
+      await deleteCreatorVideo(token, id);
+      saveFiles(files.filter((x) => String(x.id) !== id));
+      toast("Video deleted");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Unable to delete video");
+    }
+  };
+  const share = async (file: FileItem) => {
+    let link = file.link;
+    try {
+      if (!link) {
+        const result = await createCreatorVideoLink(token, String(file.id));
+        link = result.link.url;
+        saveFiles(
+          files.map((item) => (item.id === file.id ? { ...item, link } : item)),
+        );
+      }
+      await copyTextToClipboard(link);
+      toast("Link copied");
+    } catch (error) {
+      toast(
+        error instanceof Error
+          ? error.message
+          : "Unable to create or copy link",
+      );
+    }
+  };
+  return (
+    <>
+      <AppTitle
+        eyebrow="VIDEO LIBRARY"
+        title="Creator videos"
+        action={
+          <button
+            className="btn btn-primary"
+            onClick={() => go("/user/upload")}
+          >
+            ↑ Upload video
+          </button>
+        }
+      />
+      <div className="toolbar">
+        <div className="search">
+          ⌕
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search videos…"
+          />
+        </div>
+        <select>
+          <option>All formats</option>
+          <option>Video</option>
+        </select>
+        <select>
+          <option>Recently updated</option>
+          <option>Most viewed</option>
+        </select>
+      </div>
+      <div className="card files-table">
+        <div className="table-head">
+          <span>VIDEO</span>
+          <span>STATUS</span>
+          <span>VIEWS</span>
+          <span>EARNED</span>
+          <span>UPDATED</span>
+          <span />
+        </div>
+        {shown.map((f) => (
+          <div className="table-row" key={f.id}>
+            <span className="file-cell">
+              <i className="type-box" style={{ background: f.color }}>
+                {f.type}
+              </i>
+              <b>
+                {f.name}
+                <small>{f.size}</small>
+              </b>
+            </span>
+            <Pill tone={videoStatusIsActive(f.status) ? "green" : "orange"}>
+              {videoStatusLabel(f.status)}
+            </Pill>
+            <span>{f.views.toLocaleString()}</span>
+            <b>{money(f.earned)}</b>
+            <span>{f.updated}</span>
+            <button onClick={() => share(f)}>
+              {f.link ? "Copy link" : "Create link"}
+            </button>
+            <button onClick={() => remove(String(f.id))}>Delete</button>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+function Analytics({ token }: { token: string }) {
+  const [data, setData] = useState<CreatorAnalyticsData | null>(null);
+  const [dailyActivity, setDailyActivity] = useState<OverviewPoint[]>([]);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let active = true;
+    const load = () => {
+      Promise.all([getCreatorAnalytics(token), getCreatorOverview(token, "all")])
+        .then(([analytics, overview]) => {
+          if (active) {
+            setData(analytics);
+            setDailyActivity(overview.dailyActivity);
+            setFailed(false);
+          }
+        })
+        .catch(() => { if (active) setFailed(true); });
+    };
+    void load();
+    const timer = window.setInterval(load, 10000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [token]);
+  if (!data)
+    return (
+      <>
+        <AppTitle eyebrow="PERFORMANCE" title="Analytics" />
+        <div className="card empty-state">
+          <h2>
+            {failed
+              ? "Analytics could not be loaded"
+              : "Loading country rates and analytics"}
+          </h2>
+          <p>
+            {failed
+              ? "We could not reach your creator analytics. Check your connection and try again."
+              : "Your configured country CPM and eligible-view performance will appear here."}
+          </p>
+          {failed && (
+            <button
+              className="btn btn-outline"
+              onClick={() => {
+                setData(null);
+                setFailed(false);
+                Promise.all([
+                  getCreatorAnalytics(token),
+                  getCreatorOverview(token, "all"),
+                ])
+                  .then(([analytics, overview]) => {
+                    setData(analytics);
+                    setDailyActivity(overview.dailyActivity);
+                  })
+                  .catch(() => setFailed(true));
+              }}
+            >
+              Try again
+            </button>
+          )}
+        </div>
+      </>
+    );
+  const rates = data.rates.length
+    ? data.rates
+    : [{ country: "ZZ", cpmCents: 1000 }];
+  return (
+    <>
+      <AppTitle eyebrow="PERFORMANCE" title="Analytics" />
+      <div className="metrics three">
+        <Metric
+          icon="◉"
+          label="Eligible views"
+          value={data.summary.views.toLocaleString()}
+        />
+        <Metric
+          icon="$"
+          label="Recorded earnings"
+          value={money(data.summary.earningsMicros / 1000000)}
+        />
+        <Metric
+          icon="◎"
+          label="Countries with views"
+          value={String(data.countries.length)}
+        />
+      </div>
+      <section className="card creator-rates-table">
+        <div className="creator-section-heading">
+          <div>
+            <span>ACTIVE MONETIZATION RULES</span>
+            <h2>Country CPM rates</h2>
+            <p>
+              Every country uses the $10.00 default per 1,000 eligible views
+              unless a specific override is configured.
+            </p>
+          </div>
+          <strong className="rate-highlight">
+            $10.00 <small>CPM / 1,000 views</small>
+          </strong>
+        </div>
+        <div className="creator-rates-grid">
+          <div className="creator-rates-head">
+            <span>COUNTRY</span>
+            <span>CPM · USD / 1,000 ELIGIBLE VIEWS</span>
+            <span>RATE</span>
+          </div>
+          {rates.map((rate) => (
+            <div className="creator-rates-row" key={rate.country}>
+              <b>{displayRateCountry(rate.country)}</b>
+              <span>{money(rate.cpmCents / 100)}</span>
+              <i>
+                {rate.country === "ZZ"
+                  ? "All-country default"
+                  : "Country-specific"}
+              </i>
+            </div>
+          ))}
+        </div>
+        <small className="creator-rate-footnote">
+          The $10.00 default applies to countries without a specific override.
+          Previous eligible views keep the rate recorded when they qualified.
+        </small>
+      </section>
+      <section className="card creator-rates-table creator-performance-table">
+        <div className="creator-section-heading">
+          <div>
+            <span>YOUR VERIFIED PERFORMANCE</span>
+            <h2>Views and earnings by viewer country</h2>
+          </div>
+        </div>
+        <div className="card files-table analytics-table">
+          <div className="table-head">
+            <span>COUNTRY</span>
+            <span>VIEWS</span>
+            <span>CPM</span>
+            <span>EARNED</span>
+          </div>
+          {data.countries.length ? (
+            data.countries.map((row) => (
+              <div className="table-row" key={row.country}>
+                <b>{countryName(row.country)}</b>
+                <span>{row.views.toLocaleString()}</span>
+                <span>{money(row.cpmCents / 100 || 1000 / 100)}</span>
+                <b>{money(row.earningsMicros / 1000000)}</b>
+              </div>
+            ))
+          ) : (
+            <p className="empty-copy">
+              No eligible views yet. Your $10.00 default CPM is ready for every
+              country.
+            </p>
+          )}
+        </div>
+        <p className="creator-rate-footnote">
+          Unknown country means location was not recorded when that view
+          qualified. Past records cannot be assigned to a country reliably.
+        </p>
+      </section>
+      <section className="card creator-rates-table creator-daily-activity">
+        <div className="creator-section-heading">
+          <div>
+            <span>DAILY BREAKDOWN</span>
+            <h2>Daily views and earnings · all dates</h2>
+            <p>UTC dates from the first recorded qualified view.</p>
+          </div>
+        </div>
+        <div className="card files-table analytics-table">
+          <div className="table-head">
+            <span>DATE</span>
+            <span>VIEWS</span>
+            <span>CPM</span>
+            <span>EARNED</span>
+          </div>
+          {dailyActivity.length ? (
+            [...dailyActivity].reverse().map((row) => (
+              <div className="table-row" key={row.date}>
+                <b>
+                  {new Date(`${row.date}T00:00:00`).toLocaleDateString(
+                    undefined,
+                    { year: "numeric", month: "short", day: "numeric" },
+                  )}
+                </b>
+                <span>{row.views.toLocaleString()}</span>
+                <span>
+                  {row.views
+                    ? money((row.earningsMicros / 1000000 / row.views) * 1000)
+                    : "—"}
+                </span>
+                <b>{money(row.earningsMicros / 1000000)}</b>
+              </div>
+            ))
+          ) : (
+            <p className="empty-copy">
+              No qualified views or earnings recorded yet.
+            </p>
+          )}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function Earnings({ token }: { token: string }) {
+  const [analytics, setAnalytics] = useState<CreatorAnalyticsData>({
+    summary: { views: 0, earningsMicros: 0 },
+    countries: [],
+    rates: [],
+  });
+  const [withdrawals, setWithdrawals] = useState<
+    Array<{
+      id: string;
+      amountMicros: number;
+      method: string;
+      status: string;
+      requestedAt: string;
+    }>
+  >([]);
+  useEffect(() => {
+    const load = () => {
+      getCreatorAnalytics(token).then(setAnalytics).catch(() => {});
+      getCreatorWithdrawals(token)
+        .then((x) => setWithdrawals(x.withdrawals))
+        .catch(() => setWithdrawals([]));
+    };
+    void load();
+    const timer = window.setInterval(load, 10000);
+    return () => window.clearInterval(timer);
+  }, [token]);
+  const summary = analytics.summary;
+  const cpm = effectiveCpm(analytics);
+  const paid = withdrawals
+    .filter((row) => row.status.toLowerCase() === "completed")
+    .reduce((sum, row) => sum + row.amountMicros / 1000000, 0);
+  const pending = withdrawals
+    .filter((row) => row.status.toLowerCase() !== "completed")
+    .reduce((sum, row) => sum + row.amountMicros / 1000000, 0);
+  return (
+    <>
+      <AppTitle eyebrow="CREATOR WALLET" title="Earnings" />
+      <p className="withdraw-subtitle">
+        Follow your recorded earnings, payout progress, and payment history in
+        one place.
+      </p>
+      <section className="wallet-hero earnings-hero">
+        <div>
+          <span>TOTAL RECORDED EARNINGS</span>
+          <b>{money(summary.earningsMicros / 1000000)}</b>
+          <small>Based on qualified views recorded by NightBox</small>
+        </div>
+        <div>
+          <span>
+            <b>{summary.views.toLocaleString()}</b>
+            <small>Qualified views</small>
+          </span>
+          <span>
+            <b>{cpm === null ? "—" : money(cpm)}</b>
+            <small>Effective CPM</small>
+          </span>
+          <span>
+            <b>{money(paid)}</b>
+            <small>Paid out</small>
+          </span>
+          <span>
+            <b>{money(pending)}</b>
+            <small>In review</small>
+          </span>
+        </div>
+      </section>
+      <div className="metrics three earnings-metrics">
+        <Metric
+          icon="◉"
+          label="Qualified views"
+          value={summary.views.toLocaleString()}
+        />
+        <Metric
+          icon="$"
+          label="Recorded earnings"
+          value={money(summary.earningsMicros / 1000000)}
+        />
+        <Metric icon="↗" label="Completed payouts" value={money(paid)} />
+      </div>
+      <section className="card ledger earnings-ledger">
+        <div className="card-head">
+          <div>
+            <b>Payment history</b>
+            <span>Recent payout requests and their status</span>
+          </div>
+        </div>
+        {withdrawals.length ? (
+          withdrawals.map((row) => (
+            <div key={row.id}>
+              <span className="ledger-icon">$</span>
+              <span>
+                <b>{row.method} payout</b>
+                <small>
+                  {new Date(row.requestedAt).toLocaleDateString()} · Request{" "}
+                  {row.id.slice(0, 8)}
+                </small>
+              </span>
+              <b
+                className={
+                  row.status.toLowerCase() === "completed" ? "positive" : ""
+                }
+              >
+                {money(row.amountMicros / 1000000)}
+              </b>
+              <span>
+                <Pill
+                  tone={
+                    row.status.toLowerCase() === "completed"
+                      ? "green"
+                      : "orange"
+                  }
+                >
+                  {row.status}
+                </Pill>
+              </span>
+            </div>
+          ))
+        ) : (
+          <div className="earnings-empty">
+            <span>↗</span>
+            <div>
+              <b>No payouts yet</b>
+              <small>
+                Your payment history will appear here after you submit a
+                withdrawal request.
+              </small>
+            </div>
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+
+function LiveAdminLogin({
+  go,
+  setAuth,
+  toast,
+}: {
+  go: (p: string) => void;
+  setAuth: (v: boolean) => void;
+  toast: (s: string) => void;
+}) {
+  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const row=editing;if(!row)return;
-    const token=sessionStorage.getItem("nightbox-admin-token");if(!token){setError("Admin session expired");return}
-    const payoutAccount=String(new FormData(e.currentTarget).get("payoutAccount")||"").trim();
-    setBusyId(row.id);
-    try{await updateAdminWithdrawal(token,row.id,{payoutAccount});toast("Payout account saved");setEditing(null);await load()}
-    catch(e){toast(e instanceof Error?e.message:"Unable to save payout account")}
-    finally{setBusyId("")}
+    const data = new FormData(e.currentTarget);
+    try {
+      const result = await adminLogin(
+        String(data.get("email")),
+        String(data.get("password")),
+      );
+      sessionStorage.setItem("nightbox-admin-token", result.token);
+      sessionStorage.setItem("nightbox-admin", "1");
+      setAuth(true);
+      toast("Secure admin session started");
+      go("/admin/dashboard");
+    } catch (error) {
+      toast(
+        error instanceof Error ? error.message : "Administrator login failed",
+      );
+    }
   };
-  return <>
-    <AppTitle eyebrow="PAYOUT OPERATIONS" title="Payout requests" action={<button className="btn btn-dark" onClick={load}>Refresh</button>}/>
-    <p className="admin-page-note">Review and process creator payout requests.</p>
-    {loading?<div className="card empty-state" role="status" aria-live="polite"><h2>Loading payout requests…</h2><p>Fetching the latest requests.</p></div>:error?<div className="card empty-state" role="alert"><h2>Unable to load payout requests</h2><p>{error}</p><button className="btn btn-primary" onClick={load}>Try again</button></div>:<section className="card admin-table-card payout-admin"><div className="admin-section-heading"><div><span>CREATOR PAYOUTS</span><h2>Requests</h2></div><small>{rows.length} request{rows.length===1?"":"s"}</small></div><div className="admin-overview-table-wrap"><table className="admin-overview-table"><caption className="sr-only">Creator payout requests</caption><thead><tr><th scope="col">Creator</th><th scope="col">Amount</th><th scope="col">Method</th><th scope="col">Payout account</th><th scope="col">Requested</th><th scope="col">Status</th><th scope="col">Action</th></tr></thead><tbody>{rows.map(row=>{const busy=busyId===row.id;return <tr key={row.id}><td><b>{row.email}</b><small>{row.creatorId}</small></td><td>{money(row.amountMicros/1000000)}</td><td>{row.method}</td><td>{row.payoutAccount||<em>Missing account</em>}</td><td>{new Date(row.requestedAt).toLocaleString()}</td><td><Pill tone={row.status==="paid"?"green":row.status==="rejected"?"red":"orange"}>{row.status}</Pill></td><td><div className="payout-actions">{(row.status==="pending"||row.status==="approved")&&<button type="button" disabled={busy} onClick={()=>setEditing(row)}>{row.payoutAccount?"Edit account":"Add account"}</button>}{row.status==="pending"?<><button type="button" disabled={busy||!row.payoutAccount} onClick={()=>update(row.id,"approved")}>{busy?"Saving…":"Approve"}</button><button type="button" disabled={busy} onClick={()=>update(row.id,"rejected")}>Reject</button></>:row.status==="approved"?<button type="button" disabled={busy||!row.payoutAccount} onClick={()=>update(row.id,"paid")}>{busy?"Saving…":"Mark paid"}</button>:<span aria-label="No action available">—</span>}</div></td></tr>})}</tbody></table>{!rows.length&&<p className="admin-overview-empty" role="status">No payout requests have been submitted yet.</p>}</div></section>}
-    {editing&&<div className="modal" role="dialog" aria-modal="true" aria-labelledby="payout-account-title"><form className="payout-edit-modal" onSubmit={saveAccount}><button type="button" className="modal-close" aria-label="Close payout account editor" onClick={()=>setEditing(null)}>×</button><span className="eyebrow">PAYOUT ACCOUNT</span><h2 id="payout-account-title">{editing.payoutAccount?"Edit":"Add"} {editing.method} account</h2><p className="payout-edit-subtitle">{editing.email} · {editing.id.slice(0,8)}</p><label>{editing.method==="UPI"?"UPI ID":"PayPal email"}<input name="payoutAccount" type={editing.method==="PayPal"?"email":"text"} maxLength={254} defaultValue={editing.payoutAccount||""} placeholder={editing.method==="UPI"?"name@bank":"name@example.com"} required autoFocus/></label><p className="payout-edit-hint">Confirm these payment details with the creator before processing the payout.</p><div className="form-actions"><button type="button" className="btn btn-outline" onClick={()=>setEditing(null)}>Cancel</button><button className="btn btn-primary" disabled={busyId===editing.id}>{busyId===editing.id?"Saving…":"Save account"}</button></div></form></div>}
-  </>;
+  return (
+    <div className="admin-login">
+      <div className="admin-login-brand">
+        <Brand dark go={go} />
+        <Pill tone="orange">OPERATIONS CONSOLE</Pill>
+      </div>
+      <form onSubmit={submit}>
+        <span className="shield">◆</span>
+        <h1>Administrator access</h1>
+        <p>Use the administrator credentials configured on the backend.</p>
+        <label>
+          Admin email
+          <input
+            name="email"
+            required
+            type="email"
+            placeholder="admin@example.com"
+          />
+        </label>
+        <label>
+          Password
+          <input name="password" required type="password" />
+        </label>
+        <button className="btn btn-primary btn-block">
+          Enter command center →
+        </button>
+        <small>
+          Admin authentication is server-side and requires configured
+          environment credentials.
+        </small>
+      </form>
+      <button className="admin-back" onClick={() => go("/")}>
+        ← Return to NightBox website
+      </button>
+    </div>
+  );
 }
-function LiveAdminWithdrawals({toast}:{toast:(s:string)=>void}){
-  type Withdrawal=Awaited<ReturnType<typeof getAdminWithdrawals>>["withdrawals"][number]; type Overview=Awaited<ReturnType<typeof getAdminOverview>>; type Status="pending"|"approved"|"paid"|"rejected";
-  const [rows,setRows]=useState<Withdrawal[]>([]); const [overview,setOverview]=useState<Overview|null>(null); const [error,setError]=useState(""); const [editing,setEditing]=useState<Withdrawal|null>(null); const [saving,setSaving]=useState(false);
-  const load=()=>{const token=sessionStorage.getItem("nightbox-admin-token");if(!token){setError("Admin session expired");return}Promise.all([getAdminWithdrawals(token),getAdminOverview(token)]).then(([p,o])=>{setRows(p.withdrawals);setOverview(o);setError("")}).catch(e=>setError(e instanceof Error?e.message:"Unable to load payout data"))};
+
+function AdminApp({
+  route,
+  go,
+  auth,
+  setAuth,
+  toast,
+}: {
+  route: string;
+  go: (p: string) => void;
+  auth: boolean;
+  setAuth: (v: boolean) => void;
+  toast: (s: string) => void;
+}) {
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  if (route === "/admin/login" || !auth)
+    return <LiveAdminLogin go={go} setAuth={setAuth} toast={toast} />;
+  const navigate = (p: string) => {
+    setDrawerOpen(false);
+    go(p);
+  };
+  const openSidebar = () => {
+    setSidebarCollapsed(false);
+    setDrawerOpen(true);
+  };
+  return (
+    <div
+      className={`app-shell admin-app ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}
+    >
+      <Sidebar
+        nav={adminNav}
+        route={route}
+        go={navigate}
+        admin
+        open={drawerOpen}
+        close={() => setDrawerOpen(false)}
+        collapsed={sidebarCollapsed}
+        toggleCollapse={() => setSidebarCollapsed((value) => !value)}
+      />
+      <div className="app-main">
+        <Topbar go={navigate} admin onMenu={openSidebar} />
+        <div className="app-content">
+          {route === "/admin/dashboard" && <AdminDashboard go={navigate} />}
+          {route === "/admin/analytics" && <AdminAnalytics />}
+          {route === "/admin/traffic" && <AdminTraffic />}
+          {route === "/admin/users" && (
+            <LiveAdminUsers toast={toast} view="all" />
+          )}
+          {route === "/admin/creators" && (
+            <LiveAdminUsers toast={toast} view="creators" />
+          )}
+          {route === "/admin/admins" && (
+            <LiveAdminUsers toast={toast} view="admins" />
+          )}
+          {route === "/admin/earnings" && <AdminEarnings go={navigate} />}
+          {route === "/admin/referrals" && <AdminReferrals />}
+          {route === "/admin/files" && <LiveAdminFiles toast={toast} />}
+          {route === "/admin/revenue" && <LiveAdminRevenue toast={toast} />}
+          {route === "/admin/withdrawals" && (
+            <AdminPayoutRequests toast={toast} />
+          )}
+          {route === "/admin/reports" && <LiveAdminReports toast={toast} />}
+          {route === "/admin/tickets" && <LiveAdminTickets toast={toast} />}
+          {route === "/admin/events" && <LiveAdminEvents toast={toast} />}
+          {route === "/admin/payments" && (
+            <>
+              <LiveAdminPayments />
+              <AdminPaymentActions toast={toast} />
+              <LiveAdminPlans toast={toast} />
+            </>
+          )}
+          {route === "/admin/rewards" && (
+            <>
+              <AppTitle
+                eyebrow="FINANCE · CREATOR PROGRAM"
+                title="Bonuses & rewards"
+              />
+              <AdminRewardMilestones toast={toast} />
+            </>
+          )}
+          {route === "/admin/views" && (
+            <>
+              <AppTitle
+                eyebrow="ANALYTICS · QUALITY CONTROL"
+                title="View review queue"
+              />
+              <LiveAdminViews toast={toast} />
+            </>
+          )}
+          {route === "/admin/bot-activity" && <LiveAdminBotActivity />}
+          {route === "/admin/settings" && <LiveAdminSettings toast={toast} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LiveAdminBotActivity() {
+  type BotEvent = Awaited<
+    ReturnType<typeof getAdminBotEvents>
+  >["events"][number];
+  const [events, setEvents] = useState<BotEvent[]>([]);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const load = () => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) {
+      setError("Admin session expired");
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    getAdminBotEvents(token)
+      .then((result) => {
+        setEvents(result.events);
+        setError("");
+      })
+      .catch((reason) =>
+        setError(
+          reason instanceof Error
+            ? reason.message
+            : "Unable to load bot activity",
+        ),
+      )
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => {
+    Promise.resolve().then(load);
+  }, []);
+  return (
+    <>
+      <AppTitle
+        eyebrow="SYSTEM · TELEGRAM INTEGRATIONS"
+        title="Bot activity"
+        action={
+          <button className="btn btn-dark" onClick={load}>
+            Refresh log
+          </button>
+        }
+      />
+      <p className="withdraw-subtitle">
+        Recent bot events recorded by NightBox. Sensitive raw error details are
+        not shown here.
+      </p>
+      <section className="card admin-table">
+        <div className="card-head">
+          <div>
+            <b>Recent bot events</b>
+            <span>Latest 100 backend-recorded actions</span>
+          </div>
+        </div>
+        {error ? (
+          <p className="empty-copy">{error}</p>
+        ) : loading ? (
+          <p className="empty-copy">Loading bot activity…</p>
+        ) : events.length ? (
+          <>
+            <div className="admin-table-head">
+              <span>BOT</span>
+              <span>CREATOR</span>
+              <span>EVENT</span>
+              <span>REFERENCE</span>
+              <span>STATUS</span>
+              <span>TIME</span>
+            </div>
+            {events.map((event) => (
+              <div className="admin-table-row" key={event.id}>
+                <span>{event.botName}</span>
+                <span>{event.email || "Unlinked account"}</span>
+                <span>{event.eventType}</span>
+                <span>{event.videoId || event.externalId || "—"}</span>
+                <span>
+                  <Pill
+                    tone={
+                      event.status.toLowerCase() === "completed" ||
+                      event.status.toLowerCase() === "success"
+                        ? "green"
+                        : "orange"
+                    }
+                  >
+                    {event.status}
+                  </Pill>
+                </span>
+                <span>{new Date(event.createdAt).toLocaleString()}</span>
+              </div>
+            ))}
+          </>
+        ) : (
+          <p className="empty-copy">No bot events have been recorded yet.</p>
+        )}
+      </section>
+    </>
+  );
+}
+function AdminDashboard({ go }: { go: (path: string) => void }) {
+  const dateValue = (value: Date) =>
+    `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+  const endDefault = dateValue(new Date());
+  const startDefault = (() => {
+    const value = new Date();
+    value.setDate(value.getDate() - 29);
+    return dateValue(value);
+  })();
+  type Overview = Awaited<ReturnType<typeof getAdminOverview>>;
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [status, setStatus] = useState("loading");
+  const [dateFrom, setDateFrom] = useState(startDefault);
+  const [dateTo, setDateTo] = useState(endDefault);
+  const [appliedFrom, setAppliedFrom] = useState(startDefault);
+  const [appliedTo, setAppliedTo] = useState(endDefault);
+  const [refreshTick, setRefreshTick] = useState(0);
+  useEffect(() => {
+    let active = true;
+    const load = () => {
+      const token = sessionStorage.getItem("nightbox-admin-token");
+      if (!token) {
+        setStatus("error");
+        return;
+      }
+      getAdminOverview(token, appliedFrom, appliedTo)
+        .then((data) => {
+          if (active) {
+            setOverview(data);
+            setStatus("ready");
+          }
+        })
+        .catch(() => {
+          if (active) setStatus("error");
+        });
+    };
+    Promise.resolve().then(load);
+    const timer = window.setInterval(load, 10000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [appliedFrom, appliedTo, refreshTick]);
+  const validRange = dateFrom <= dateTo && dateTo <= endDefault;
+  const applyDates = () => {
+    if (!validRange) return;
+    setAppliedFrom(dateFrom);
+    setAppliedTo(dateTo);
+  };
+  const clearDates = () => {
+    setDateFrom(startDefault);
+    setDateTo(endDefault);
+    setAppliedFrom(startDefault);
+    setAppliedTo(endDefault);
+  };
+  const dailyRows = overview?.dailyActivity || [];
+  const creatorRows = overview?.recentCreators || [];
+  return (
+    <>
+      <header className="admin-dashboard-heading">
+        <div>
+          <span>ANALYTICS · NIGHTBOX OPERATIONS</span>
+          <h1>Super Admin Overview</h1>
+          <p>
+            Live platform activity, creator growth, and qualified-view earnings.
+          </p>
+        </div>
+        <div className="admin-overview-actions">
+          <small>
+            Updated{" "}
+            {overview?.updatedAt
+              ? new Date(overview.updatedAt).toLocaleTimeString()
+              : "—"}
+          </small>
+          <button
+            className="btn btn-dark"
+            onClick={() => setRefreshTick((value) => value + 1)}
+          >
+            Refresh
+          </button>
+        </div>
+      </header>
+      <section className="admin-overview-toolbar card">
+        <div>
+          <b>Filter by date</b>
+          <small>Daily activity and earnings in the selected period</small>
+        </div>
+        <label>
+          Start date
+          <input
+            type="date"
+            value={dateFrom}
+            max={dateTo}
+            onChange={(event) => setDateFrom(event.target.value)}
+          />
+        </label>
+        <span className="admin-filter-to">to</span>
+        <label>
+          End date
+          <input
+            type="date"
+            value={dateTo}
+            min={dateFrom}
+            max={endDefault}
+            onChange={(event) => setDateTo(event.target.value)}
+          />
+        </label>
+        <button
+          className="btn btn-primary"
+          disabled={!validRange}
+          onClick={applyDates}
+        >
+          Apply
+        </button>
+        <button className="btn btn-light" onClick={clearDates}>
+          Clear
+        </button>
+      </section>
+      <div className="admin-realtime-note">
+        <i className={status === "ready" ? "online" : "offline"} />
+        {status === "error"
+          ? "Could not load live admin data. Check the session or backend connection."
+          : "Live NightBox data · refreshes automatically every 10 seconds."}
+      </div>
+      <section className="admin-overview-metrics" aria-label="Platform metrics">
+        <article className="card admin-overview-metric">
+          <span className="admin-overview-icon people">♙</span>
+          <small>Total Creators</small>
+          <b>{overview ? overview.creators.toLocaleString() : "—"}</b>
+          <em>Registered creator accounts</em>
+        </article>
+        <article className="card admin-overview-metric">
+          <span className="admin-overview-icon users">◉</span>
+          <small>Registered Accounts</small>
+          <b>{overview ? overview.users.toLocaleString() : "—"}</b>
+          <em>All NightBox accounts</em>
+        </article>
+        <article className="card admin-overview-metric">
+          <span className="admin-overview-icon views">◷</span>
+          <small>Qualified Views</small>
+          <b>{overview ? overview.qualifiedViews.toLocaleString() : "—"}</b>
+          <em>
+            {appliedFrom} to {appliedTo}
+          </em>
+        </article>
+        <article className="card admin-overview-metric">
+          <span className="admin-overview-icon earnings">$</span>
+          <small>Creator Earnings</small>
+          <b>{overview ? money(overview.earningsMicros / 1_000_000) : "—"}</b>
+          <em>Qualified-view ledger · selected period</em>
+        </article>
+      </section>
+      <section className="admin-overview-section card">
+        <div className="admin-section-heading">
+          <div>
+            <span>PLATFORM ACTIVITY</span>
+            <h2>Daily Activity</h2>
+          </div>
+          <small>
+            {appliedFrom} — {appliedTo}
+          </small>
+        </div>
+        <div className="admin-overview-table-wrap">
+          <table className="admin-overview-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Qualified Views</th>
+                <th>Earnings</th>
+                <th>Active Creators</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dailyRows.map((row) => (
+                <tr key={row.date}>
+                  <td>
+                    {new Date(`${row.date}T00:00:00`).toLocaleDateString()}
+                  </td>
+                  <td>{row.qualifiedViews.toLocaleString()}</td>
+                  <td>{money(row.earningsMicros / 1_000_000)}</td>
+                  <td>{row.activeCreators.toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {status === "loading" ? (
+            <p className="admin-overview-empty">Loading daily activity…</p>
+          ) : status === "error" ? (
+            <p className="admin-overview-empty">
+              Daily activity could not be loaded.
+            </p>
+          ) : dailyRows.length === 0 ? (
+            <p className="admin-overview-empty">
+              No qualified views in this date range.
+            </p>
+          ) : null}
+        </div>
+      </section>
+      <section className="admin-overview-section card">
+        <div className="admin-section-heading">
+          <div>
+            <span>CREATOR DIRECTORY</span>
+            <h2>Recent Creators</h2>
+          </div>
+          <button
+            className="admin-text-action"
+            onClick={() => go("/admin/users")}
+          >
+            Manage creators →
+          </button>
+        </div>
+        <div className="admin-overview-table-wrap">
+          <table className="admin-overview-table">
+            <thead>
+              <tr>
+                <th>Creator</th>
+                <th>Joined</th>
+                <th>Videos</th>
+                <th>Qualified Views</th>
+                <th>Today Earnings</th>
+                <th>Lifetime Earnings</th>
+              </tr>
+            </thead>
+            <tbody>
+              {creatorRows.map((creator) => (
+                <tr key={creator.id}>
+                  <td>
+                    <b>{creator.email}</b>
+                  </td>
+                  <td>{new Date(creator.createdAt).toLocaleDateString()}</td>
+                  <td>{creator.videos.toLocaleString()}</td>
+                  <td>{creator.qualifiedViews.toLocaleString()}</td>
+                  <td>
+                    <b
+                      className={
+                        creator.todayEarningsMicros > 0 ? "positive" : ""
+                      }
+                    >
+                      {money(creator.todayEarningsMicros / 1_000_000)}
+                    </b>
+                  </td>
+                  <td>{money(creator.earningsMicros / 1_000_000)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {status === "loading" ? (
+            <p className="admin-overview-empty">Loading creators…</p>
+          ) : creatorRows.length === 0 ? (
+            <p className="admin-overview-empty">No creator accounts yet.</p>
+          ) : null}
+        </div>
+      </section>
+    </>
+  );
+}
+function adminDate(value: Date) {
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+}
+function AdminTrendChart({
+  title,
+  points,
+  color,
+  format,
+}: {
+  title: string;
+  points: Array<{ date: string; value: number }>;
+  color: string;
+  format: (value: number) => string;
+}) {
+  const values = points.slice(-14);
+  const max = Math.max(1, ...values.map((point) => point.value));
+  const plotted = values.map((point, index) => ({
+    ...point,
+    x: values.length < 2 ? 300 : (index * 600) / (values.length - 1) + 30,
+    y: 148 - (point.value / max) * 116,
+  }));
+  const line = plotted.map((point) => `${point.x},${point.y}`).join(" ");
+  const area = plotted.length ? `30,148 ${line} 630,148` : "";
+  return (
+    <section className="card admin-chart-card">
+      <header>
+        <div>
+          <span>LAST 14 ACTIVE DAYS</span>
+          <h2>{title}</h2>
+        </div>
+        <b>{format(values.reduce((sum, point) => sum + point.value, 0))}</b>
+      </header>
+      {plotted.length ? (
+        <>
+          <svg
+            viewBox="0 0 660 180"
+            role="img"
+            aria-label={`${title} daily trend`}
+            preserveAspectRatio="none"
+          >
+            <defs>
+              <linearGradient
+                id={`fill-${title.replace(/\\W/g, "")}`}
+                x1="0"
+                x2="0"
+                y1="0"
+                y2="1"
+              >
+                <stop offset="0%" stopColor={color} stopOpacity=".25" />
+                <stop offset="100%" stopColor={color} stopOpacity="0" />
+              </linearGradient>
+            </defs>
+            <path
+              d={`M ${area} Z`}
+              fill={`url(#fill-${title.replace(/\\W/g, "")})`}
+            />
+            <polyline
+              points={line}
+              fill="none"
+              stroke={color}
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            {plotted.map((point) => (
+              <circle
+                key={point.date}
+                cx={point.x}
+                cy={point.y}
+                r="3.5"
+                fill={color}
+              >
+                <title>
+                  {point.date}: {format(point.value)}
+                </title>
+              </circle>
+            ))}
+          </svg>
+          <div className="admin-chart-labels">
+            <span>{values[0]?.date}</span>
+            <span>{values.at(-1)?.date}</span>
+          </div>
+        </>
+      ) : (
+        <p className="admin-chart-empty">
+          No recorded activity in this date range.
+        </p>
+      )}
+    </section>
+  );
+}
+function useAdminDateRange() {
+  const [range] = useState(() => {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(start.getDate() - 29);
+    return { start: adminDate(start), end: adminDate(end) };
+  });
+  return range;
+}
+function AdminAnalytics() {
+  const range = useAdminDateRange();
+  const [data, setData] = useState<Awaited<
+    ReturnType<typeof getAdminOverview>
+  > | null>(null);
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [error, setError] = useState("");
+  const [refreshTick, setRefreshTick] = useState(0);
+  useEffect(() => {
+    let active = true;
+    const load = () => {
+      const token = sessionStorage.getItem("nightbox-admin-token");
+      if (!token) {
+        setError("Admin session expired");
+        return;
+      }
+      Promise.all([
+        getAdminOverview(token, range.start, range.end),
+        getAdminUsers(token),
+      ])
+        .then(([overview, userResult]) => {
+          if (active) {
+            setData(overview);
+            setUsers(userResult.users);
+            setError("");
+          }
+        })
+        .catch((reason) => {
+          if (active)
+            setError(
+              reason instanceof Error
+                ? reason.message
+                : "Unable to load analytics",
+            );
+        });
+    };
+    Promise.resolve().then(load);
+    const timer = window.setInterval(load, 10000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [range.start, range.end, refreshTick]);
+  const dates = Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(`${range.end}T12:00:00`);
+    day.setDate(day.getDate() - (6 - index));
+    return adminDate(day);
+  });
+  const registrations = dates.map((date) => ({
+    date,
+    value: users.filter((user) => user.createdAt.slice(0, 10) === date).length,
+  }));
+  const creators = [...(data?.recentCreators || [])]
+    .sort((a, b) => b.qualifiedViews - a.qualifiedViews)
+    .slice(0, 5);
+  return (
+    <>
+      <AppTitle
+        eyebrow="ANALYTICS · LIVE CHARTS"
+        title="Analytics overview"
+        action={
+          <button
+            className="btn btn-dark"
+            onClick={() => setRefreshTick((value) => value + 1)}
+          >
+            Refresh
+          </button>
+        }
+      />
+      <p className="admin-page-note">
+        Live account growth, eligible-view performance and creator earnings ·
+        refreshed every 10 seconds.
+      </p>
+      {error ? (
+        <div className="card empty-state">
+          <p>{error}</p>
+        </div>
+      ) : (
+        <>
+          <div className="admin-dark-metrics">
+            <article className="card">
+              <span>CREATORS</span>
+              <b>{data?.creators.toLocaleString() ?? "—"}</b>
+              <small>Creator accounts</small>
+            </article>
+            <article className="card">
+              <span>ACCOUNTS</span>
+              <b>{data?.users.toLocaleString() ?? "—"}</b>
+              <small>All registered accounts</small>
+            </article>
+            <article className="card">
+              <span>QUALIFIED VIEWS</span>
+              <b>{data?.qualifiedViews.toLocaleString() ?? "—"}</b>
+              <small>
+                {range.start} – {range.end}
+              </small>
+            </article>
+            <article className="card">
+              <span>CREATOR EARNINGS</span>
+              <b>{data ? money(data.earningsMicros / 1_000_000) : "—"}</b>
+              <small>Recorded view ledger</small>
+            </article>
+          </div>
+          <div className="admin-analytics-grid">
+            <AdminGrowthChart points={registrations} />
+            <AdminUnavailableChart
+              title="Watch Time Trends"
+              unit="minutes"
+              detail="Watch-time duration is not currently collected."
+              icon="▶"
+            />
+            <AdminCreatorChart creators={creators} />
+            <AdminUnavailableChart
+              title="Device Distribution"
+              unit="devices"
+              detail="Device and browser type are not currently collected."
+              icon="◔"
+            />
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+function AdminGrowthChart({
+  points,
+}: {
+  points: Array<{ date: string; value: number }>;
+}) {
+  const max = Math.max(1, ...points.map((point) => point.value));
+  const plotted = points.map((point, index) => ({
+    ...point,
+    x: 30 + (index * 600) / Math.max(points.length - 1, 1),
+    y: 150 - (point.value / max) * 116,
+  }));
+  const line = plotted.map((point) => `${point.x},${point.y}`).join(" ");
+  const area = plotted.length ? `30,150 ${line} 630,150` : "";
+  return (
+    <section className="card admin-chart-card admin-visual-chart">
+      <header>
+        <div>
+          <span>LAST 7 DAYS</span>
+          <h2>User Growth Trends</h2>
+        </div>
+        <b>
+          {points.reduce((sum, point) => sum + point.value, 0).toLocaleString()}
+        </b>
+      </header>
+      {points.length ? (
+        <>
+          <svg
+            viewBox="0 0 660 180"
+            role="img"
+            aria-label="New user accounts created per day for the last seven days"
+            preserveAspectRatio="none"
+          >
+            <defs>
+              <linearGradient
+                id="admin-growth-fill"
+                x1="0"
+                x2="0"
+                y1="0"
+                y2="1"
+              >
+                <stop offset="0%" stopColor="#368cf4" stopOpacity=".72" />
+                <stop offset="100%" stopColor="#368cf4" stopOpacity="0" />
+              </linearGradient>
+            </defs>
+            <g className="admin-visual-gridlines">
+              <path d="M30 34H630M30 72H630M30 111H630M30 150H630" />
+            </g>
+            <path d={`M ${area} Z`} fill="url(#admin-growth-fill)" />
+            <polyline
+              points={line}
+              fill="none"
+              stroke="#368cf4"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            {plotted.map((point) => (
+              <circle
+                key={point.date}
+                cx={point.x}
+                cy={point.y}
+                r="3"
+                fill="#54a4ff"
+              >
+                <title>
+                  {point.date}: {point.value} new accounts
+                </title>
+              </circle>
+            ))}
+          </svg>
+          <div className="admin-chart-labels">
+            {points.map((point) => (
+              <span key={point.date}>
+                {new Date(`${point.date}T12:00:00`).toLocaleDateString(
+                  undefined,
+                  { month: "short", day: "numeric" },
+                )}
+              </span>
+            ))}
+          </div>
+        </>
+      ) : (
+        <p className="admin-chart-empty">
+          No account registration data available.
+        </p>
+      )}
+    </section>
+  );
+}
+function AdminCreatorChart({
+  creators,
+}: {
+  creators: Array<
+    Awaited<ReturnType<typeof getAdminOverview>>["recentCreators"][number]
+  >;
+}) {
+  const maxViews = Math.max(
+    1,
+    ...creators.map((creator) => creator.qualifiedViews),
+  );
+  const maxEarnings = Math.max(
+    1,
+    ...creators.map((creator) => creator.earningsMicros),
+  );
+  const plotted = creators.map((creator, index) => ({
+    creator,
+    x: 70 + index * 125,
+    bar: 150 - (creator.qualifiedViews / maxViews) * 112,
+    line: 150 - (creator.earningsMicros / maxEarnings) * 112,
+  }));
+  const earningsLine = plotted
+    .map((point) => `${point.x + 20},${point.line}`)
+    .join(" ");
+  return (
+    <section className="card admin-chart-card admin-visual-chart">
+      <header>
+        <div>
+          <span>TOP 5 · RECENT CREATOR ACCOUNTS</span>
+          <h2>Top Creators Performance</h2>
+        </div>
+      </header>
+      {creators.length ? (
+        <>
+          <svg
+            viewBox="0 0 660 180"
+            role="img"
+            aria-label="Eligible views and recorded earnings for top creators"
+            preserveAspectRatio="none"
+          >
+            <g className="admin-visual-gridlines">
+              <path d="M30 38H630M30 75H630M30 112H630M30 150H630" />
+            </g>
+            {plotted.map(({ creator, x, bar }) => (
+              <rect
+                key={creator.id}
+                x={x}
+                y={bar}
+                width="42"
+                height={150 - bar}
+                rx="4"
+                fill="#a64df0"
+              >
+                <title>
+                  {creator.email}: {creator.qualifiedViews.toLocaleString()}{" "}
+                  qualified views
+                </title>
+              </rect>
+            ))}
+            <polyline
+              points={earningsLine}
+              fill="none"
+              stroke="#f0a900"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            {plotted.map(({ creator, x, line }) => (
+              <circle
+                key={`${creator.id}-earnings`}
+                cx={x + 20}
+                cy={line}
+                r="4"
+                fill="#f0a900"
+                stroke="#171719"
+                strokeWidth="2"
+              >
+                <title>
+                  {creator.email}: {money(creator.earningsMicros / 1_000_000)}{" "}
+                  earnings
+                </title>
+              </circle>
+            ))}
+          </svg>
+          <div className="admin-chart-labels admin-creator-labels">
+            {plotted.map(({ creator }) => (
+              <span key={creator.id} title={creator.email}>
+                {creator.email.split("@")[0]}
+              </span>
+            ))}
+          </div>
+          <div className="admin-visual-legend">
+            <span>
+              <i className="views" />
+              Qualified views
+            </span>
+            <span>
+              <i className="earnings" />
+              Earnings
+            </span>
+          </div>
+        </>
+      ) : (
+        <p className="admin-chart-empty">
+          Creator performance will appear once creators have qualified views.
+        </p>
+      )}
+    </section>
+  );
+}
+function AdminUnavailableChart({
+  title,
+  unit,
+  detail,
+  icon,
+}: {
+  title: string;
+  unit: string;
+  detail: string;
+  icon: string;
+}) {
+  return (
+    <section className="card admin-chart-card admin-visual-chart admin-unavailable-chart">
+      <header>
+        <div>
+          <span>{unit.toUpperCase()}</span>
+          <h2>{title}</h2>
+        </div>
+        <i>{icon}</i>
+      </header>
+      <div className="admin-unavailable-state">
+        <span>{icon}</span>
+        <b>No {unit} metrics available</b>
+        <p>{detail}</p>
+      </div>
+    </section>
+  );
+}
+function AdminTraffic() {
+  const range = useAdminDateRange();
+  const [data, setData] = useState<Awaited<
+    ReturnType<typeof getAdminTraffic>
+  > | null>(null);
+  const [error, setError] = useState("");
+  const load = () => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (token)
+      getAdminTraffic(token, range.start, range.end)
+        .then((result) => {
+          setData(result);
+          setError("");
+        })
+        .catch((reason) =>
+          setError(
+            reason instanceof Error
+              ? reason.message
+              : "Unable to load traffic data",
+          ),
+        );
+  };
+  useEffect(() => {
+    Promise.resolve().then(load);
+    const timer = window.setInterval(load, 10000);
+    return () => window.clearInterval(timer);
+  }, [range.start, range.end]);
+  return (
+    <>
+      <AppTitle
+        eyebrow="ANALYTICS · TRAFFIC & LOAD"
+        title="Share traffic"
+        action={
+          <button className="btn btn-dark" onClick={load}>
+            Refresh
+          </button>
+        }
+      />
+      <p className="admin-page-note">
+        Tracked visits to NightBox creator share links. IP addresses are not
+        exposed; only distinct-IP counts are shown.
+      </p>
+      {error ? (
+        <div className="card empty-state">
+          <p>{error}</p>
+        </div>
+      ) : (
+        <>
+          <div className="admin-dark-metrics">
+            <article className="card">
+              <span>SHARE SESSIONS</span>
+              <b>{data?.sessions.toLocaleString() ?? "—"}</b>
+              <small>
+                {range.start} – {range.end}
+              </small>
+            </article>
+            <article className="card">
+              <span>QUALIFIED</span>
+              <b>{data?.qualified.toLocaleString() ?? "—"}</b>
+              <small>Counted for earnings</small>
+            </article>
+            <article className="card">
+              <span>FILTERED</span>
+              <b>{data?.filtered.toLocaleString() ?? "—"}</b>
+              <small>Did not qualify</small>
+            </article>
+            <article className="card">
+              <span>DISTINCT IPs</span>
+              <b>{data?.uniqueIps.toLocaleString() ?? "—"}</b>
+              <small>Hashed/IP-deduplicated only</small>
+            </article>
+          </div>
+          <div className="admin-table-card card">
+            <div className="admin-section-heading">
+              <div>
+                <span>SHARE-LINK TRAFFIC</span>
+                <h2>Daily sessions</h2>
+              </div>
+              <small>
+                Updated{" "}
+                {data?.updatedAt
+                  ? new Date(data.updatedAt).toLocaleTimeString()
+                  : "—"}
+              </small>
+            </div>
+            <div className="admin-overview-table-wrap">
+              <table className="admin-overview-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Sessions</th>
+                    <th>Qualified</th>
+                    <th>Distinct IPs</th>
+                    <th>Qualification rate</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data?.dailyActivity.map((row) => (
+                    <tr key={row.date}>
+                      <td>
+                        {new Date(`${row.date}T00:00:00`).toLocaleDateString()}
+                      </td>
+                      <td>{row.sessions.toLocaleString()}</td>
+                      <td>{row.qualified.toLocaleString()}</td>
+                      <td>{row.uniqueIps.toLocaleString()}</td>
+                      <td>
+                        {row.sessions
+                          ? `${((row.qualified / row.sessions) * 100).toFixed(1)}%`
+                          : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!data?.dailyActivity.length && (
+                <p className="admin-overview-empty">
+                  No share-link sessions recorded in this range.
+                </p>
+              )}
+            </div>
+          </div>
+          <p className="admin-data-hint">
+            This service records share-link session traffic, not VPS CPU, memory
+            or network-load history. Those infrastructure metrics are not
+            currently collected.
+          </p>
+        </>
+      )}
+    </>
+  );
+}
+function AdminEarnings({ go }: { go: (path: string) => void }) {
+  const range = useAdminDateRange();
+  const [data, setData] = useState<Awaited<
+    ReturnType<typeof getAdminOverview>
+  > | null>(null);
+  const [rates, setRates] = useState<
+    Array<{ country: string; cpmCents: number }>
+  >([]);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) {
+      Promise.resolve().then(() => setError("Admin session expired"));
+      return;
+    }
+    Promise.all([
+      getAdminOverview(token, range.start, range.end),
+      getAdminCpm(token),
+    ])
+      .then(([overview, cpm]) => {
+        setData(overview);
+        setRates(cpm.rates);
+      })
+      .catch((reason) =>
+        setError(
+          reason instanceof Error ? reason.message : "Unable to load earnings",
+        ),
+      );
+  }, [range.start, range.end]);
+  return (
+    <>
+      <AppTitle
+        eyebrow="FINANCE · EARNINGS"
+        title="Creator earnings"
+        action={
+          <button
+            className="btn btn-outline admin-outline"
+            onClick={() => go("/admin/revenue")}
+          >
+            CPM & view rules →
+          </button>
+        }
+      />
+      <p className="admin-page-note">
+        Actual creator earnings recorded against qualified share-link views ·{" "}
+        {range.start} – {range.end}
+      </p>
+      {error ? (
+        <div className="card empty-state">
+          <p>{error}</p>
+        </div>
+      ) : (
+        <>
+          <div className="admin-dark-metrics">
+            <article className="card">
+              <span>CREATOR EARNINGS</span>
+              <b>{data ? money(data.earningsMicros / 1_000_000) : "—"}</b>
+              <small>Selected 30-day period</small>
+            </article>
+            <article className="card">
+              <span>QUALIFIED VIEWS</span>
+              <b>{data?.qualifiedViews.toLocaleString() ?? "—"}</b>
+              <small>Eligible view sessions</small>
+            </article>
+            <article className="card">
+              <span>PENDING PAYOUTS</span>
+              <b>{data?.pendingWithdrawals.toLocaleString() ?? "—"}</b>
+              <small>Requests awaiting review</small>
+            </article>
+          </div>
+          <AdminTrendChart
+            title="Daily earnings"
+            points={[...(data?.dailyActivity || [])]
+              .reverse()
+              .map((row) => ({
+                date: row.date,
+                value: row.earningsMicros / 1_000_000,
+              }))}
+            color="#39b86b"
+            format={money}
+          />
+          <div className="admin-table-card card">
+            <div className="admin-section-heading">
+              <div>
+                <span>ACTIVE RATE CONFIGURATION</span>
+                <h2>Country CPM</h2>
+              </div>
+              <button
+                className="admin-text-action"
+                onClick={() => go("/admin/revenue")}
+              >
+                Manage rates →
+              </button>
+            </div>
+            <div className="admin-overview-table-wrap">
+              <table className="admin-overview-table">
+                <thead>
+                  <tr>
+                    <th>Country</th>
+                    <th>CPM / 1,000 eligible views</th>
+                    <th>Rate type</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rates.map((rate) => (
+                    <tr key={rate.country}>
+                      <td>
+                        <b>{rate.country}</b>
+                      </td>
+                      <td>{money(rate.cpmCents / 100)}</td>
+                      <td>
+                        {rate.country === "ZZ"
+                          ? "Fallback"
+                          : "Country override"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+function AdminReferrals() {
+  const [rows, setRows] = useState<
+    Awaited<ReturnType<typeof getAdminReferrals>>["referrals"]
+  >([]);
+  const [error, setError] = useState("");
+  const load = () => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) {
+      setError("Admin session expired");
+      return;
+    }
+    getAdminReferrals(token)
+      .then((data) => {
+        setRows(data.referrals);
+        setError("");
+      })
+      .catch((reason) =>
+        setError(
+          reason instanceof Error
+            ? reason.message
+            : "Unable to load referral ledger",
+        ),
+      );
+  };
+  useEffect(() => {
+    Promise.resolve().then(load);
+  }, []);
+  return (
+    <>
+      <AppTitle
+        eyebrow="FINANCE · REFERRALS"
+        title="Referral earnings"
+        action={
+          <button className="btn btn-dark" onClick={load}>
+            Refresh
+          </button>
+        }
+      />
+      <p className="admin-page-note">
+        Original creator receives the configured referral share from qualified
+        views on imported links.
+      </p>
+      {error ? (
+        <div className="card empty-state">
+          <p>{error}</p>
+        </div>
+      ) : (
+        <DataTable
+          headers={[
+            "SOURCE CREATOR",
+            "IMPORTING CREATOR",
+            "RATE",
+            "EARNED",
+            "DATE",
+          ]}
+          rows={rows.map((row) => [
+            row.sourceEmail,
+            row.importingEmail,
+            `${row.percentage}%`,
+            money(row.amountMicros / 1_000_000),
+            new Date(row.createdAt).toLocaleString(),
+          ])}
+        />
+      )}
+    </>
+  );
+}
+function DataTable({
+  headers,
+  rows,
+  actions,
+}: {
+  headers: string[];
+  rows: (string | React.ReactNode)[][];
+  actions?: boolean;
+}) {
+  return (
+    <div className="card admin-table">
+      <div className="admin-table-head">
+        {headers.map((h) => (
+          <span key={h}>{h}</span>
+        ))}
+        {actions && <span />}
+      </div>
+      {rows.map((r, i) => (
+        <div className="admin-table-row" key={i}>
+          {r.map((x, j) => (
+            <span key={j}>{x}</span>
+          ))}
+          {actions && <button>•••</button>}
+        </div>
+      ))}
+    </div>
+  );
+}
+function LiveAdminUsers({
+  toast,
+  view = "all",
+}: {
+  toast: (s: string) => void;
+  view?: "all" | "creators" | "admins";
+}) {
+  return <AdminAccountDirectory view={view} toast={toast} />;
+}
+function LiveAdminPlans({ toast }: { toast: (s: string) => void }) {
+  const [plans, setPlans] = useState<
+    Array<{
+      id: string;
+      name: string;
+      priceMinor: number;
+      currency: string;
+      durationDays: number;
+      recurring: number;
+      active: number;
+    }>
+  >([]);
+  const load = () => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (token)
+      getAdminPlans(token)
+        .then((x) => setPlans(x.plans))
+        .catch(() => setPlans([]));
+  };
+  useEffect(load, []);
+  const save = async (
+    plan: { id: string; name: string },
+    input: HTMLInputElement,
+    active: HTMLInputElement,
+  ) => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) return;
+    try {
+      await updateAdminPlan(
+        token,
+        plan.id,
+        Math.round(Number(input.value) * 100),
+        active.checked ? 1 : 0,
+      );
+      toast(`${plan.name} plan updated`);
+      load();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Unable to update plan");
+    }
+  };
+  return (
+    <>
+      <AppTitle eyebrow="PREMIUM" title="Subscription plans" />
+      <DataTable
+        headers={["PLAN", "PRICE (INR)", "RECURRING", "ACTIVE", "ACTION"]}
+        rows={plans.map((plan) => [
+          plan.name,
+          <input
+            key={plan.id}
+            type="number"
+            min="0"
+            step="0.01"
+            defaultValue={(plan.priceMinor / 100).toFixed(2)}
+          />,
+          plan.recurring ? "Yes" : "No",
+          <input
+            key={`active-${plan.id}`}
+            type="checkbox"
+            defaultChecked={Boolean(plan.active)}
+          />,
+          <button
+            key={`save-${plan.id}`}
+            onClick={(event) => {
+              const cell = event.currentTarget.parentElement;
+              const input = cell?.children[1] as HTMLInputElement;
+              const active = cell?.children[3] as HTMLInputElement;
+              if (input && active) save(plan, input, active);
+            }}
+          >
+            Save
+          </button>,
+        ])}
+      />
+    </>
+  );
+}
+function LiveAdminFiles({ toast }: { toast: (s: string) => void }) {
+  type VideoRow = Awaited<ReturnType<typeof getAdminVideos>>["videos"][number];
+  const [rows, setRows] = useState<VideoRow[]>([]);
+  const [error, setError] = useState("");
+  const load = () => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) {
+      setError("Admin session expired");
+      return;
+    }
+    getAdminVideos(token)
+      .then((x) => {
+        setRows(x.videos);
+        setError("");
+      })
+      .catch((e) =>
+        setError(e instanceof Error ? e.message : "Unable to load videos"),
+      );
+  };
+  useEffect(() => {
+    Promise.resolve().then(load);
+  }, []);
+  const moderate = async (row: VideoRow, action: "approve" | "reject") => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) return;
+    try {
+      if (action === "approve") await approveAdminVideo(token, row.id);
+      else {
+        const reason =
+          window.prompt("Rejection reason", row.rejectionReason || "") ||
+          "Video rejected by administrator";
+        await rejectAdminVideo(token, row.id, reason);
+      }
+      toast(action === "approve" ? "Video approved" : "Video rejected");
+      load();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Unable to update video");
+    }
+  };
+  const remove = async (id: string) => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) return;
+    try {
+      await deleteAdminVideo(token, id);
+      toast("Video deleted");
+      load();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Unable to delete video");
+    }
+  };
+  return (
+    <>
+      <AppTitle
+        eyebrow="CONTENT OPERATIONS"
+        title="File moderation"
+        action={
+          <button className="btn btn-dark" onClick={load}>
+            Refresh queue
+          </button>
+        }
+      />
+      <p className="admin-page-note">
+        Review processing, CDN verification, copyright and approval before a
+        video becomes playable.
+      </p>
+      {error ? (
+        <div className="card empty-state">
+          <h2>Unable to load files</h2>
+          <p>{error}</p>
+        </div>
+      ) : (
+        <DataTable
+          headers={[
+            "FILE / CREATOR",
+            "PROCESSING",
+            "CDN / APPROVAL",
+            "VIEWS",
+            "CREATED",
+            "ACTION",
+          ]}
+          rows={rows.map((row) => [
+            <span className="person" key={row.id}>
+              <i>
+                {(row.ownerEmail || row.uploadSource).slice(0, 2).toUpperCase()}
+              </i>
+              <b>
+                {row.title}
+                <small>
+                  {row.ownerEmail || "System / bot"} · {row.id}
+                  {row.fileSize
+                    ? ` · ${(row.fileSize / 1024 / 1024).toFixed(1)} MB`
+                    : ""}
+                </small>
+              </b>
+            </span>,
+            <Pill
+              key={`processing-${row.id}`}
+              tone={
+                row.processingStatus === "completed"
+                  ? "green"
+                  : row.processingStatus === "failed"
+                    ? "red"
+                    : "orange"
+              }
+            >
+              {row.processingStage ||
+                row.processingStatus ||
+                row.playbackStatus ||
+                "queued"}
+            </Pill>,
+            <span key={`approval-${row.id}`}>
+              <Pill tone={row.cdnVerifiedAt ? "green" : "orange"}>
+                {row.cdnVerifiedAt ? "CDN verified" : "CDN pending"}
+              </Pill>
+              <small>
+                {row.approvalStatus || "pending"} ·{" "}
+                {row.copyrightStatus || "pending"}
+              </small>
+            </span>,
+            row.eligibleViews.toLocaleString(),
+            new Date(row.createdAt).toLocaleString(),
+            <span key={`actions-${row.id}`}>
+              <button
+                disabled={
+                  row.approvalStatus === "approved" ||
+                  row.approvalStatus === "rejected"
+                }
+                onClick={() => moderate(row, "approve")}
+              >
+                Approve
+              </button>
+              <button
+                disabled={row.approvalStatus === "rejected"}
+                onClick={() => moderate(row, "reject")}
+              >
+                Reject
+              </button>
+              <button onClick={() => remove(row.id)}>Delete</button>
+            </span>,
+          ])}
+        />
+      )}
+    </>
+  );
+}
+function LiveAdminRevenue({ toast }: { toast: (s: string) => void }) {
+  const [rates, setRates] = useState<
+    Array<{ country: string; cpmCents: number }>
+  >([]);
+  const [rules, setRules] = useState({
+    eligiblePercent: 100,
+    maxViewsPerIp24h: 5,
+    minimumWatchSeconds: 5,
+  });
+  const [error, setError] = useState("");
+  const [newCountry, setNewCountry] = useState("");
+  const [newCpm, setNewCpm] = useState("");
+  const load = () => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) {
+      setError("Admin session expired");
+      return;
+    }
+    Promise.all([getAdminCpm(token), getAdminViewRules(token)])
+      .then(([cpm, viewRules]) => {
+        setRates(cpm.rates);
+        setRules(viewRules.rules);
+      })
+      .catch((e) =>
+        setError(
+          e instanceof Error ? e.message : "Unable to load revenue controls",
+        ),
+      );
+  };
   // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(load,[]);
-  const update=async(id:string,status:"approved"|"paid"|"rejected")=>{const token=sessionStorage.getItem("nightbox-admin-token");if(!token)return;try{await updateAdminWithdrawal(token,id,status);toast(`Withdrawal ${status}`);load()}catch(e){toast(e instanceof Error?e.message:"Unable to update withdrawal")}};
-  const saveEdit=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();if(!editing)return;const token=sessionStorage.getItem("nightbox-admin-token");if(!token)return;const form=new FormData(e.currentTarget);const amount=Number(form.get("amount"));const method=String(form.get("method")||"").trim();const note=String(form.get("note")||"").trim();const status=String(form.get("status")||editing.status) as Status;if(!Number.isFinite(amount)||amount<=0||!method){toast("Enter a valid amount and payout method");return}setSaving(true);try{await updateAdminWithdrawal(token,editing.id,{amountMicros:Math.round(amount*1000000),method,note,...(status!==editing.status?{status}: {})});toast("Payout request updated");setEditing(null);load()}catch(e){toast(e instanceof Error?e.message:"Unable to update payout request")}finally{setSaving(false)}};
-  const total=overview?.earningsMicros||0; const pending=rows.filter(row=>row.status==="pending"||row.status==="approved").reduce((sum,row)=>sum+row.amountMicros,0); const average=overview?.creators?total/overview.creators:0;
-  const statusOptions=(status:Status):Status[]=>status==="pending"?["pending","approved","rejected"]:status==="approved"?["approved","paid","rejected"]:[status];
-  return <><AppTitle eyebrow="PAYOUT OPERATIONS" title="Earnings & revenue" action={<button className="btn btn-dark" onClick={load}>Refresh</button>}/><p className="admin-page-note">Platform revenue, creator payouts, and financial trends.</p>{error?<div className="card empty-state"><p>{error}</p></div>:<><div className="admin-finance-grid"><section className="card admin-finance-hero"><div><span>Total platform revenue (all time)</span><b>{money(total/1000000)}</b><small>Watch-time earnings only · manual bonuses excluded</small></div><Pill tone="green">↗ Real-time</Pill><AdminTrendChart title="Revenue trend" points={(overview?.dailyActivity||[]).map(row=>({date:row.date,value:row.earningsMicros/1000000}))} color="#f0a900" format={money}/></section><div className="admin-finance-side"><article className="card"><span>＄ &nbsp; Pending payouts</span><b>{money(pending/1000000)}</b></article><article className="card"><span>↗ &nbsp; Avg creator earning</span><b>{money(average/1000000)}</b></article></div></div><section className="card admin-table-card payout-admin"><div className="admin-section-heading"><div><span>PAYOUT OPERATIONS</span><h2>Recent payouts</h2></div><small>{rows.length} request{rows.length===1?"":"s"}</small></div><div className="admin-overview-table-wrap"><table className="admin-overview-table"><thead><tr><th>Creator</th><th>Amount</th><th>Method</th><th>Date</th><th>Status</th><th>Action</th></tr></thead><tbody>{rows.map(row=><tr key={row.id}><td><b>{row.email}</b><small>{row.creatorId}</small></td><td>{money(row.amountMicros/1000000)}</td><td>{row.method}</td><td>{new Date(row.requestedAt).toLocaleString()}</td><td><Pill tone={row.status==="paid"?"green":row.status==="rejected"?"red":"orange"}>{row.status}</Pill></td><td><div className="payout-actions">{(row.status==="pending"||row.status==="approved")&&<button className="admin-text-action" onClick={()=>setEditing(row)}>Edit</button>}{row.status==="pending"?<><button onClick={()=>update(row.id,"approved")}>Approve</button><button onClick={()=>update(row.id,"rejected")}>Reject</button></>:row.status==="approved"?<button onClick={()=>update(row.id,"paid")}>Mark paid</button>:"—"}</div></td></tr>)}</tbody></table>{!rows.length&&<p className="admin-overview-empty">No payout requests have been submitted yet.</p>}</div></section></>}{editing&&<div className="modal" role="dialog" aria-modal="true" aria-labelledby="payout-edit-title"><form className="payout-edit-modal" onSubmit={saveEdit}><button type="button" className="modal-close" aria-label="Close payout editor" onClick={()=>setEditing(null)}>×</button><span className="eyebrow">PAYOUT REQUEST</span><h2 id="payout-edit-title">Edit payout request</h2><p className="payout-edit-subtitle">{editing.email} · {editing.id.slice(0,8)}</p><label>Amount (USD)<input name="amount" type="number" min="0.01" step="0.01" defaultValue={(editing.amountMicros/1000000).toFixed(2)} required/></label><label>Payout method<input name="method" maxLength={100} defaultValue={editing.method} required/></label><label>Status<select name="status" defaultValue={editing.status}>{statusOptions(editing.status as Status).map(status=><option value={status} key={status}>{status.charAt(0).toUpperCase()+status.slice(1)}</option>)}</select></label><label>Admin note<textarea name="note" rows={3} maxLength={1000} defaultValue={editing.note||""} placeholder="Optional note for this payout request"/></label><p className="payout-edit-hint">Paid and rejected requests are locked. Pending or approved edits still respect the creator’s available balance.</p><div className="form-actions"><button type="button" className="btn btn-outline" onClick={()=>setEditing(null)}>Cancel</button><button className="btn btn-primary" disabled={saving}>{saving?"Saving…":"Save payout"}</button></div></form></div>}</>;
+  useEffect(load, []);
+  const save = async (country: string, value: string) => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) return;
+    try {
+      await updateAdminCpm(token, country, Math.round(Number(value) * 100));
+      toast(`${country} CPM updated`);
+      load();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Unable to update CPM");
+    }
+  };
+  const add = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const country = newCountry.trim().toUpperCase();
+    const amount = Number(newCpm);
+    if (!/^[A-Z]{2}$/.test(country) || !Number.isFinite(amount) || amount < 0) {
+      toast("Use a valid ISO country code and CPM");
+      return;
+    }
+    await save(country, String(amount));
+    setNewCountry("");
+    setNewCpm("");
+  };
+  const saveRules = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) return;
+    try {
+      await updateAdminViewRules(token, rules);
+      toast("View earning rules updated");
+      load();
+    } catch (error) {
+      toast(
+        error instanceof Error ? error.message : "Unable to update view rules",
+      );
+    }
+  };
+  return (
+    <>
+      <AppTitle eyebrow="MONETIZATION" title="Revenue controls" />
+      {error ? (
+        <div className="card empty-state">
+          <p>{error}</p>
+        </div>
+      ) : (
+        <>
+          <form className="card compact-form" onSubmit={saveRules}>
+            <h2>Eligible-view rules</h2>
+            <div className="three">
+              <label>
+                Eligible percentage
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={rules.eligiblePercent}
+                  onChange={(e) =>
+                    setRules({
+                      ...rules,
+                      eligiblePercent: Number(e.target.value),
+                    })
+                  }
+                />
+              </label>
+              <label>
+                Counted views per IP / link / 24h
+                <input
+                  type="number"
+                  min="1"
+                  max="10000"
+                  value={rules.maxViewsPerIp24h}
+                  onChange={(e) =>
+                    setRules({
+                      ...rules,
+                      maxViewsPerIp24h: Number(e.target.value),
+                    })
+                  }
+                />
+              </label>
+              <label>
+                Minimum seconds
+                <input
+                  type="number"
+                  min="5"
+                  value={rules.minimumWatchSeconds}
+                  onChange={(e) =>
+                    setRules({
+                      ...rules,
+                      minimumWatchSeconds: Number(e.target.value),
+                    })
+                  }
+                />
+              </label>
+            </div>
+            <button className="btn btn-primary">Save earning rules</button>
+          </form>
+          <div className="card empty-state">
+            <h2>Country CPM rates</h2>
+            <p>
+              Default rate: $10 per 1,000 eligible views ($0.01 per counted
+              view). Add a country override below; unconfigured countries use
+              ZZ.
+            </p>
+            <form className="three" onSubmit={add}>
+              <label>
+                Country code
+                <input
+                  required
+                  maxLength={2}
+                  value={newCountry}
+                  onChange={(e) => setNewCountry(e.target.value)}
+                  placeholder="IN"
+                />
+              </label>
+              <label>
+                CPM (USD per 1,000 views)
+                <input
+                  required
+                  min="0"
+                  step="0.01"
+                  type="number"
+                  value={newCpm}
+                  onChange={(e) => setNewCpm(e.target.value)}
+                  placeholder="10.00"
+                />
+              </label>
+              <button className="btn btn-dark">Add or update country</button>
+            </form>
+          </div>
+          <DataTable
+            headers={["COUNTRY", "CPM USD / 1,000", "RATE TYPE", "ACTION"]}
+            rows={rates.map((rate) => [
+              rate.country,
+              <input
+                key={rate.country}
+                type="number"
+                min="0"
+                step="0.01"
+                defaultValue={(rate.cpmCents / 100).toFixed(2)}
+              />,
+              <Pill
+                key={`status-${rate.country}`}
+                tone={rate.country === "ZZ" ? "orange" : "green"}
+              >
+                {rate.country === "ZZ" ? "Fallback" : "Country override"}
+              </Pill>,
+              <button
+                key={`save-${rate.country}`}
+                onClick={(event) => {
+                  const input = event.currentTarget.parentElement
+                    ?.children[1] as HTMLInputElement;
+                  save(rate.country, input.value);
+                }}
+              >
+                Save
+              </button>,
+            ])}
+          />
+        </>
+      )}
+    </>
+  );
+}
+function LiveAdminWithdrawalsLegacy({ toast }: { toast: (s: string) => void }) {
+  const [rows, setRows] = useState<
+    Array<{
+      id: string;
+      creatorId: string;
+      email: string;
+      amountMicros: number;
+      currency: string;
+      method: string;
+      status: string;
+      requestedAt: string;
+    }>
+  >([]);
+  const [error, setError] = useState("");
+  const load = () => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) {
+      setError("Admin session expired");
+      return;
+    }
+    getAdminWithdrawals(token)
+      .then((x) => setRows(x.withdrawals))
+      .catch((e) =>
+        setError(e instanceof Error ? e.message : "Unable to load withdrawals"),
+      );
+  };
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(load, []);
+  const update = async (
+    id: string,
+    status: "approved" | "paid" | "rejected",
+  ) => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) return;
+    try {
+      await updateAdminWithdrawal(token, id, status);
+      toast(`Withdrawal ${status}`);
+      load();
+    } catch (error) {
+      toast(
+        error instanceof Error ? error.message : "Unable to update withdrawal",
+      );
+    }
+  };
+  return (
+    <>
+      <AppTitle
+        eyebrow="PAYOUT OPERATIONS"
+        title="Withdrawals"
+        action={
+          <button className="btn btn-dark" onClick={load}>
+            Refresh
+          </button>
+        }
+      />
+      {error ? (
+        <div className="card empty-state">
+          <p>{error}</p>
+        </div>
+      ) : (
+        <DataTable
+          headers={[
+            "CREATOR",
+            "AMOUNT",
+            "METHOD",
+            "STATUS",
+            "REQUESTED",
+            "ACTION",
+          ]}
+          rows={rows.map((row) => [
+            row.email,
+            money(row.amountMicros / 1000000),
+            row.method,
+            row.status,
+            new Date(row.requestedAt).toLocaleDateString(),
+            row.status === "pending" ? (
+              <Fragment key={row.id}>
+                <button onClick={() => update(row.id, "approved")}>
+                  Approve
+                </button>
+                <button onClick={() => update(row.id, "rejected")}>
+                  Reject
+                </button>
+              </Fragment>
+            ) : row.status === "approved" ? (
+              <button onClick={() => update(row.id, "paid")}>Mark paid</button>
+            ) : (
+              "-"
+            ),
+          ])}
+        />
+      )}
+    </>
+  );
+}
+function LiveAdminPayments() {
+  const [subscriptions, setSubscriptions] = useState<AdminSubscription[]>([]);
+  const [payments, setPayments] = useState<AdminPayment[]>([]);
+  const [error, setError] = useState("");
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) {
+      setError("Admin session expired");
+      return;
+    }
+    Promise.all([getAdminSubscriptions(token), getAdminPayments(token)])
+      .then(([s, p]) => {
+        setSubscriptions(s.subscriptions);
+        setPayments(p.payments);
+      })
+      .catch((e) =>
+        setError(
+          e instanceof Error ? e.message : "Unable to load payment records",
+        ),
+      );
+  }, []);
+  return (
+    <>
+      <AppTitle eyebrow="PAYMENTS" title="Subscription activity" />
+      {error ? (
+        <div className="card empty-state">
+          <p>{error}</p>
+        </div>
+      ) : (
+        <>
+          <DataTable
+            headers={["PLAN", "STATUS", "STARTED", "EXPIRES", "CANCELLED"]}
+            rows={subscriptions.map((row) => [
+              row.plan_id,
+              row.status,
+              row.started_at
+                ? new Date(row.started_at).toLocaleDateString()
+                : "-",
+              row.expires_at
+                ? new Date(row.expires_at).toLocaleDateString()
+                : "-",
+              row.cancelled_at
+                ? new Date(row.cancelled_at).toLocaleDateString()
+                : "-",
+            ])}
+          />
+          <div className="card empty-state">
+            <h2>Payment ledger</h2>
+            <p>{payments.length} provider record(s) returned by the backend.</p>
+            {payments.slice(0, 10).map((row) => (
+              <div className="table-row" key={row.id}>
+                <span>{row.provider_payment_id || row.id.slice(0, 8)}</span>
+                <span>
+                  {row.currency} {(row.amount_minor / 100).toFixed(2)}
+                </span>
+                <Pill tone={row.status === "paid" ? "green" : "orange"}>
+                  {row.status}
+                </Pill>
+                <span>{new Date(row.created_at).toLocaleDateString()}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+function NotFound({ go }: { go: (p: string) => void }) {
+  return (
+    <section className="not-found">
+      <b>404</b>
+      <h1>This NightLink drifted into space.</h1>
+      <p>The page may have moved, expired or never existed.</p>
+      <button className="btn btn-primary" onClick={() => go("/")}>
+        Return home
+      </button>
+    </section>
+  );
+}
+function AdminPayoutRequests({ toast }: { toast: (s: string) => void }) {
+  type Withdrawal = Awaited<
+    ReturnType<typeof getAdminWithdrawals>
+  >["withdrawals"][number];
+  const [rows, setRows] = useState<Withdrawal[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busyId, setBusyId] = useState("");
+  const [editing, setEditing] = useState<Withdrawal | null>(null);
+  const load = async () => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) {
+      setError("Admin session expired");
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const result = await getAdminWithdrawals(token);
+      setRows(result.withdrawals);
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Unable to load payout requests",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    Promise.resolve().then(load);
+  }, []);
+  const update = async (
+    id: string,
+    status: "approved" | "paid" | "rejected",
+  ) => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) {
+      setError("Admin session expired");
+      return;
+    }
+    setBusyId(id);
+    try {
+      await updateAdminWithdrawal(token, id, status);
+      toast(`Payout ${status}`);
+      await load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Unable to update payout request");
+    } finally {
+      setBusyId("");
+    }
+  };
+  const saveAccount = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const row = editing;
+    if (!row) return;
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) {
+      setError("Admin session expired");
+      return;
+    }
+    const payoutAccount = String(
+      new FormData(e.currentTarget).get("payoutAccount") || "",
+    ).trim();
+    setBusyId(row.id);
+    try {
+      await updateAdminWithdrawal(token, row.id, { payoutAccount });
+      toast("Payout account saved");
+      setEditing(null);
+      await load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Unable to save payout account");
+    } finally {
+      setBusyId("");
+    }
+  };
+  return (
+    <>
+      <AppTitle
+        eyebrow="PAYOUT OPERATIONS"
+        title="Payout requests"
+        action={
+          <button className="btn btn-dark" onClick={load}>
+            Refresh
+          </button>
+        }
+      />
+      <p className="admin-page-note">
+        Review and process creator payout requests.
+      </p>
+      {loading ? (
+        <div className="card empty-state" role="status" aria-live="polite">
+          <h2>Loading payout requests…</h2>
+          <p>Fetching the latest requests.</p>
+        </div>
+      ) : error ? (
+        <div className="card empty-state" role="alert">
+          <h2>Unable to load payout requests</h2>
+          <p>{error}</p>
+          <button className="btn btn-primary" onClick={load}>
+            Try again
+          </button>
+        </div>
+      ) : (
+        <section className="card admin-table-card payout-admin">
+          <div className="admin-section-heading">
+            <div>
+              <span>CREATOR PAYOUTS</span>
+              <h2>Requests</h2>
+            </div>
+            <small>
+              {rows.length} request{rows.length === 1 ? "" : "s"}
+            </small>
+          </div>
+          <div className="admin-overview-table-wrap">
+            <table className="admin-overview-table">
+              <caption className="sr-only">Creator payout requests</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Creator</th>
+                  <th scope="col">Amount</th>
+                  <th scope="col">Method</th>
+                  <th scope="col">Payout account</th>
+                  <th scope="col">Requested</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const busy = busyId === row.id;
+                  return (
+                    <tr key={row.id}>
+                      <td>
+                        <b>{row.email}</b>
+                        <small>{row.creatorId}</small>
+                      </td>
+                      <td>{money(row.amountMicros / 1000000)}</td>
+                      <td>{row.method}</td>
+                      <td>{row.payoutAccount || <em>Missing account</em>}</td>
+                      <td>{new Date(row.requestedAt).toLocaleString()}</td>
+                      <td>
+                        <Pill
+                          tone={
+                            row.status === "paid"
+                              ? "green"
+                              : row.status === "rejected"
+                                ? "red"
+                                : "orange"
+                          }
+                        >
+                          {row.status}
+                        </Pill>
+                      </td>
+                      <td>
+                        <div className="payout-actions">
+                          {(row.status === "pending" ||
+                            row.status === "approved") && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => setEditing(row)}
+                            >
+                              {row.payoutAccount
+                                ? "Edit account"
+                                : "Add account"}
+                            </button>
+                          )}
+                          {row.status === "pending" ? (
+                            <>
+                              <button
+                                type="button"
+                                disabled={busy || !row.payoutAccount}
+                                onClick={() => update(row.id, "approved")}
+                              >
+                                {busy ? "Saving…" : "Approve"}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => update(row.id, "rejected")}
+                              >
+                                Reject
+                              </button>
+                            </>
+                          ) : row.status === "approved" ? (
+                            <button
+                              type="button"
+                              disabled={busy || !row.payoutAccount}
+                              onClick={() => update(row.id, "paid")}
+                            >
+                              {busy ? "Saving…" : "Mark paid"}
+                            </button>
+                          ) : (
+                            <span aria-label="No action available">—</span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {!rows.length && (
+              <p className="admin-overview-empty" role="status">
+                No payout requests have been submitted yet.
+              </p>
+            )}
+          </div>
+        </section>
+      )}
+      {editing && (
+        <div
+          className="modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="payout-account-title"
+        >
+          <form className="payout-edit-modal" onSubmit={saveAccount}>
+            <button
+              type="button"
+              className="modal-close"
+              aria-label="Close payout account editor"
+              onClick={() => setEditing(null)}
+            >
+              ×
+            </button>
+            <span className="eyebrow">PAYOUT ACCOUNT</span>
+            <h2 id="payout-account-title">
+              {editing.payoutAccount ? "Edit" : "Add"} {editing.method} account
+            </h2>
+            <p className="payout-edit-subtitle">
+              {editing.email} · {editing.id.slice(0, 8)}
+            </p>
+            <label>
+              {editing.method === "UPI" ? "UPI ID" : "PayPal email"}
+              <input
+                name="payoutAccount"
+                type={editing.method === "PayPal" ? "email" : "text"}
+                maxLength={254}
+                defaultValue={editing.payoutAccount || ""}
+                placeholder={
+                  editing.method === "UPI" ? "name@bank" : "name@example.com"
+                }
+                required
+                autoFocus
+              />
+            </label>
+            <p className="payout-edit-hint">
+              Confirm these payment details with the creator before processing
+              the payout.
+            </p>
+            <div className="form-actions">
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => setEditing(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                disabled={busyId === editing.id}
+              >
+                {busyId === editing.id ? "Saving…" : "Save account"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+    </>
+  );
+}
+function LiveAdminWithdrawals({ toast }: { toast: (s: string) => void }) {
+  type Withdrawal = Awaited<
+    ReturnType<typeof getAdminWithdrawals>
+  >["withdrawals"][number];
+  type Overview = Awaited<ReturnType<typeof getAdminOverview>>;
+  type Status = "pending" | "approved" | "paid" | "rejected";
+  const [rows, setRows] = useState<Withdrawal[]>([]);
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [error, setError] = useState("");
+  const [editing, setEditing] = useState<Withdrawal | null>(null);
+  const [saving, setSaving] = useState(false);
+  const load = () => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) {
+      setError("Admin session expired");
+      return;
+    }
+    Promise.all([getAdminWithdrawals(token), getAdminOverview(token)])
+      .then(([p, o]) => {
+        setRows(p.withdrawals);
+        setOverview(o);
+        setError("");
+      })
+      .catch((e) =>
+        setError(e instanceof Error ? e.message : "Unable to load payout data"),
+      );
+  };
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(load, []);
+  const update = async (
+    id: string,
+    status: "approved" | "paid" | "rejected",
+  ) => {
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) return;
+    try {
+      await updateAdminWithdrawal(token, id, status);
+      toast(`Withdrawal ${status}`);
+      load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Unable to update withdrawal");
+    }
+  };
+  const saveEdit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editing) return;
+    const token = sessionStorage.getItem("nightbox-admin-token");
+    if (!token) return;
+    const form = new FormData(e.currentTarget);
+    const amount = Number(form.get("amount"));
+    const method = String(form.get("method") || "").trim();
+    const note = String(form.get("note") || "").trim();
+    const status = String(form.get("status") || editing.status) as Status;
+    if (!Number.isFinite(amount) || amount <= 0 || !method) {
+      toast("Enter a valid amount and payout method");
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateAdminWithdrawal(token, editing.id, {
+        amountMicros: Math.round(amount * 1000000),
+        method,
+        note,
+        ...(status !== editing.status ? { status } : {}),
+      });
+      toast("Payout request updated");
+      setEditing(null);
+      load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Unable to update payout request");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const total = overview?.earningsMicros || 0;
+  const pending = rows
+    .filter((row) => row.status === "pending" || row.status === "approved")
+    .reduce((sum, row) => sum + row.amountMicros, 0);
+  const average = overview?.creators ? total / overview.creators : 0;
+  const statusOptions = (status: Status): Status[] =>
+    status === "pending"
+      ? ["pending", "approved", "rejected"]
+      : status === "approved"
+        ? ["approved", "paid", "rejected"]
+        : [status];
+  return (
+    <>
+      <AppTitle
+        eyebrow="PAYOUT OPERATIONS"
+        title="Earnings & revenue"
+        action={
+          <button className="btn btn-dark" onClick={load}>
+            Refresh
+          </button>
+        }
+      />
+      <p className="admin-page-note">
+        Platform revenue, creator payouts, and financial trends.
+      </p>
+      {error ? (
+        <div className="card empty-state">
+          <p>{error}</p>
+        </div>
+      ) : (
+        <>
+          <div className="admin-finance-grid">
+            <section className="card admin-finance-hero">
+              <div>
+                <span>Total platform revenue (all time)</span>
+                <b>{money(total / 1000000)}</b>
+                <small>
+                  Watch-time earnings only · manual bonuses excluded
+                </small>
+              </div>
+              <Pill tone="green">↗ Real-time</Pill>
+              <AdminTrendChart
+                title="Revenue trend"
+                points={(overview?.dailyActivity || []).map((row) => ({
+                  date: row.date,
+                  value: row.earningsMicros / 1000000,
+                }))}
+                color="#f0a900"
+                format={money}
+              />
+            </section>
+            <div className="admin-finance-side">
+              <article className="card">
+                <span>＄ &nbsp; Pending payouts</span>
+                <b>{money(pending / 1000000)}</b>
+              </article>
+              <article className="card">
+                <span>↗ &nbsp; Avg creator earning</span>
+                <b>{money(average / 1000000)}</b>
+              </article>
+            </div>
+          </div>
+          <section className="card admin-table-card payout-admin">
+            <div className="admin-section-heading">
+              <div>
+                <span>PAYOUT OPERATIONS</span>
+                <h2>Recent payouts</h2>
+              </div>
+              <small>
+                {rows.length} request{rows.length === 1 ? "" : "s"}
+              </small>
+            </div>
+            <div className="admin-overview-table-wrap">
+              <table className="admin-overview-table">
+                <thead>
+                  <tr>
+                    <th>Creator</th>
+                    <th>Amount</th>
+                    <th>Method</th>
+                    <th>Date</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => (
+                    <tr key={row.id}>
+                      <td>
+                        <b>{row.email}</b>
+                        <small>{row.creatorId}</small>
+                      </td>
+                      <td>{money(row.amountMicros / 1000000)}</td>
+                      <td>{row.method}</td>
+                      <td>{new Date(row.requestedAt).toLocaleString()}</td>
+                      <td>
+                        <Pill
+                          tone={
+                            row.status === "paid"
+                              ? "green"
+                              : row.status === "rejected"
+                                ? "red"
+                                : "orange"
+                          }
+                        >
+                          {row.status}
+                        </Pill>
+                      </td>
+                      <td>
+                        <div className="payout-actions">
+                          {(row.status === "pending" ||
+                            row.status === "approved") && (
+                            <button
+                              className="admin-text-action"
+                              onClick={() => setEditing(row)}
+                            >
+                              Edit
+                            </button>
+                          )}
+                          {row.status === "pending" ? (
+                            <>
+                              <button
+                                onClick={() => update(row.id, "approved")}
+                              >
+                                Approve
+                              </button>
+                              <button
+                                onClick={() => update(row.id, "rejected")}
+                              >
+                                Reject
+                              </button>
+                            </>
+                          ) : row.status === "approved" ? (
+                            <button onClick={() => update(row.id, "paid")}>
+                              Mark paid
+                            </button>
+                          ) : (
+                            "—"
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!rows.length && (
+                <p className="admin-overview-empty">
+                  No payout requests have been submitted yet.
+                </p>
+              )}
+            </div>
+          </section>
+        </>
+      )}
+      {editing && (
+        <div
+          className="modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="payout-edit-title"
+        >
+          <form className="payout-edit-modal" onSubmit={saveEdit}>
+            <button
+              type="button"
+              className="modal-close"
+              aria-label="Close payout editor"
+              onClick={() => setEditing(null)}
+            >
+              ×
+            </button>
+            <span className="eyebrow">PAYOUT REQUEST</span>
+            <h2 id="payout-edit-title">Edit payout request</h2>
+            <p className="payout-edit-subtitle">
+              {editing.email} · {editing.id.slice(0, 8)}
+            </p>
+            <label>
+              Amount (USD)
+              <input
+                name="amount"
+                type="number"
+                min="0.01"
+                step="0.01"
+                defaultValue={(editing.amountMicros / 1000000).toFixed(2)}
+                required
+              />
+            </label>
+            <label>
+              Payout method
+              <input
+                name="method"
+                maxLength={100}
+                defaultValue={editing.method}
+                required
+              />
+            </label>
+            <label>
+              Status
+              <select name="status" defaultValue={editing.status}>
+                {statusOptions(editing.status as Status).map((status) => (
+                  <option value={status} key={status}>
+                    {status.charAt(0).toUpperCase() + status.slice(1)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Admin note
+              <textarea
+                name="note"
+                rows={3}
+                maxLength={1000}
+                defaultValue={editing.note || ""}
+                placeholder="Optional note for this payout request"
+              />
+            </label>
+            <p className="payout-edit-hint">
+              Paid and rejected requests are locked. Pending or approved edits
+              still respect the creator’s available balance.
+            </p>
+            <div className="form-actions">
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => setEditing(null)}
+              >
+                Cancel
+              </button>
+              <button className="btn btn-primary" disabled={saving}>
+                {saving ? "Saving…" : "Save payout"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+    </>
+  );
 }
