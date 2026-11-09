@@ -28,6 +28,17 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run lint
       - run: npm run build
+      - name: Validate Android App Links asset
+        run: |
+          test -s dist/.well-known/assetlinks.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          payload = json.loads(Path("dist/.well-known/assetlinks.json").read_text())
+          assert payload and payload[0]["target"]["package_name"] == "simple.shayaribygenz"
+          assert payload[0]["target"]["sha256_cert_fingerprints"]
+          print("Android App Links asset is present and valid")
+          PY
 
       - name: Validate Telegram bot code and shared-key storage
         run: |
@@ -210,6 +221,11 @@ jobs:
                   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                   proxy_set_header X-Forwarded-Proto https;
               }
+              location = /.well-known/assetlinks.json {
+                  default_type application/json;
+                  alias /var/www/nightbox/nightbox-p4/web/.well-known/assetlinks.json;
+                  add_header Cache-Control "public, max-age=86400" always;
+              }
               location / {
                   root /var/www/nightbox/nightbox-p4/web;
                   try_files $uri $uri/ /index.html;
@@ -286,3 +302,7 @@ jobs:
           curl --fail --silent --show-error https://api.nightbox.in/health >/dev/null
           curl --fail --silent --show-error https://app.nightbox.in/ >/dev/null
           curl --fail --silent --show-error https://admin.nightbox.in/ >/dev/null
+          for host in nightbox.in www.nightbox.in api.nightbox.in; do
+            curl --fail --silent --show-error "https://$host/.well-known/assetlinks.json" \
+              | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p and p[0]["target"]["package_name"] == "simple.shayaribygenz" and p[0]["target"]["sha256_cert_fingerprints"]; print("App Links verified:", sys.argv[1])' "$host"
+          done
