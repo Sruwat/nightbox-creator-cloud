@@ -63,8 +63,13 @@ BOT_NAME = os.getenv("BOT_NAME", "videos-upload")
 REQUIRE_CONNECT = os.getenv("TELEGRAM_REQUIRE_CONNECT", "true").lower() == "true"
 PUBLIC_WATCH_URL = os.getenv("PUBLIC_WATCH_URL", "https://nightbox.in").rstrip("/")
 
-# Limits
-MAX_CONCURRENT_UPLOADS = 10
+# Limits. Keep this conservative because every upload temporarily needs space
+# for the Telegram download and the backend handoff at the same time. Operators
+# can raise it explicitly after adding storage with UPLOAD_MAX_CONCURRENT.
+try:
+    MAX_CONCURRENT_UPLOADS = max(1, int(os.getenv("UPLOAD_MAX_CONCURRENT", "2")))
+except ValueError:
+    MAX_CONCURRENT_UPLOADS = 2
 UPLOAD_RETRY_ATTEMPTS = 3
 UPLOAD_RETRY_DELAY = 5  # seconds
 
