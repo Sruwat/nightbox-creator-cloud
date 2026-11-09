@@ -429,7 +429,7 @@ app.post('/internal/workers/claim', requireWorker, (req, res) => {
     store.db.exec('COMMIT');
 
     const expiresAt = Math.floor(Date.now() / 1000) + 1800;
-    const sourceUrl = bunny.hasTokenAuth()
+    const sourceUrl = bunny.hasSourceTokenAuth()
       ? bunny.getSignedDirectPlayUrl(job.videoId, expiresAt)
       : bunny.getDirectPlayUrl(job.videoId);
     return res.json({ job: { videoId: job.videoId, title: job.title, attempts, sourceUrl, sourceExpiresAt: new Date(expiresAt * 1000).toISOString() } });
@@ -1386,7 +1386,7 @@ app.get('/api/playback-media/:id', async (req, res) => {
   const video = videoLifecycle(req.params.id);
   if (!video || video.status === 'deleted' || video.approval_status === 'rejected' || video.copyright_status === 'rejected') return res.status(403).send('Playback is not available');
   try {
-    const sourceUrl = bunny.hasTokenAuth()
+    const sourceUrl = bunny.hasSourceTokenAuth()
       ? bunny.getSignedDirectPlayUrl(req.params.id, decoded.exp)
       : bunny.getDirectPlayUrl(req.params.id);
     const upstream = await axios.get(sourceUrl, {
@@ -2443,7 +2443,7 @@ app.put('/api/admin/reward-claims/:id', requireAdmin, (req, res) => {
   store.db.prepare('UPDATE reward_claims SET status=?,admin_note=?,updated_at=? WHERE id=?').run(nextStatus, adminNote, store.now(), req.params.id);
   res.json({ status: nextStatus });
 });
-app.get('/api/admin/settings', requireAdmin, (req, res) => res.json({ settings: { environment: process.env.NODE_ENV || 'development', domain: DOMAIN_URL, paymentProvider: process.env.PAYMENT_PROVIDER || 'not configured', bunnyConfigured: Boolean(process.env.BUNNY_CDN_HOST && (BUNNY_LOCAL_STORAGE || (process.env.BUNNY_STORAGE_PASSWORD && process.env.BUNNY_STORAGE_ZONE))), reputationChecksConfigured: Boolean(process.env.IPQUALITYSCORE_API_KEY), recurringPlansConfigured: Boolean(process.env.RAZORPAY_PLAN_MONTHLY && process.env.RAZORPAY_PLAN_PRIORITY) } }));
+app.get('/api/admin/settings', requireAdmin, (req, res) => res.json({ settings: { environment: process.env.NODE_ENV || 'development', domain: DOMAIN_URL, paymentProvider: process.env.PAYMENT_PROVIDER || 'not configured', bunnyConfigured: Boolean(process.env.BUNNY_CDN_HOST && (BUNNY_LOCAL_STORAGE || bunny.isDirectAdminStorage() || (process.env.BUNNY_STORAGE_PASSWORD && process.env.BUNNY_STORAGE_ZONE))), reputationChecksConfigured: Boolean(process.env.IPQUALITYSCORE_API_KEY), recurringPlansConfigured: Boolean(process.env.RAZORPAY_PLAN_MONTHLY && process.env.RAZORPAY_PLAN_PRIORITY) } }));
 app.get('/api/admin/ads-txt', requireAdmin, (_req, res) => {
   res.json(store.db.prepare('SELECT content,updated_at AS updatedAt FROM ads_txt_content WHERE id=1').get());
 });
@@ -3015,7 +3015,7 @@ app.get('/download/:id', async (req, res) => {
   }
 
   const cdnHost = process.env.BUNNY_CDN_HOST;
-  if (!cdnHost || (!BUNNY_LOCAL_STORAGE && (!BUNNY_STORAGE_PASSWORD || !BUNNY_STORAGE_ZONE))) return res.status(503).json({ error: 'Video downloads are not configured on the server' });
+  if (!cdnHost || (!BUNNY_LOCAL_STORAGE && !bunny.isDirectAdminStorage() && (!BUNNY_STORAGE_PASSWORD || !BUNNY_STORAGE_ZONE))) return res.status(503).json({ error: 'Video downloads are not configured on the server' });
   const lifecycle = videoLifecycle(videoId);
   if (!playbackReady(lifecycle)) return res.status(403).json({ error: 'Download is available only after processing and approval', code: 'DOWNLOAD_NOT_READY', state: publicVideoState(lifecycle) });
 
@@ -3026,6 +3026,21 @@ app.get('/download/:id', async (req, res) => {
     res.setHeader('Content-Type', 'video/mp4');
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
     return res.download(localPath, fileName);
+  }
+
+  if (bunny.isDirectAdminStorage()) {
+    try {
+      const response = await axios({ method: 'GET', url: bunny.getDirectPlayUrl(videoId), responseType: 'stream', timeout: 300000, validateStatus: (status) => status >= 200 && status < 500 });
+      if (response.status < 200 || response.status >= 300) return res.status(response.status === 404 ? 404 : 502).json({ error: 'Video download not found' });
+      const fileName = `${videoId}.mp4`;
+      res.setHeader('Content-Type', response.headers['content-type'] || 'video/mp4');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length']);
+      response.data.pipe(res);
+      return;
+    } catch (error) {
+      return res.status(502).json({ error: 'Video download unavailable' });
+    }
   }
 
   // Try multiple Bunny CDN URL formats in order of preference
@@ -3148,7 +3163,7 @@ app.get('/ready', (req, res) => {
     authSecrets: Boolean(process.env.AUTH_SECRET && process.env.IP_HASH_SECRET && process.env.VIEW_HASH_SECRET),
     adminApiKey: Boolean(process.env.ADMIN_API_KEY && process.env.ADMIN_API_KEY.length >= 32),
     trustedProxy: process.env.TRUST_PROXY === 'true',
-    bunny: Boolean(process.env.BUNNY_CDN_HOST && (BUNNY_LOCAL_STORAGE || (process.env.BUNNY_STORAGE_PASSWORD && process.env.BUNNY_STORAGE_ZONE))),
+    bunny: Boolean(process.env.BUNNY_CDN_HOST && (BUNNY_LOCAL_STORAGE || bunny.isDirectAdminStorage() || (process.env.BUNNY_STORAGE_PASSWORD && process.env.BUNNY_STORAGE_ZONE))),
     hlsTranscode: HLS_TRANSCODE_ENABLED,
     // Reputation lookup is optional; when no provider is configured the
     // traffic filter fails closed in production, which is still safe/ready.

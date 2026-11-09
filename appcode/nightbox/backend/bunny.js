@@ -6,6 +6,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const ftp = require('basic-ftp');
 
 const STORAGE_ZONE = process.env.BUNNY_STORAGE_ZONE;
 const STORAGE_PASSWORD = process.env.BUNNY_STORAGE_PASSWORD;
@@ -14,6 +15,12 @@ const CDN_FALLBACK_HOST = process.env.BUNNY_CDN_FALLBACK_HOST || 'nightbox.b-cdn
 const STORAGE_PREFIX = String(process.env.BUNNY_STORAGE_PREFIX || 'nightbox').replace(/^\/+|\/+$/g, '');
 const STORAGE_DRIVER = String(process.env.VIDEO_STORAGE_DRIVER || 'bunny').toLowerCase();
 const LOCAL_STORAGE_ROOT = path.resolve(process.env.VIDEO_STORAGE_ROOT || path.join(__dirname, 'media'));
+const DIRECTADMIN_FTP_HOST = String(process.env.DIRECTADMIN_FTP_HOST || '').trim();
+const DIRECTADMIN_FTP_PORT = Number(process.env.DIRECTADMIN_FTP_PORT || 21);
+const DIRECTADMIN_FTP_USERNAME = String(process.env.DIRECTADMIN_FTP_USERNAME || '').trim();
+const DIRECTADMIN_FTP_PASSWORD = String(process.env.DIRECTADMIN_FTP_PASSWORD || '');
+const DIRECTADMIN_FTP_ROOT = String(process.env.DIRECTADMIN_FTP_ROOT || '/').replace(/^\/+|\/+$/g, '');
+const DIRECTADMIN_PUBLIC_URL = String(process.env.DIRECTADMIN_PUBLIC_URL || '').replace(/\/+$/, '');
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
 const MAX_VIDEO_BYTES = 2 * 1024 * 1024 * 1024;
@@ -50,6 +57,35 @@ function localPath(videoId) {
   return path.join(LOCAL_STORAGE_ROOT, `${videoId}.mp4`);
 }
 
+function isDirectAdminStorage() { return STORAGE_DRIVER === 'directadmin'; }
+
+function directAdminPath(relativePath) {
+  const safe = String(relativePath || '').replace(/^\/+/, '');
+  if (!safe || safe.includes('..') || safe.includes('\\')) throw new Error('Invalid DirectAdmin storage path');
+  return `${DIRECTADMIN_FTP_ROOT}/${safe}`;
+}
+
+async function withDirectAdminFtp(fn) {
+  if (!DIRECTADMIN_FTP_HOST || !DIRECTADMIN_FTP_USERNAME || !DIRECTADMIN_FTP_PASSWORD || !DIRECTADMIN_PUBLIC_URL) {
+    throw new Error('DirectAdmin FTP storage is not configured');
+  }
+  const client = new ftp.Client(120000);
+  client.ftp.verbose = false;
+  try {
+    await client.access({
+      host: DIRECTADMIN_FTP_HOST,
+      port: DIRECTADMIN_FTP_PORT,
+      user: DIRECTADMIN_FTP_USERNAME,
+      password: DIRECTADMIN_FTP_PASSWORD,
+      secure: false,
+      passive: true,
+    });
+    return await fn(client);
+  } finally {
+    client.close();
+  }
+}
+
 async function withRetry(fn, retries = MAX_RETRIES, label = 'API call') {
   for (let attempt = 1; attempt <= retries; attempt += 1) {
     try {
@@ -67,14 +103,20 @@ function createVideo(title) { return { guid: crypto.randomUUID(), title: title |
 
 function assertConfigured() {
   if (!CDN_HOST) throw new Error('Bunny CDN host is not configured');
+  if (isDirectAdminStorage()) {
+    if (!DIRECTADMIN_FTP_HOST || !DIRECTADMIN_FTP_USERNAME || !DIRECTADMIN_FTP_PASSWORD || !DIRECTADMIN_PUBLIC_URL) {
+      throw new Error('DirectAdmin FTP storage is not configured');
+    }
+    return;
+  }
   if (STORAGE_DRIVER !== 'local' && (!STORAGE_ZONE || !STORAGE_PASSWORD)) throw new Error('Bunny Storage/CDN is not configured');
 }
 
 async function uploadVideo(videoId, filePath) {
   assertConfigured();
+  const fileStats = fs.statSync(filePath);
+  if (fileStats.size > MAX_VIDEO_BYTES) throw new Error('Video exceeds the 2GB upload limit');
   if (STORAGE_DRIVER === 'local') {
-    const fileStats = fs.statSync(filePath);
-    if (fileStats.size > MAX_VIDEO_BYTES) throw new Error('Video exceeds the 2GB upload limit');
     fs.mkdirSync(LOCAL_STORAGE_ROOT, { recursive: true });
     const target = localPath(videoId);
     const temporaryTarget = `${target}.uploading`;
@@ -82,6 +124,11 @@ async function uploadVideo(videoId, filePath) {
     fs.renameSync(temporaryTarget, target);
     console.log(`[NightBox VPS storage] Uploaded ${videoId}`);
     return { guid: videoId, storageSize: fileStats.size };
+  }
+  if (isDirectAdminStorage()) {
+    const result = await withDirectAdminFtp((client) => client.uploadFrom(filePath, directAdminPath(`${videoId}.mp4`)));
+    console.log(`[DirectAdmin FTP storage] Uploaded ${videoId}`);
+    return { guid: videoId, storageSize: fileStats.size, result };
   }
   return withRetry(async () => {
     const fileStats = fs.statSync(filePath);
@@ -122,6 +169,10 @@ async function uploadCreatorFile(storageKey, filePath, mimeType = 'application/o
     fs.renameSync(temporaryTarget, target);
     return { storageKey, size: fileStats.size };
   }
+  if (isDirectAdminStorage()) {
+    await withDirectAdminFtp((client) => client.uploadFrom(filePath, directAdminPath(storageKey)));
+    return { storageKey, size: fileStats.size };
+  }
   return withRetry(async () => {
     const response = await bunnyApi.put(`/${creatorObjectPath(storageKey)}`, fs.createReadStream(filePath), {
       headers: { 'Content-Type': mimeType || 'application/octet-stream', 'Content-Length': fileStats.size },
@@ -137,6 +188,10 @@ async function deleteCreatorFile(storageKey) {
     try { fs.unlinkSync(creatorLocalPath(storageKey)); } catch (error) { if (error.code !== 'ENOENT') throw error; }
     return { success: true };
   }
+  if (isDirectAdminStorage()) {
+    await withDirectAdminFtp((client) => client.remove(directAdminPath(storageKey)));
+    return { success: true };
+  }
   return withRetry(async () => (await bunnyApi.delete(`/${creatorObjectPath(storageKey)}`, { timeout: 30000 })).data, MAX_RETRIES, 'deleteCreatorFile');
 }
 
@@ -145,6 +200,7 @@ function getCreatorFilePath(storageKey) {
 }
 
 function getCreatorFileUrl(storageKey) {
+  if (isDirectAdminStorage()) return `${DIRECTADMIN_PUBLIC_URL}/${String(storageKey || '').replace(/^\/+/, '')}`;
   const host = CDN_HOST || CDN_FALLBACK_HOST;
   if (!host) throw new Error('Bunny CDN host is not configured');
   return `https://${host}/${STORAGE_PREFIX}/${String(storageKey || '').replace(/^\/+/, '')}`;
@@ -154,6 +210,10 @@ async function downloadVideoToFile(videoId, targetPath) {
   assertConfigured();
   if (STORAGE_DRIVER === 'local') {
     fs.copyFileSync(localPath(videoId), targetPath);
+    return;
+  }
+  if (isDirectAdminStorage()) {
+    await withDirectAdminFtp((client) => client.downloadTo(targetPath, directAdminPath(`${videoId}.mp4`)));
     return;
   }
   const response = await axios({ method: 'GET', url: getDirectPlayUrl(videoId), responseType: 'stream', timeout: 600000, maxContentLength: MAX_VIDEO_BYTES, maxBodyLength: MAX_VIDEO_BYTES });
@@ -173,6 +233,10 @@ async function getVideo(videoId) {
       throw error;
     }
   }
+  if (isDirectAdminStorage()) {
+    const storageSize = await withDirectAdminFtp((client) => client.size(directAdminPath(`${videoId}.mp4`)));
+    return { guid: videoId, status: 4, storageSize, dateUploaded: null };
+  }
   return withRetry(async () => {
     const response = await bunnyApi.head(`/${objectPath(videoId)}`, { timeout: 15000 });
     return { guid: videoId, status: 4, storageSize: Number(response.headers['content-length'] || 0), dateUploaded: response.headers.date || null };
@@ -183,6 +247,10 @@ async function deleteVideo(videoId) {
   assertConfigured();
   if (STORAGE_DRIVER === 'local') {
     try { fs.unlinkSync(localPath(videoId)); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    return { success: true };
+  }
+  if (isDirectAdminStorage()) {
+    await withDirectAdminFtp((client) => client.remove(directAdminPath(`${videoId}.mp4`)));
     return { success: true };
   }
   return withRetry(async () => (await bunnyApi.delete(`/${objectPath(videoId)}`, { timeout: 30000 })).data, MAX_RETRIES, 'deleteVideo');
@@ -213,6 +281,21 @@ async function uploadHlsDirectory(videoId, directory, onProgress) {
       completed += 1;
       onProgress?.(completed / total);
     }
+    return;
+  }
+  if (isDirectAdminStorage()) {
+    const files = fs.readdirSync(directory).filter((fileName) => /\.(m3u8|ts)$/i.test(fileName));
+    const total = files.length || 1;
+    let completed = 0;
+    await withDirectAdminFtp(async (client) => {
+      await client.ensureDir(directAdminPath(`hls/${videoId}`));
+      for (const fileName of files) {
+        const filePath = path.join(directory, fileName);
+        await client.uploadFrom(filePath, directAdminPath(`hls/${videoId}/${fileName}`));
+        completed += 1;
+        onProgress?.(completed / total);
+      }
+    });
     return;
   }
   const files = fs.readdirSync(directory).filter((fileName) => /\.(m3u8|ts)$/i.test(fileName));
@@ -291,7 +374,11 @@ function getSignedCdnUrl(url, expiresAt = Math.floor(Date.now() / 1000) + TOKEN_
   return appendSignedQuery(target.toString(), signCdnPath(target.pathname, expiresAt));
 }
 
-function getDirectPlayUrl(videoId) { assertConfigured(); return `https://${CDN_HOST}/${STORAGE_PREFIX}/${videoId}.mp4`; }
+function getDirectPlayUrl(videoId) {
+  assertConfigured();
+  if (isDirectAdminStorage()) return `${DIRECTADMIN_PUBLIC_URL}/${videoId}.mp4`;
+  return `https://${CDN_HOST}/${STORAGE_PREFIX}/${videoId}.mp4`;
+}
 function getSignedDirectPlayUrl(videoId, expiresAt = Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS) {
   const url = getDirectPlayUrl(videoId);
   return appendSignedQuery(url, signCdnPath(new URL(url).pathname, expiresAt));
@@ -303,6 +390,7 @@ function getHlsUrl(videoId) {
 function getEmbedUrl(videoId) { return getDirectPlayUrl(videoId); }
 const cdnAvailability = new Map();
 async function getCdnUrlIfAvailable(videoId) {
+  if (isDirectAdminStorage()) return getDirectPlayUrl(videoId);
   if (!CDN_HOST && !CDN_FALLBACK_HOST) return null;
   const cached = cdnAvailability.get(videoId);
   if (cached && cached.expiresAt > Date.now()) return cached.available ? cached.url : null;
@@ -328,4 +416,4 @@ function getWatchUrl(videoId) {
 }
 function cleanupTempFile(filePath) { try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (error) { console.error('[Cleanup] Failed:', error.message); } }
 
-module.exports = { createVideo, uploadVideo, uploadVideoFromUrl, uploadCreatorFile, deleteCreatorFile, downloadVideoToFile, uploadHlsDirectory, verifyHls, signCdnPath, getSignedHlsUrl, getSignedCdnUrl, getVideo, deleteVideo, getEmbedUrl, getDirectPlayUrl, getSignedDirectPlayUrl, getHlsUrl, getCdnUrlIfAvailable, getWatchUrl, getCreatorFilePath, getCreatorFileUrl, cleanupTempFile, getLocalPath: (videoId) => STORAGE_DRIVER === 'local' ? localPath(videoId) : null, isLocalStorage: () => STORAGE_DRIVER === 'local', hasTokenAuth: () => Boolean(TOKEN_AUTH_KEY) };
+module.exports = { createVideo, uploadVideo, uploadVideoFromUrl, uploadCreatorFile, deleteCreatorFile, downloadVideoToFile, uploadHlsDirectory, verifyHls, signCdnPath, getSignedHlsUrl, getSignedCdnUrl, getVideo, deleteVideo, getEmbedUrl, getDirectPlayUrl, getSignedDirectPlayUrl, getHlsUrl, getCdnUrlIfAvailable, getWatchUrl, getCreatorFilePath, getCreatorFileUrl, cleanupTempFile, getLocalPath: (videoId) => STORAGE_DRIVER === 'local' ? localPath(videoId) : null, isLocalStorage: () => STORAGE_DRIVER === 'local', isDirectAdminStorage, hasTokenAuth: () => Boolean(TOKEN_AUTH_KEY), hasSourceTokenAuth: () => Boolean(TOKEN_AUTH_KEY && !isDirectAdminStorage()) };

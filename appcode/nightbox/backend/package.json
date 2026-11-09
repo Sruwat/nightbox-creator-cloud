@@ -12,6 +12,7 @@
   "dependencies": {
     "@ip-location-db/geo-whois-asn-country-mmdb": "^2.3.2026061719",
     "axios": "^1.7.2",
+    "basic-ftp": "^5.2.1",
     "compression": "^1.7.4",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
