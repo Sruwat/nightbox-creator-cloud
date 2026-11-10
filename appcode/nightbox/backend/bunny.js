@@ -317,17 +317,37 @@ async function verifyHls(videoId) {
   const unsignedManifestUrl = getHlsUrl(videoId);
   const manifestUrl = TOKEN_AUTH_KEY ? getSignedHlsUrl(videoId) : unsignedManifestUrl;
   if (!manifestUrl) throw new Error('Bunny CDN host is not configured');
-  const manifest = await axios.get(manifestUrl, { timeout: 15000, responseType: 'text', validateStatus: () => true });
-  if (manifest.status < 200 || manifest.status >= 300 || !String(manifest.data || '').includes('#EXTM3U')) {
-    throw new Error(`CDN HLS manifest verification failed (${manifest.status})`);
-  }
+  const manifest = await withRetry(async () => {
+    const response = await axios.get(manifestUrl, { timeout: 15000, responseType: 'text', validateStatus: () => true });
+    if (response.status < 200 || response.status >= 300 || !String(response.data || '').includes('#EXTM3U')) {
+      const error = new Error(`CDN HLS manifest verification failed (${response.status})`);
+      error.response = { status: response.status };
+      throw error;
+    }
+    return response;
+  }, MAX_RETRIES, 'HLS manifest verification');
   const segment = String(manifest.data).split(/\r?\n/).map((line) => line.trim()).find((line) => line && !line.startsWith('#') && /\.(ts|m4s)(\?|$)/i.test(line));
   if (!segment) throw new Error('CDN HLS manifest contains no media segment');
   const segmentUrl = TOKEN_AUTH_KEY
     ? getSignedCdnUrl(new URL(segment, unsignedManifestUrl).toString(), Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS)
     : new URL(segment, unsignedManifestUrl).toString();
-  const response = await axios.head(segmentUrl, { timeout: 10000, validateStatus: () => true });
-  if (response.status < 200 || response.status >= 400) throw new Error(`CDN HLS segment verification failed (${response.status})`);
+  await withRetry(async () => {
+    // Verify the real media path, not only HEAD support. A small ranged GET
+    // catches CDN token/origin failures while avoiding a full segment download.
+    const response = await axios.get(segmentUrl, {
+      timeout: 10000,
+      headers: { Range: 'bytes=0-1023' },
+      responseType: 'arraybuffer',
+      maxContentLength: 64 * 1024,
+      validateStatus: () => true,
+    });
+    if (response.status < 200 || response.status >= 400 || !response.data?.byteLength) {
+      const error = new Error(`CDN HLS segment verification failed (${response.status})`);
+      error.response = { status: response.status };
+      throw error;
+    }
+    return response;
+  }, MAX_RETRIES, 'HLS segment verification');
   return { manifestUrl, segmentUrl };
 }
 
