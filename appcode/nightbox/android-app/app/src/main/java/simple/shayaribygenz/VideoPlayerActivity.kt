@@ -126,6 +126,7 @@ class VideoPlayerActivity : AppCompatActivity() {
     private var remoteHlsUrl: String? = null
     private var remoteProgressiveUrl: String? = null
     private var prefetchedMediaType: String? = null
+    private var progressiveFallbackUsed = false
     private var remotePlaybackExpiresAtEpoch: Long = 0L
     private var downloadUrl: String? = null
     private var durationUpdateRunnable: Runnable? = null
@@ -476,6 +477,7 @@ class VideoPlayerActivity : AppCompatActivity() {
                         withContext(Dispatchers.Main) {
                             remoteHlsUrl = responseManifest
                             remoteProgressiveUrl = responseProgressive
+                            progressiveFallbackUsed = false
                             prefetchedMediaType = "progressive"
                             remotePlaybackExpiresAtEpoch = responseBody.optLong("expiresAtEpoch", 0L)
                             viewSessionId = responseBody.optString("sessionId").takeIf { it.isNotBlank() }
@@ -541,6 +543,7 @@ class VideoPlayerActivity : AppCompatActivity() {
                         viewQualified = false
                         remoteHlsUrl = manifest
                         remoteProgressiveUrl = progressive
+                        progressiveFallbackUsed = false
                         remotePlaybackExpiresAtEpoch = payload.optLong("expiresAtEpoch", 0L)
                         viewSessionId = sId
                         viewToken = vToken
@@ -734,12 +737,25 @@ class VideoPlayerActivity : AppCompatActivity() {
 
             override fun onPlayerError(error: PlaybackException) {
                 Log.e(TAG, "Native playback failed (${error.errorCode})", error)
+                // HLS is preferred, but a transient manifest/segment/CDN error
+                // must not strand the user. The backend returns an authorized
+                // range-based MP4 URL alongside the manifest, so switch to it
+                // immediately before spending the one token-refresh retry.
+                if (!isProgressive && !progressiveFallbackUsed && remoteProgressiveUrl != null && localVideoUri == null) {
+                    progressiveFallbackUsed = true
+                    releasePlayer()
+                    window.decorView.postDelayed({
+                        if (!isFinishing && !isDestroyed) initExoPlayerHls(isProgressive = true)
+                    }, 150L)
+                    return
+                }
                 if (!playbackTokenRetryUsed && localVideoUri == null) {
                     playbackTokenRetryUsed = true
                     // Force a fresh token on retry. Reusing the prefetched
                     // URL can loop forever after its 60-second expiry.
                     remoteHlsUrl = null
                     remoteProgressiveUrl = null
+                    progressiveFallbackUsed = false
                     prefetchedMediaType = null
                     remotePlaybackExpiresAtEpoch = 0L
                     window.decorView.postDelayed({

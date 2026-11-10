@@ -1375,7 +1375,13 @@ app.post('/api/videos/:id/playback-token', async (req, res) => {
       minWatchSeconds: store.db.prepare('SELECT minimum_watch_seconds AS seconds FROM view_rules WHERE id=1').get().seconds,
     });
   }
-  res.json({ manifestUrl: `${PUBLIC_API_URL}/api/playback-manifest/${encodeURIComponent(video.id)}?token=${encodeURIComponent(token)}`, expiresAt: new Date(expiresAt * 1000).toISOString(), expiresAtEpoch: expiresAt, sessionId, viewToken, minWatchSeconds: store.db.prepare('SELECT minimum_watch_seconds AS seconds FROM view_rules WHERE id=1').get().seconds });
+  // Return the authorized MP4 range proxy together with HLS.  HLS is the
+  // preferred path, but the client must be able to continue playback when a
+  // manifest/segment temporarily fails or a CDN edge is still converging.
+  // The proxy keeps the same playback token and forwards Range requests, so
+  // this does not expose an unsigned storage URL or download the whole file.
+  const mediaUrl = `${PUBLIC_API_URL}/api/playback-media/${encodeURIComponent(video.id)}?token=${encodeURIComponent(token)}`;
+  res.json({ manifestUrl: `${PUBLIC_API_URL}/api/playback-manifest/${encodeURIComponent(video.id)}?token=${encodeURIComponent(token)}`, mediaUrl, mediaType: 'hls', expiresAt: new Date(expiresAt * 1000).toISOString(), expiresAtEpoch: expiresAt, sessionId, viewToken, minWatchSeconds: store.db.prepare('SELECT minimum_watch_seconds AS seconds FROM view_rules WHERE id=1').get().seconds });
 });
 
 // Authorized progressive fallback while HLS is still processing. Range
