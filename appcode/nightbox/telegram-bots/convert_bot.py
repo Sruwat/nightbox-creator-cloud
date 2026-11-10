@@ -405,17 +405,22 @@ async def download_nightheast(url, message_text, tmp_dir):
 
 async def upload_video(fpath, title, chat_id, telegram_id=""):
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=1800)) as session:
-        data = aiohttp.FormData()
-        with open(fpath, 'rb') as video_file:
-            data.add_field('video', video_file, filename=os.path.basename(fpath), content_type='video/mp4')
-            data.add_field('title', title)
-            headers = backend_headers(chat_id, telegram_id)
-            async with session.post(f"{BACKEND_URL}/upload-file", data=data, headers=headers) as resp:
-                data = await resp.json(content_type=None)
-                if resp.status in {200, 201}:
-                    return data
-                detail = data.get("error") or data.get("message") or f"HTTP {resp.status}"
-                raise Exception(f"Upload error: {str(detail)[:180]}")
+        for attempt in range(4):
+            data = aiohttp.FormData()
+            with open(fpath, 'rb') as video_file:
+                data.add_field('video', video_file, filename=os.path.basename(fpath), content_type='video/mp4')
+                data.add_field('title', title)
+                headers = backend_headers(chat_id, telegram_id)
+                async with session.post(f"{BACKEND_URL}/upload-file", data=data, headers=headers) as resp:
+                    payload = await resp.json(content_type=None)
+                    if resp.status in {200, 201}:
+                        return payload
+                    if resp.status == 429 and attempt < 3:
+                        retry_after = min(max(int(resp.headers.get("Retry-After", "5")), 1), 30)
+                        await asyncio.sleep(retry_after)
+                        continue
+                    detail = payload.get("error") or payload.get("message") or f"HTTP {resp.status}"
+                    raise Exception(f"Upload error: {str(detail)[:180]}")
 
 
 def response_video_id(payload):

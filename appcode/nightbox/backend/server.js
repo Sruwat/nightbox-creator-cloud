@@ -571,7 +571,13 @@ app.use((req, res, next) => {
 
 const uploadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 50,
+  // All Telegram bots share the VPS egress IP. Key authenticated uploads by
+  // creator instead of making one creator's traffic throttle every bot.
+  max: 120,
+  keyGenerator: (req) => {
+    const owner = uploadOwner(req);
+    return owner?.id ? `creator:${owner.id}` : requestIp(req);
+  },
   message: { error: 'Too many upload requests. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
