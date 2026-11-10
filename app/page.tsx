@@ -1191,8 +1191,8 @@ function Contact({ toast }: { toast: (s: string) => void }) {
           <h2>Choose the right channel</h2>
           {[
             ["General support", "Use the contact form below"],
-            ["Legal & DMCA", "legal@nightbox.cloud"],
-            ["Advertising", "partners@nightbox.cloud"],
+            ["Legal & DMCA", "Submit a request through the contact form"],
+            ["Advertising", "Submit a partnership request through the contact form"],
           ].map((x) => (
             <div className="contact-line" key={x[0]}>
               <span>↗</span>
