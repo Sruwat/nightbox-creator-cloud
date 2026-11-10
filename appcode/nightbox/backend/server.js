@@ -444,7 +444,10 @@ app.post('/internal/workers/jobs/:id/progress', requireWorker, (req, res) => {
   const videoId = String(req.params.id || '');
   const workerId = String(req.body?.workerId || '').trim();
   const job = store.db.prepare('SELECT claimed_by,status FROM video_jobs WHERE video_id=?').get(videoId);
-  if (!job || job.claimed_by !== workerId || job.status !== 'processing') return res.status(409).json({ error: 'Job is not owned by this worker' });
+  // A worker can finish just after another worker/recovery pass has reclaimed
+  // the job. Treat that late progress report as an idempotent no-op instead of
+  // making the worker retry a permanently stale callback.
+  if (!job || job.claimed_by !== workerId || job.status !== 'processing') return res.status(204).end();
   const stage = String(req.body?.stage || 'transcoding').slice(0, 40);
   const progress = Math.max(0, Math.min(99, Number(req.body?.progress || 0)));
   updateProcessing(videoId, stage, progress);
@@ -488,7 +491,9 @@ app.post('/internal/workers/jobs/:id/hls-archive', requireWorker, async (req, re
   const videoId = String(req.params.id || '');
   const workerId = String(req.headers['x-worker-id'] || req.body?.workerId || '').trim();
   const job = store.db.prepare('SELECT claimed_by,status FROM video_jobs WHERE video_id=?').get(videoId);
-  if (!job || job.claimed_by !== workerId || job.status !== 'processing') return res.status(409).json({ error: 'Job is not owned by this worker' });
+  // Late archives from a reclaimed/completed worker are harmless; acknowledge
+  // them so the worker does not loop on a stale 409 forever.
+  if (!job || job.claimed_by !== workerId || job.status !== 'processing') return res.status(204).end();
   const advertisedSize = Number(req.headers['content-length'] || 0);
   if (advertisedSize > 2 * 1024 * 1024 * 1024) return res.status(413).json({ error: 'HLS handoff exceeds the 2GB limit' });
   const archivePath = path.join(TEMP_DIR, `worker-handoff-${videoId}.tar.gz`);
@@ -3242,6 +3247,14 @@ async function migrateLegacyVideos() {
       verified += 1;
     } catch (error) {
       console.warn(`[HLS] Legacy video ${row.id} was not verified: ${error.message}`);
+      // If the original MP4 is still present locally, schedule a fresh HLS
+      // conversion instead of leaving a broken legacy-ready record forever.
+      const localSource = BUNNY_LOCAL_STORAGE ? bunny.getLocalPath(row.id) : null;
+      if (localSource && fs.existsSync(localSource)) {
+        const now = store.now();
+        store.db.prepare("UPDATE videos SET processing_status='queued',processing_stage='queued',processing_progress=0,processing_error=NULL,cdn_verified_at=NULL,hls_ready_at=NULL WHERE id=?").run(row.id);
+        store.db.prepare("INSERT OR REPLACE INTO video_jobs (video_id,job_type,status,attempts,last_error,next_attempt_at,locked_at,updated_at) VALUES (?, 'hls', 'queued', 0, NULL, ?, NULL, ?)").run(row.id, now, now);
+      }
     }
   }
   if (legacy.length) console.log(`[HLS] Legacy migration verified ${verified}/${legacy.length} video(s).`);
