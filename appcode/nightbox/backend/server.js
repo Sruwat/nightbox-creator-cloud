@@ -1327,9 +1327,17 @@ app.post('/api/videos/:id/playback-token', async (req, res) => {
   // the proxy returns normal CDN URLs so existing videos remain playable.
 
   const requestedSlug = String(req.body?.linkSlug || '').trim();
-  const link = requestedSlug
+  // Direct /watch/:videoId links are the stable links sent by the Telegram
+  // bots. Older uploads (and some imported videos) may not have had a
+  // creator_links row when they were published. Playback must still create a
+  // trackable owner link; otherwise the video plays successfully but no view
+  // session can ever be attributed to the creator.
+  let link = requestedSlug
     ? store.db.prepare('SELECT id,slug FROM creator_links WHERE slug=? AND video_id=?').get(requestedSlug, video.id)
     : store.db.prepare('SELECT id,slug FROM creator_links WHERE video_id=? ORDER BY canonical DESC,created_at ASC LIMIT 1').get(video.id);
+  if (!link && video.ownerId) {
+    link = store.createLink(video.id, video.ownerId);
+  }
   let sessionId = null;
   let viewToken = null;
   if (link) {
