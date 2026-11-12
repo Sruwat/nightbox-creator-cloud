@@ -9,6 +9,8 @@ const port = Number(process.env.DIRECTADMIN_FTP_PORT || 21);
 const user = process.env.DIRECTADMIN_FTP_USERNAME;
 const password = process.env.DIRECTADMIN_FTP_PASSWORD;
 const logPath = process.env.DIRECTADMIN_MIGRATION_LOG || path.join(process.env.WORKER_TEMP_DIR || path.join(__dirname, 'temp'), 'directadmin-migration.jsonl');
+const batchLimit = Math.max(0, Number.parseInt(process.env.DIRECTADMIN_MIGRATION_LIMIT || '0', 10) || 0);
+const deleteVerified = process.env.DIRECTADMIN_MIGRATION_DELETE_VERIFIED === 'true';
 
 if (!host || !user || !password) throw new Error('DirectAdmin FTP credentials are not configured');
 
@@ -51,12 +53,14 @@ async function main() {
       try { const entry = JSON.parse(line); if (entry.ok) done.add(entry.remote); } catch (_) {}
     }
   }
+  const pending = files.filter((item) => !done.has(item.remote));
+  const batch = batchLimit > 0 ? pending.slice(0, batchLimit) : pending;
+  console.log(`MIGRATION_BATCH ${batch.length}/${pending.length} pending (limit=${batchLimit || 'all'}, deleteVerified=${deleteVerified})`);
   const client = new ftp.Client(300000);
   client.ftp.verbose = false;
   await client.access({ host, port, user, password, secure: false, passive: true });
   let completed = 0;
-  for (const item of files) {
-    if (done.has(item.remote)) { completed += 1; continue; }
+  for (const item of batch) {
     const size = fs.statSync(item.local).size;
     try {
       let remoteSize = null;
@@ -64,16 +68,17 @@ async function main() {
       if (remoteSize !== size) await client.uploadFrom(item.local, remotePath(item.remote));
       const verified = await client.size(remotePath(item.remote));
       if (verified !== size) throw new Error(`size mismatch local=${size} remote=${verified}`);
-      appendLog({ ok: true, remote: item.remote, size });
+      if (deleteVerified) fs.unlinkSync(item.local);
+      appendLog({ ok: true, deleted: deleteVerified, remote: item.remote, size });
       completed += 1;
-      if (completed % 10 === 0) console.log(`MIGRATION_PROGRESS ${completed}/${files.length}`);
+      if (completed % 10 === 0) console.log(`MIGRATION_PROGRESS ${completed}/${batch.length}`);
     } catch (error) {
       appendLog({ ok: false, remote: item.remote, error: error.message });
       console.error(`MIGRATION_FAILED ${item.remote}: ${error.message}`);
     }
   }
   client.close();
-  console.log(`MIGRATION_FINISHED ${completed}/${files.length}`);
+  console.log(`MIGRATION_FINISHED ${completed}/${batch.length}`);
 }
 
 main().catch((error) => { console.error(error.stack || error.message); process.exit(1); });
