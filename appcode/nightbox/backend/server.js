@@ -1456,6 +1456,16 @@ app.get('/api/playback-manifest/:id', async (req, res) => {
     }).join('\n');
     res.status(200).type('application/vnd.apple.mpegurl').set('Cache-Control', 'private, no-store').send(playlist);
   } catch (error) {
+    const legacyPath = bunny.getLegacyLocalPath?.(req.params.id);
+    const legacyManifest = legacyPath ? path.join(path.dirname(legacyPath), 'hls', req.params.id, 'master.m3u8') : null;
+    if (bunny.isDirectAdminStorage() && legacyManifest && fs.existsSync(legacyManifest)) {
+      const localPlaylist = fs.readFileSync(legacyManifest, 'utf8').split(/\r?\n/).map((line) => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) return line;
+        return `${PUBLIC_API_URL}/api/playback-hls/${encodeURIComponent(req.params.id)}/${encodeURIComponent(trimmed)}?token=${encodeURIComponent(req.query.token)}`;
+      }).join('\n');
+      return res.status(200).type('application/vnd.apple.mpegurl').set('Cache-Control', 'private, no-store').send(localPlaylist);
+    }
     console.error('[Playback manifest] Failed:', error.message);
     res.status(502).send('Playback manifest unavailable');
   }
@@ -2959,10 +2969,10 @@ app.get('/video/:id', async (req, res) => {
 app.get('/nightbox/hls/:id/:fileName', (req, res) => {
   const videoId = String(req.params.id || '');
   const fileName = String(req.params.fileName || '');
-  if (!BUNNY_LOCAL_STORAGE || !/^[a-f0-9-]{36}$/i.test(videoId) || !/^[a-zA-Z0-9._-]+\.(?:m3u8|ts|m4s)$/i.test(fileName)) {
+  if ((!BUNNY_LOCAL_STORAGE && !bunny.isDirectAdminStorage()) || !/^[a-f0-9-]{36}$/i.test(videoId) || !/^[a-zA-Z0-9._-]+\.(?:m3u8|ts|m4s)$/i.test(fileName)) {
     return res.status(404).end();
   }
-  const sourcePath = bunny.getLocalPath(videoId);
+  const sourcePath = bunny.getLegacyLocalPath(videoId);
   if (!sourcePath) return res.status(404).end();
   const hlsRoot = path.resolve(path.dirname(sourcePath), 'hls', videoId);
   const filePath = path.resolve(hlsRoot, fileName);
@@ -3012,6 +3022,12 @@ app.get('/video/:id/stream', async (req, res) => {
     });
     if (upstream.status !== 200 && upstream.status !== 206) {
       upstream.data.destroy();
+      const legacyPath = bunny.getLegacyLocalPath?.(videoId);
+      if (bunny.isDirectAdminStorage() && legacyPath && fs.existsSync(legacyPath)) {
+        res.setHeader('Content-Type', 'video/mp4');
+        res.setHeader('Accept-Ranges', 'bytes');
+        return res.sendFile(legacyPath, { acceptRanges: true, cacheControl: false });
+      }
       return res.status(upstream.status === 404 ? 404 : 502).json({ error: 'Video stream unavailable' });
     }
     if (upstream.status === 206) res.status(206);
@@ -3025,6 +3041,12 @@ app.get('/video/:id/stream', async (req, res) => {
     });
     return upstream.data.pipe(res);
   } catch (error) {
+    const legacyPath = bunny.getLegacyLocalPath?.(videoId);
+    if (bunny.isDirectAdminStorage() && legacyPath && fs.existsSync(legacyPath)) {
+      res.setHeader('Content-Type', 'video/mp4');
+      res.setHeader('Accept-Ranges', 'bytes');
+      return res.sendFile(legacyPath, { acceptRanges: true, cacheControl: false });
+    }
     console.error('[Video stream] Failed:', error.message);
     return res.status(502).json({ error: 'Video stream unavailable' });
   }

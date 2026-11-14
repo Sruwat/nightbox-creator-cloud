@@ -57,6 +57,10 @@ function localPath(videoId) {
   return path.join(LOCAL_STORAGE_ROOT, `${videoId}.mp4`);
 }
 
+function legacyLocalPath(videoId) {
+  return localPath(videoId);
+}
+
 function isDirectAdminStorage() { return STORAGE_DRIVER === 'directadmin'; }
 
 function directAdminPath(relativePath) {
@@ -436,4 +440,4 @@ function getWatchUrl(videoId) {
 }
 function cleanupTempFile(filePath) { try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (error) { console.error('[Cleanup] Failed:', error.message); } }
 
-module.exports = { createVideo, uploadVideo, uploadVideoFromUrl, uploadCreatorFile, deleteCreatorFile, downloadVideoToFile, uploadHlsDirectory, verifyHls, signCdnPath, getSignedHlsUrl, getSignedCdnUrl, getVideo, deleteVideo, getEmbedUrl, getDirectPlayUrl, getSignedDirectPlayUrl, getHlsUrl, getCdnUrlIfAvailable, getWatchUrl, getCreatorFilePath, getCreatorFileUrl, cleanupTempFile, getLocalPath: (videoId) => STORAGE_DRIVER === 'local' ? localPath(videoId) : null, isLocalStorage: () => STORAGE_DRIVER === 'local', isDirectAdminStorage, hasTokenAuth: () => Boolean(TOKEN_AUTH_KEY), hasSourceTokenAuth: () => Boolean(TOKEN_AUTH_KEY && !isDirectAdminStorage()) };
+module.exports = { createVideo, uploadVideo, uploadVideoFromUrl, uploadCreatorFile, deleteCreatorFile, downloadVideoToFile, uploadHlsDirectory, verifyHls, signCdnPath, getSignedHlsUrl, getSignedCdnUrl, getVideo, deleteVideo, getEmbedUrl, getDirectPlayUrl, getSignedDirectPlayUrl, getHlsUrl, getCdnUrlIfAvailable, getWatchUrl, getCreatorFilePath, getCreatorFileUrl, cleanupTempFile, getLocalPath: (videoId) => STORAGE_DRIVER === 'local' ? localPath(videoId) : null, getLegacyLocalPath: legacyLocalPath, isLocalStorage: () => STORAGE_DRIVER === 'local', isDirectAdminStorage, hasTokenAuth: () => Boolean(TOKEN_AUTH_KEY), hasSourceTokenAuth: () => Boolean(TOKEN_AUTH_KEY && !isDirectAdminStorage()) };
