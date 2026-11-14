@@ -284,23 +284,18 @@ async function uploadHlsDirectory(videoId, directory, onProgress) {
     return;
   }
   if (isDirectAdminStorage()) {
-    // DirectAdmin is the durable source/original store. HLS remains a CDN
-    // delivery artifact so getHlsUrl()/verifyHls() and the existing signed
-    // manifest proxy continue to use Bunny exactly as before.
     const files = fs.readdirSync(directory).filter((fileName) => /\.(m3u8|ts)$/i.test(fileName));
     const total = files.length || 1;
     let completed = 0;
-    if (!STORAGE_ZONE || !STORAGE_PASSWORD) throw new Error('Bunny CDN storage is not configured for HLS delivery');
-    for (const fileName of files) {
-      const filePath = path.join(directory, fileName);
-      const size = fs.statSync(filePath).size;
-      await withRetry(() => bunnyApi.put(`/${hlsObjectPath(videoId, fileName)}`, fs.createReadStream(filePath), {
-        headers: { 'Content-Type': contentTypeFor(fileName), 'Content-Length': size, 'Cache-Control': fileName.endsWith('.m3u8') ? 'public, max-age=60' : 'public, max-age=31536000, immutable' },
-        maxContentLength: Infinity, maxBodyLength: Infinity, timeout: 300000,
-      }), MAX_RETRIES, `uploadHls:${fileName}`);
-      completed += 1;
-      onProgress?.(completed / total);
-    }
+    await withDirectAdminFtp(async (client) => {
+      await client.ensureDir(directAdminPath(`hls/${videoId}`));
+      for (const fileName of files) {
+        const filePath = path.join(directory, fileName);
+        await client.uploadFrom(filePath, directAdminPath(`hls/${videoId}/${fileName}`));
+        completed += 1;
+        onProgress?.(completed / total);
+      }
+    });
     return;
   }
   const files = fs.readdirSync(directory).filter((fileName) => /\.(m3u8|ts)$/i.test(fileName));
