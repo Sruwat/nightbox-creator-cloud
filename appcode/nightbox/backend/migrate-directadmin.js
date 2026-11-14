@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const ftp = require('basic-ftp');
+const DatabaseSync = require('node:sqlite').DatabaseSync;
 
 const root = path.resolve(process.env.VIDEO_STORAGE_ROOT || path.join(__dirname, 'media'));
 const host = process.env.DIRECTADMIN_FTP_HOST;
@@ -11,6 +12,7 @@ const password = process.env.DIRECTADMIN_FTP_PASSWORD;
 const logPath = process.env.DIRECTADMIN_MIGRATION_LOG || path.join(process.env.WORKER_TEMP_DIR || path.join(__dirname, 'temp'), 'directadmin-migration.jsonl');
 const batchLimit = Math.max(0, Number.parseInt(process.env.DIRECTADMIN_MIGRATION_LIMIT || '0', 10) || 0);
 const deleteVerified = process.env.DIRECTADMIN_MIGRATION_DELETE_VERIFIED === 'true';
+const dbPath = process.env.NIGHTBOX_DB_PATH || path.join(__dirname, 'data', 'nightbox.sqlite');
 
 if (!host || !user || !password) throw new Error('DirectAdmin FTP credentials are not configured');
 
@@ -45,6 +47,18 @@ function appendLog(entry) {
   fs.appendFileSync(logPath, `${JSON.stringify(entry)}\n`);
 }
 
+function canDeleteSource(item, db) {
+  // Only a source MP4 may be removed, and only after the database confirms
+  // that HLS is complete, verified, and ready. HLS artifacts are retained.
+  const match = /^([a-f0-9-]{36})\.mp4$/i.exec(item.remote);
+  if (!match || !db) return false;
+  const row = db.prepare(`SELECT status, processing_status, playback_status, cdn_verified_at
+    FROM videos WHERE id=?`).get(match[1]);
+  return Boolean(row && row.status !== 'deleted' &&
+    row.processing_status === 'completed' &&
+    row.playback_status === 'ready' && row.cdn_verified_at);
+}
+
 async function main() {
   const files = filesToMigrate();
   const done = new Set();
@@ -58,6 +72,12 @@ async function main() {
   console.log(`MIGRATION_BATCH ${batch.length}/${pending.length} pending (limit=${batchLimit || 'all'}, deleteVerified=${deleteVerified})`);
   const client = new ftp.Client(300000);
   client.ftp.verbose = false;
+  let db = null;
+  if (deleteVerified) {
+    try { db = new DatabaseSync(dbPath); } catch (error) {
+      console.error(`SAFE_DELETE_DISABLED ${error.message}`);
+    }
+  }
   await client.access({ host, port, user, password, secure: false, passive: true });
   let completed = 0;
   for (const item of batch) {
@@ -68,8 +88,9 @@ async function main() {
       if (remoteSize !== size) await client.uploadFrom(item.local, remotePath(item.remote));
       const verified = await client.size(remotePath(item.remote));
       if (verified !== size) throw new Error(`size mismatch local=${size} remote=${verified}`);
-      if (deleteVerified) fs.unlinkSync(item.local);
-      appendLog({ ok: true, deleted: deleteVerified, remote: item.remote, size });
+      const safeToDelete = deleteVerified && canDeleteSource(item, db);
+      if (safeToDelete) fs.unlinkSync(item.local);
+      appendLog({ ok: true, deleted: safeToDelete, remote: item.remote, size });
       completed += 1;
       if (completed % 10 === 0) console.log(`MIGRATION_PROGRESS ${completed}/${batch.length}`);
     } catch (error) {

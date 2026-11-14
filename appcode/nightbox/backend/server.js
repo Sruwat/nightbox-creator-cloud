@@ -1556,6 +1556,19 @@ function ensureHlsForLegacyVideo(videoId, playback) {
     const sourceExists = Boolean(sourcePath && fs.existsSync(sourcePath));
     const hlsExists = Boolean(hlsPath && fs.existsSync(hlsPath));
     if (!sourceExists) {
+      // A verified HLS asset may remain playable after its local source MP4
+      // has been safely migrated off this VPS. Do not overwrite that healthy
+      // state with a misleading "missing local storage" failure.
+      const verified = store.db.prepare(`
+        SELECT processing_status, playback_status, cdn_verified_at, hls_url
+        FROM videos WHERE id=? AND status <> 'deleted'
+      `).get(videoId);
+      if (verified?.processing_status === 'completed' &&
+          verified.playback_status === 'ready' && verified.cdn_verified_at &&
+          (verified.hls_url || playback.hlsUrl)) {
+        const hlsUrl = bunny.getHlsUrl(videoId);
+        return { ...playback, playbackStatus: 'ready', hlsUrl, playbackError: null };
+      }
       if (playback.playbackStatus !== 'failed') {
         store.updateVideoPlayback(videoId, 'failed', null, 'Media file is missing from local storage. Please upload the video again.');
       }
