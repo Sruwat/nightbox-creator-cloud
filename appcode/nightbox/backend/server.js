@@ -277,7 +277,10 @@ function finalizeVideoVisibility(videoId) {
   const needsAutoNormalization = !REQUIRE_ADMIN_APPROVAL && (video.approval_status !== 'approved' || video.copyright_status !== 'approved');
   if (approvalReady && copyrightReady && (video.visibility !== 'visible' || needsAutoNormalization)) {
     store.db.prepare("UPDATE videos SET approval_status=CASE WHEN ? THEN 'approved' ELSE approval_status END,visibility='visible',approved_at=COALESCE(approved_at,?),processing_stage='completed' WHERE id=?")
-      .run(!REQUIRE_ADMIN_APPROVAL, store.now(), videoId);
+      // better-sqlite3 does not bind JavaScript booleans. Use SQLite's
+      // integer representation so playback-token generation cannot crash
+      // while normalizing visibility for an already-ready video.
+      .run(REQUIRE_ADMIN_APPROVAL ? 0 : 1, store.now(), videoId);
     if (!REQUIRE_ADMIN_APPROVAL && video.copyright_status !== 'approved') {
       store.db.prepare("UPDATE videos SET copyright_status='approved' WHERE id=?").run(videoId);
     }
