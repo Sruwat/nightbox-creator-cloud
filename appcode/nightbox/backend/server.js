@@ -1416,6 +1416,10 @@ app.post('/api/videos/:id/playback-token', async (req, res) => {
     } catch (error) {
       const message = `HLS asset repair queued: ${String(error.message || error).slice(0, 500)}`;
       store.db.prepare("UPDATE videos SET playback_status='processing',hls_url=NULL,playback_error=?,processing_status='queued',processing_stage='queued',processing_progress=0,cdn_verified_at=NULL WHERE id=? AND status <> 'deleted'").run(message, video.id);
+      // A legacy row may still have a completed video_jobs record even though
+      // its HLS segment is missing. Reset the durable job explicitly so the
+      // distributed worker can claim the repair.
+      store.db.prepare("INSERT OR REPLACE INTO video_jobs (video_id,job_type,status,attempts,last_error,next_attempt_at,locked_at,updated_at) VALUES (?, 'hls', 'queued', 0, ?, NULL, NULL, ?)").run(video.id, message, store.now());
       const refreshed = store.getVideoPlayback(video.id);
       ensureHlsForLegacyVideo(video.id, refreshed);
       return res.json({
