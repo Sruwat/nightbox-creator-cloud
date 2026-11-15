@@ -3383,7 +3383,8 @@ function cleanupExpiredTempArtifacts() {
 
 // Permanently failed jobs should not consume VPS or storage indefinitely.
 // Keep recent failures available for retry/support investigation, and only
-// retire jobs after the configured retry budget and grace period are over.
+// retire non-ready failures after the grace period is over. This also covers
+// legacy rows whose historical retry counter was not recorded reliably.
 const FAILED_VIDEO_CLEANUP_AGE_MS = Math.max(60 * 60 * 1000, Number(process.env.FAILED_VIDEO_CLEANUP_HOURS || 24) * 60 * 60 * 1000);
 const FAILED_VIDEO_CLEANUP_INTERVAL_MS = Math.max(15 * 60 * 1000, Number(process.env.FAILED_VIDEO_CLEANUP_INTERVAL_MINUTES || 60) * 60 * 1000);
 
@@ -3398,10 +3399,9 @@ async function cleanupRepeatedlyFailedVideos() {
       AND v.processing_status = 'failed'
       AND v.playback_status <> 'ready'
       AND v.created_at < ?
-      AND (v.processing_attempts >= ? OR COALESCE(j.attempts, 0) >= ?)
     ORDER BY v.created_at ASC
     LIMIT 50
-  `).all(cutoff, WORKER_MAX_JOB_ATTEMPTS, WORKER_MAX_JOB_ATTEMPTS);
+  `).all(cutoff);
   let removed = 0;
   for (const row of rows) {
     try {
