@@ -499,6 +499,15 @@ app.post('/internal/workers/jobs/:id/hls-archive', requireWorker, async (req, re
   if (!job || job.claimed_by !== workerId || job.status !== 'processing') return res.status(204).end();
   const advertisedSize = Number(req.headers['content-length'] || 0);
   if (advertisedSize > 2 * 1024 * 1024 * 1024) return res.status(413).json({ error: 'HLS handoff exceeds the 2GB limit' });
+  // A handoff needs room for the compressed archive and its extracted HLS
+  // tree. Reject early instead of letting tar fail halfway with ENOSPC and
+  // leaving a broken processing job behind.
+  try {
+    const stat = fs.statfsSync(TEMP_DIR);
+    const freeBytes = Number(stat.bavail) * Number(stat.bsize);
+    const requiredBytes = Math.max(512 * 1024 * 1024, advertisedSize * 2 + 256 * 1024 * 1024);
+    if (freeBytes < requiredBytes) return res.status(507).json({ error: 'Primary processing storage is temporarily full; retrying on an available worker.' });
+  } catch (_) { /* continue on filesystems without statfs support */ }
   const archivePath = path.join(TEMP_DIR, `worker-handoff-${videoId}.tar.gz`);
   const extractDir = path.join(TEMP_DIR, `worker-handoff-${videoId}`);
   try {
@@ -3372,9 +3381,62 @@ function cleanupExpiredTempArtifacts() {
   if (removed) console.log(`[Temp cleanup] Removed ${removed} stale file(s), reclaimed ${(reclaimed / 1024 / 1024).toFixed(1)} MB.`);
 }
 
+// Permanently failed jobs should not consume VPS or storage indefinitely.
+// Keep recent failures available for retry/support investigation, and only
+// retire jobs after the configured retry budget and grace period are over.
+const FAILED_VIDEO_CLEANUP_AGE_MS = Math.max(60 * 60 * 1000, Number(process.env.FAILED_VIDEO_CLEANUP_HOURS || 24) * 60 * 60 * 1000);
+const FAILED_VIDEO_CLEANUP_INTERVAL_MS = Math.max(15 * 60 * 1000, Number(process.env.FAILED_VIDEO_CLEANUP_INTERVAL_MINUTES || 60) * 60 * 1000);
+
+async function cleanupRepeatedlyFailedVideos() {
+  const cutoff = new Date(Date.now() - FAILED_VIDEO_CLEANUP_AGE_MS).toISOString();
+  const rows = store.db.prepare(`
+    SELECT v.id, v.title, v.processing_attempts AS processingAttempts,
+      COALESCE(j.attempts, 0) AS jobAttempts
+    FROM videos v
+    LEFT JOIN video_jobs j ON j.video_id = v.id
+    WHERE v.status <> 'deleted'
+      AND v.processing_status = 'failed'
+      AND v.playback_status <> 'ready'
+      AND v.created_at < ?
+      AND (v.processing_attempts >= ? OR COALESCE(j.attempts, 0) >= ?)
+    ORDER BY v.created_at ASC
+    LIMIT 50
+  `).all(cutoff, WORKER_MAX_JOB_ATTEMPTS, WORKER_MAX_JOB_ATTEMPTS);
+  let removed = 0;
+  for (const row of rows) {
+    try {
+      const localSource = bunny.getLegacyLocalPath(row.id);
+      if (localSource) {
+        try { fs.rmSync(localSource, { force: true }); } catch (_) { /* already absent */ }
+        try { fs.rmSync(path.join(path.dirname(localSource), 'hls', row.id), { recursive: true, force: true }); } catch (_) { /* already absent */ }
+      }
+      try { await bunny.deleteHlsDirectory(row.id); } catch (error) {
+        // A missing remote HLS directory is safe; other errors should defer
+        // retirement so the next cleanup pass can retry it.
+        if (!/550|not found|no such|does not exist/i.test(String(error.message || ''))) throw error;
+      }
+      try { await bunny.deleteVideo(row.id); } catch (error) {
+        if (!/550|not found|no such|does not exist/i.test(String(error.message || ''))) throw error;
+      }
+      const now = store.now();
+      store.db.prepare("UPDATE videos SET status='deleted',visibility='hidden',processing_stage='failed',processing_error=COALESCE(processing_error,'Automatically retired after repeated processing failures') WHERE id=?").run(row.id);
+      store.db.prepare("UPDATE video_jobs SET status='failed',locked_at=NULL,claimed_by=NULL,updated_at=? WHERE video_id=?").run(now, row.id);
+      store.db.prepare('DELETE FROM video_notifications WHERE video_id=? AND delivered_at IS NULL').run(row.id);
+      removed += 1;
+      console.log(`[Failed video cleanup] Retired ${row.id} after repeated failures.`);
+    } catch (error) {
+      console.warn(`[Failed video cleanup] Deferred ${row.id}: ${error.message}`);
+    }
+  }
+  if (rows.length) console.log(`[Failed video cleanup] Scanned ${rows.length}; retired ${removed}.`);
+}
+
 const tempCleanupTimer = setInterval(cleanupExpiredTempArtifacts, TEMP_CLEANUP_INTERVAL_MS);
 tempCleanupTimer.unref();
 setTimeout(cleanupExpiredTempArtifacts, 5000).unref();
+const failedVideoCleanupTimer = setInterval(() => { void cleanupRepeatedlyFailedVideos(); }, FAILED_VIDEO_CLEANUP_INTERVAL_MS);
+failedVideoCleanupTimer.unref();
+setTimeout(() => { void cleanupRepeatedlyFailedVideos(); }, 10000).unref();
 
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🚀 Backend running on port ${PORT}`);

@@ -260,6 +260,24 @@ async function deleteVideo(videoId) {
   return withRetry(async () => (await bunnyApi.delete(`/${objectPath(videoId)}`, { timeout: 30000 })).data, MAX_RETRIES, 'deleteVideo');
 }
 
+// Remove HLS artifacts when a permanently failed video is retired. Failed
+// jobs can leave a partial HLS tree behind even when the source MP4 is gone.
+async function deleteHlsDirectory(videoId) {
+  assertConfigured();
+  if (STORAGE_DRIVER === 'local') {
+    fs.rmSync(path.join(LOCAL_STORAGE_ROOT, 'hls', videoId), { recursive: true, force: true });
+    return { success: true };
+  }
+  if (isDirectAdminStorage()) {
+    await withDirectAdminFtp((client) => client.removeDir(directAdminPath(`hls/${videoId}`)));
+    return { success: true };
+  }
+  // Bunny Storage does not expose a portable recursive-delete operation in
+  // this adapter. Keep the DB/source cleanup safe and leave CDN lifecycle
+  // cleanup to the provider in Bunny mode.
+  return { success: false, skipped: true };
+}
+
 function contentTypeFor(fileName) {
   if (fileName.endsWith('.m3u8')) return 'application/vnd.apple.mpegurl';
   if (fileName.endsWith('.ts')) return 'video/mp2t';
@@ -440,4 +458,4 @@ function getWatchUrl(videoId) {
 }
 function cleanupTempFile(filePath) { try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (error) { console.error('[Cleanup] Failed:', error.message); } }
 
-module.exports = { createVideo, uploadVideo, uploadVideoFromUrl, uploadCreatorFile, deleteCreatorFile, downloadVideoToFile, uploadHlsDirectory, verifyHls, signCdnPath, getSignedHlsUrl, getSignedCdnUrl, getVideo, deleteVideo, getEmbedUrl, getDirectPlayUrl, getSignedDirectPlayUrl, getHlsUrl, getCdnUrlIfAvailable, getWatchUrl, getCreatorFilePath, getCreatorFileUrl, cleanupTempFile, getLocalPath: (videoId) => STORAGE_DRIVER === 'local' ? localPath(videoId) : null, getLegacyLocalPath: legacyLocalPath, isLocalStorage: () => STORAGE_DRIVER === 'local', isDirectAdminStorage, hasTokenAuth: () => Boolean(TOKEN_AUTH_KEY), hasSourceTokenAuth: () => Boolean(TOKEN_AUTH_KEY && !isDirectAdminStorage()) };
+module.exports = { createVideo, uploadVideo, uploadVideoFromUrl, uploadCreatorFile, deleteCreatorFile, downloadVideoToFile, uploadHlsDirectory, verifyHls, signCdnPath, getSignedHlsUrl, getSignedCdnUrl, getVideo, deleteVideo, deleteHlsDirectory, getEmbedUrl, getDirectPlayUrl, getSignedDirectPlayUrl, getHlsUrl, getCdnUrlIfAvailable, getWatchUrl, getCreatorFilePath, getCreatorFileUrl, cleanupTempFile, getLocalPath: (videoId) => STORAGE_DRIVER === 'local' ? localPath(videoId) : null, getLegacyLocalPath: legacyLocalPath, isLocalStorage: () => STORAGE_DRIVER === 'local', isDirectAdminStorage, hasTokenAuth: () => Boolean(TOKEN_AUTH_KEY), hasSourceTokenAuth: () => Boolean(TOKEN_AUTH_KEY && !isDirectAdminStorage()) };
