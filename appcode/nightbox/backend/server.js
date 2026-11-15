@@ -1419,7 +1419,16 @@ app.get('/api/playback-media/:id', async (req, res) => {
       headers: req.headers.range ? { Range: req.headers.range } : {},
       validateStatus: (status) => status >= 200 && status < 500,
     });
-    if (upstream.status >= 400) return res.status(upstream.status).end();
+    if (upstream.status >= 400) {
+      upstream.data.destroy();
+      const legacyPath = bunny.getLegacyLocalPath?.(req.params.id);
+      if (bunny.isDirectAdminStorage() && legacyPath && fs.existsSync(legacyPath)) {
+        res.setHeader('Content-Type', 'video/mp4');
+        res.setHeader('Accept-Ranges', 'bytes');
+        return res.sendFile(legacyPath, { acceptRanges: true, cacheControl: false });
+      }
+      return res.status(upstream.status).end();
+    }
     res.status(upstream.status);
     for (const header of ['content-length', 'content-range', 'accept-ranges', 'content-type']) {
       if (upstream.headers[header]) res.setHeader(header, upstream.headers[header]);
@@ -1429,6 +1438,12 @@ app.get('/api/playback-media/:id', async (req, res) => {
     req.on('close', () => { if (!res.writableEnded) upstream.data.destroy(); });
     upstream.data.pipe(res);
   } catch (error) {
+    const legacyPath = bunny.getLegacyLocalPath?.(req.params.id);
+    if (bunny.isDirectAdminStorage() && legacyPath && fs.existsSync(legacyPath)) {
+      res.setHeader('Content-Type', 'video/mp4');
+      res.setHeader('Accept-Ranges', 'bytes');
+      return res.sendFile(legacyPath, { acceptRanges: true, cacheControl: false });
+    }
     console.error('[Playback media] Failed:', error.message);
     if (!res.headersSent) res.status(502).send('Playback media unavailable');
   }
