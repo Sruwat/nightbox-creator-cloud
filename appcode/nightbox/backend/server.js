@@ -1406,6 +1406,33 @@ app.post('/api/videos/:id/playback-token', async (req, res) => {
       minWatchSeconds: store.db.prepare('SELECT minimum_watch_seconds AS seconds FROM view_rules WHERE id=1').get().seconds,
     });
   }
+  // Older DirectAdmin-migrated records can have a cached manifest whose first
+  // segment was not copied successfully. Detect that before returning HLS so
+  // old links immediately use the authorized MP4 fallback while the HLS tree
+  // is rebuilt in the background.
+  if (bunny.isDirectAdminStorage()) {
+    try {
+      await bunny.verifyHls(video.id);
+    } catch (error) {
+      const message = `HLS asset repair queued: ${String(error.message || error).slice(0, 500)}`;
+      store.db.prepare("UPDATE videos SET playback_status='processing',hls_url=NULL,playback_error=?,processing_status='queued',processing_stage='queued',processing_progress=0,cdn_verified_at=NULL WHERE id=? AND status <> 'deleted'").run(message, video.id);
+      const refreshed = store.getVideoPlayback(video.id);
+      ensureHlsForLegacyVideo(video.id, refreshed);
+      return res.json({
+        mediaUrl: `${PUBLIC_API_URL}/api/playback-media/${encodeURIComponent(video.id)}?token=${encodeURIComponent(token)}`,
+        mediaType: 'progressive',
+        processing: true,
+        processingStage: 'Repairing video quality',
+        processingProgress: 0,
+        fallbackReason: 'hls_segment_unavailable',
+        expiresAt: new Date(expiresAt * 1000).toISOString(),
+        expiresAtEpoch: expiresAt,
+        sessionId,
+        viewToken,
+        minWatchSeconds: store.db.prepare('SELECT minimum_watch_seconds AS seconds FROM view_rules WHERE id=1').get().seconds,
+      });
+    }
+  }
   // Return the authorized MP4 range proxy together with HLS.  HLS is the
   // preferred path, but the client must be able to continue playback when a
   // manifest/segment temporarily fails or a CDN edge is still converging.
