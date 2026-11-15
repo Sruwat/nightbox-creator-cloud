@@ -3431,12 +3431,30 @@ async function cleanupRepeatedlyFailedVideos() {
   if (rows.length) console.log(`[Failed video cleanup] Scanned ${rows.length}; retired ${removed}.`);
 }
 
+// Bots use durable status polling for current jobs. Keep the optional push
+// queue bounded so historical HLS/failed notices cannot grow forever.
+const NOTIFICATION_RETENTION_MS = Math.max(60 * 60 * 1000, Number(process.env.VIDEO_NOTIFICATION_RETENTION_HOURS || 48) * 60 * 60 * 1000);
+const NOTIFICATION_CLEANUP_INTERVAL_MS = Math.max(15 * 60 * 1000, Number(process.env.VIDEO_NOTIFICATION_CLEANUP_INTERVAL_MINUTES || 60) * 60 * 1000);
+
+function cleanupStaleVideoNotifications() {
+  const cutoff = new Date(Date.now() - NOTIFICATION_RETENTION_MS).toISOString();
+  const result = store.db.prepare(`
+    DELETE FROM video_notifications
+    WHERE delivered_at IS NULL
+      AND (created_at < ? OR video_id IN (SELECT id FROM videos WHERE status='deleted'))
+  `).run(cutoff);
+  if (result.changes) console.log(`[Notification cleanup] Removed ${result.changes} stale notification(s).`);
+}
+
 const tempCleanupTimer = setInterval(cleanupExpiredTempArtifacts, TEMP_CLEANUP_INTERVAL_MS);
 tempCleanupTimer.unref();
 setTimeout(cleanupExpiredTempArtifacts, 5000).unref();
 const failedVideoCleanupTimer = setInterval(() => { void cleanupRepeatedlyFailedVideos(); }, FAILED_VIDEO_CLEANUP_INTERVAL_MS);
 failedVideoCleanupTimer.unref();
 setTimeout(() => { void cleanupRepeatedlyFailedVideos(); }, 10000).unref();
+const notificationCleanupTimer = setInterval(cleanupStaleVideoNotifications, NOTIFICATION_CLEANUP_INTERVAL_MS);
+notificationCleanupTimer.unref();
+setTimeout(cleanupStaleVideoNotifications, 12000).unref();
 
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🚀 Backend running on port ${PORT}`);
