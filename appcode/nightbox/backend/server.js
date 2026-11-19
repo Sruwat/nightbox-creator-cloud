@@ -1724,6 +1724,10 @@ function recordViewAtStart(session) {
       AND existing.counted = 1
   `).get(link.creatorId, session.ip_hash);
   if (recent.count >= ipRule.maxViews) return { counted: false, duplicate: true };
+  const recentViewer = session.viewerUserId
+    ? store.db.prepare(`SELECT COUNT(*) AS count FROM view_sessions existing JOIN creator_links existingLink ON existingLink.id=existing.link_id WHERE existingLink.creator_id=? AND existing.viewer_user_id=? AND existing.started_at>=datetime('now','-24 hours') AND existing.counted=1`).get(link.creatorId, session.viewerUserId)
+    : store.db.prepare(`SELECT COUNT(*) AS count FROM view_sessions existing JOIN creator_links existingLink ON existingLink.id=existing.link_id WHERE existingLink.creator_id=? AND existing.viewer_hash=? AND existing.started_at>=datetime('now','-24 hours') AND existing.counted=1`).get(link.creatorId, session.viewerHash);
+  if (recentViewer.count >= Number(rules.max_views_per_viewer_24h || 1)) return { counted: false, duplicate: true };
 
   const bucket = parseInt(store.hash(session.id).slice(0, 8), 16) % 100;
   if (bucket >= rules.eligible_percent) return { counted: false, filtered: true };
@@ -1774,7 +1778,10 @@ app.post('/api/links/:slug/view/start', async (req, res) => {
   const viewToken = crypto.randomBytes(32).toString('base64url');
   const session = { id: store.id(), linkId: link.id, viewerUserId: viewer?.id || null, viewerHash, ipHash, viewTokenHash: store.hash(`${viewToken}|${process.env.VIEW_HASH_SECRET || process.env.AUTH_SECRET || 'change-me'}`), country: viewerCountry(req) };
   store.db.prepare('INSERT INTO view_sessions (id,link_id,viewer_user_id,viewer_hash,ip_hash,view_token_hash,country,started_at) VALUES (?,?,?,?,?,?,?,?)').run(session.id, session.linkId, session.viewerUserId, session.viewerHash, session.ipHash, session.viewTokenHash, session.country, store.now());
-  const counted = process.env.COUNT_VIEWS_ON_START === 'false' ? { counted: false } : recordViewAtStart({ ...session, link_id: session.linkId, ip_hash: session.ipHash });
+  // Legacy clients may still call this compatibility endpoint, but a view
+  // must not be counted at link-open time. Qualification after the minimum
+  // watch duration is the only default counting path.
+  const counted = process.env.COUNT_VIEWS_ON_START === 'true' ? recordViewAtStart({ ...session, link_id: session.linkId, ip_hash: session.ipHash }) : { counted: false };
   res.status(201).json({ sessionId: session.id, viewToken, counted: counted.counted, countedAtStart: counted.countedAtStart === true, minimumWatchSeconds: store.db.prepare('SELECT minimum_watch_seconds AS seconds FROM view_rules WHERE id = 1').get().seconds });
 });
 
@@ -1808,6 +1815,13 @@ app.post('/api/views/:id/qualify', (req, res) => {
       AND existing.counted = 1
   `).get(link.creatorId, session.ip_hash);
   if (recent.count >= ipRule.maxViews) {
+    store.db.prepare('UPDATE view_sessions SET qualified_at = ?, counted = 0 WHERE id = ?').run(store.now(), session.id);
+    return res.json({ counted: false, duplicate: true });
+  }
+  const recentViewer = session.viewer_user_id
+    ? store.db.prepare(`SELECT COUNT(*) AS count FROM view_sessions existing JOIN creator_links existingLink ON existingLink.id=existing.link_id WHERE existingLink.creator_id=? AND existing.viewer_user_id=? AND existing.started_at>=datetime('now','-24 hours') AND existing.counted=1 AND existing.id<>?`).get(link.creatorId, session.viewer_user_id, session.id)
+    : store.db.prepare(`SELECT COUNT(*) AS count FROM view_sessions existing JOIN creator_links existingLink ON existingLink.id=existing.link_id WHERE existingLink.creator_id=? AND existing.viewer_hash=? AND existing.started_at>=datetime('now','-24 hours') AND existing.counted=1 AND existing.id<>?`).get(link.creatorId, session.viewer_hash, session.id);
+  if (recentViewer.count >= Number(rules.max_views_per_viewer_24h || 1)) {
     store.db.prepare('UPDATE view_sessions SET qualified_at = ?, counted = 0 WHERE id = ?').run(store.now(), session.id);
     return res.json({ counted: false, duplicate: true });
   }
