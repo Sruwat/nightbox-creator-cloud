@@ -367,6 +367,10 @@ db.exec(`
   );
 `);
 
+// Remove only rows created by the legacy ticket-to-message backfill. Real
+// messages use UUID ids; synthetic backfill rows use the ticket id suffix.
+db.prepare("DELETE FROM support_messages WHERE id LIKE ticket_id || ':creator' OR id LIKE ticket_id || ':admin'").run();
+
 // Normalize legacy 3 GiB quotas during startup so the 2 GiB product limit is consistent.
 db.prepare('UPDATE creator_storage_limits SET quota_bytes=2147483648, updated_at=? WHERE quota_bytes > 2147483648').run(new Date().toISOString());
 
