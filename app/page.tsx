@@ -2777,7 +2777,7 @@ function LiveAdminTickets({ toast }: { toast: (s: string) => void }) {
           "ACTION",
         ]}
         rows={rows.map((row) => {
-          const messages = row.messages?.length
+          const rawMessages = row.messages?.length
             ? row.messages
             : [
                 {
@@ -2795,6 +2795,13 @@ function LiveAdminTickets({ toast }: { toast: (s: string) => void }) {
                     ]
                   : []),
               ];
+          const messages = rawMessages.filter((item, index, all) =>
+            all.findIndex((candidate) =>
+              candidate.authorType === item.authorType &&
+              candidate.message === item.message &&
+              candidate.createdAt === item.createdAt,
+            ) === index,
+          );
           return [
             row.email,
             row.subject,

@@ -1035,6 +1035,17 @@ app.post('/api/creator/tickets/:id/messages', requireUser, (req, res) => {
   const ticket = store.db.prepare('SELECT id,status FROM support_tickets WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
   if (!ticket) return res.status(404).json({ error: 'Support ticket not found' });
   if (ticket.status === 'closed') return res.status(409).json({ error: 'This support ticket is closed' });
+  // Telegram/mobile clients may retry a timed-out request. Treat an identical
+  // creator message received within 30 seconds as the same submission.
+  const recentDuplicate = store.db.prepare(`
+    SELECT id,created_at AS createdAt FROM support_messages
+    WHERE ticket_id=? AND author_type='creator' AND message=?
+      AND created_at >= datetime('now','-30 seconds')
+    ORDER BY created_at DESC,id DESC LIMIT 1
+  `).get(ticket.id, message);
+  if (recentDuplicate) {
+    return res.status(200).json({ message: { id: recentDuplicate.id, authorType: 'creator', message, createdAt: recentDuplicate.createdAt } });
+  }
   const createdAt = store.now();
   const messageId = store.id();
   store.db.prepare('INSERT INTO support_messages (id,ticket_id,author_type,author_user_id,message,created_at) VALUES (?,?,?,?,?,?)').run(messageId, ticket.id, 'creator', req.user.id, message, createdAt);

@@ -374,13 +374,21 @@ db.prepare('INSERT OR IGNORE INTO ads_txt_content (id, content, updated_at) VALU
 
 // Preserve support conversations created before the message history table was introduced.
 db.exec(`
-  INSERT OR IGNORE INTO support_messages (id, ticket_id, author_type, author_user_id, message, created_at)
+  INSERT INTO support_messages (id, ticket_id, author_type, author_user_id, message, created_at)
   SELECT id || ':creator', id, 'creator', user_id, message, created_at
-  FROM support_tickets;
-  INSERT OR IGNORE INTO support_messages (id, ticket_id, author_type, message, created_at)
+  FROM support_tickets t
+  WHERE NOT EXISTS (
+    SELECT 1 FROM support_messages m
+    WHERE m.ticket_id=t.id AND m.author_type='creator' AND m.message=t.message AND m.created_at=t.created_at
+  );
+  INSERT INTO support_messages (id, ticket_id, author_type, message, created_at)
   SELECT id || ':admin', id, 'admin', admin_note, updated_at
-  FROM support_tickets
-  WHERE admin_note IS NOT NULL AND trim(admin_note) <> '';
+  FROM support_tickets t
+  WHERE admin_note IS NOT NULL AND trim(admin_note) <> ''
+    AND NOT EXISTS (
+      SELECT 1 FROM support_messages m
+      WHERE m.ticket_id=t.id AND m.author_type='admin' AND m.message=t.admin_note AND m.created_at=t.updated_at
+    );
 `);
 
 for (const statement of [
