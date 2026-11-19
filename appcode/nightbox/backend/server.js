@@ -1717,17 +1717,12 @@ function recordViewAtStart(session) {
   const recent = store.db.prepare(`
     SELECT COUNT(*) AS count
     FROM view_sessions existing
-    JOIN creator_links existingLink ON existingLink.id = existing.link_id
-    WHERE existingLink.creator_id = ?
+    WHERE existing.link_id = ?
       AND existing.ip_hash = ?
       AND existing.started_at >= datetime('now', '-24 hours')
       AND existing.counted = 1
-  `).get(link.creatorId, session.ip_hash);
+  `).get(session.link_id, session.ip_hash);
   if (recent.count >= ipRule.maxViews) return { counted: false, duplicate: true };
-  const recentViewer = session.viewerUserId
-    ? store.db.prepare(`SELECT COUNT(*) AS count FROM view_sessions existing JOIN creator_links existingLink ON existingLink.id=existing.link_id WHERE existingLink.creator_id=? AND existing.viewer_user_id=? AND existing.started_at>=datetime('now','-24 hours') AND existing.counted=1`).get(link.creatorId, session.viewerUserId)
-    : store.db.prepare(`SELECT COUNT(*) AS count FROM view_sessions existing JOIN creator_links existingLink ON existingLink.id=existing.link_id WHERE existingLink.creator_id=? AND existing.viewer_hash=? AND existing.started_at>=datetime('now','-24 hours') AND existing.counted=1`).get(link.creatorId, session.viewerHash);
-  if (recentViewer.count >= Number(rules.max_views_per_viewer_24h || 1)) return { counted: false, duplicate: true };
 
   const bucket = parseInt(store.hash(session.id).slice(0, 8), 16) % 100;
   if (bucket >= rules.eligible_percent) return { counted: false, filtered: true };
@@ -1808,20 +1803,12 @@ app.post('/api/views/:id/qualify', (req, res) => {
   const recent = store.db.prepare(`
     SELECT COUNT(*) AS count
     FROM view_sessions existing
-    JOIN creator_links existingLink ON existingLink.id = existing.link_id
-    WHERE existingLink.creator_id = ?
+    WHERE existing.link_id = ?
       AND existing.ip_hash = ?
       AND existing.started_at >= datetime('now', '-24 hours')
       AND existing.counted = 1
-  `).get(link.creatorId, session.ip_hash);
+  `).get(session.link_id, session.ip_hash);
   if (recent.count >= ipRule.maxViews) {
-    store.db.prepare('UPDATE view_sessions SET qualified_at = ?, counted = 0 WHERE id = ?').run(store.now(), session.id);
-    return res.json({ counted: false, duplicate: true });
-  }
-  const recentViewer = session.viewer_user_id
-    ? store.db.prepare(`SELECT COUNT(*) AS count FROM view_sessions existing JOIN creator_links existingLink ON existingLink.id=existing.link_id WHERE existingLink.creator_id=? AND existing.viewer_user_id=? AND existing.started_at>=datetime('now','-24 hours') AND existing.counted=1 AND existing.id<>?`).get(link.creatorId, session.viewer_user_id, session.id)
-    : store.db.prepare(`SELECT COUNT(*) AS count FROM view_sessions existing JOIN creator_links existingLink ON existingLink.id=existing.link_id WHERE existingLink.creator_id=? AND existing.viewer_hash=? AND existing.started_at>=datetime('now','-24 hours') AND existing.counted=1 AND existing.id<>?`).get(link.creatorId, session.viewer_hash, session.id);
-  if (recentViewer.count >= Number(rules.max_views_per_viewer_24h || 1)) {
     store.db.prepare('UPDATE view_sessions SET qualified_at = ?, counted = 0 WHERE id = ?').run(store.now(), session.id);
     return res.json({ counted: false, duplicate: true });
   }
