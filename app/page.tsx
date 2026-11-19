@@ -2799,7 +2799,10 @@ function LiveAdminTickets({ toast }: { toast: (s: string) => void }) {
             all.findIndex((candidate) =>
               candidate.authorType === item.authorType &&
               candidate.message === item.message &&
-              candidate.createdAt === item.createdAt,
+              Math.abs(
+                new Date(candidate.createdAt).getTime() -
+                  new Date(item.createdAt).getTime(),
+              ) <= 10_000,
             ) === index,
           );
           return [
