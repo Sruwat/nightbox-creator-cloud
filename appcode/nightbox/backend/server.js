@@ -403,6 +403,35 @@ app.post('/internal/workers/claim', requireWorker, (req, res) => {
   const now = store.now();
   store.db.exec('BEGIN IMMEDIATE');
   try {
+    // Recover jobs whose worker lease expired. Without this pass, a crashed
+    // worker leaves the row in `processing` forever because the claim query
+    // intentionally selects only queued/retry jobs.
+    const stale = store.db.prepare(`
+      SELECT video_id AS videoId
+      FROM video_jobs
+      WHERE status='processing'
+        AND locked_at IS NOT NULL
+        AND locked_at < datetime('now','-30 minutes')
+      LIMIT 100
+    `).all();
+    if (stale.length) {
+      const recover = store.db.prepare(`
+        UPDATE video_jobs
+        SET status='retry', next_attempt_at=?, locked_at=NULL, claimed_by=NULL,
+            last_error=COALESCE(last_error,'Worker lease expired; job requeued'), updated_at=?
+        WHERE video_id=? AND status='processing'
+      `);
+      const requeueVideo = store.db.prepare(`
+        UPDATE videos
+        SET processing_status='queued', processing_stage='queued', processing_error=?
+        WHERE id=? AND status <> 'deleted' AND processing_status <> 'completed'
+      `);
+      for (const row of stale) {
+        recover.run(now, now, row.videoId);
+        requeueVideo.run('Worker lease expired; processing job requeued', row.videoId);
+      }
+      console.warn(`[Worker claim] Requeued ${stale.length} stale processing job(s).`);
+    }
     // Fairness is based first on active jobs per creator, then on the last
     // assignment timestamp. This gives every creator a turn during bursts.
     const job = store.db.prepare(`
