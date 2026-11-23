@@ -1423,7 +1423,7 @@ app.post('/api/videos/:id/playback-token', async (req, res) => {
     // This keeps MP4 fallback working even when Bunny URL-token settings are
     // being changed, and prevents the client from downloading the full file.
     const mediaUrl = `${PUBLIC_API_URL}/api/playback-media/${encodeURIComponent(video.id)}?token=${encodeURIComponent(token)}`;
-    return res.json({
+    return res.status(202).json({
       mediaUrl,
       mediaType: 'progressive',
       processing: true,
@@ -1445,7 +1445,7 @@ app.post('/api/videos/:id/playback-token', async (req, res) => {
       return res.status(403).json({ error: 'Video is awaiting admin approval', code: 'VIDEO_AWAITING_APPROVAL', state: publicVideoState(video) });
     }
     const mediaUrl = `${PUBLIC_API_URL}/api/playback-media/${encodeURIComponent(video.id)}?token=${encodeURIComponent(token)}`;
-    return res.json({
+    return res.status(202).json({
       mediaUrl,
       mediaType: 'progressive',
       processing: true,
@@ -1475,7 +1475,7 @@ app.post('/api/videos/:id/playback-token', async (req, res) => {
       store.db.prepare("INSERT OR REPLACE INTO video_jobs (video_id,job_type,status,attempts,last_error,next_attempt_at,locked_at,updated_at) VALUES (?, 'hls', 'queued', 0, ?, NULL, NULL, ?)").run(video.id, message, store.now());
       const refreshed = store.getVideoPlayback(video.id);
       ensureHlsForLegacyVideo(video.id, refreshed);
-      return res.json({
+      return res.status(202).json({
         mediaUrl: `${PUBLIC_API_URL}/api/playback-media/${encodeURIComponent(video.id)}?token=${encodeURIComponent(token)}`,
         mediaType: 'progressive',
         processing: true,
