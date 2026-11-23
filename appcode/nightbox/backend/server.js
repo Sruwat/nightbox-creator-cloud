@@ -388,6 +388,47 @@ app.post('/internal/workers/queue-status', requireWorker, (req, res) => {
   res.json({ pending: Number(pending?.count || 0), workers });
 });
 
+function recoverStaleProcessingJobs() {
+  const now = store.now();
+  store.db.exec('BEGIN IMMEDIATE');
+  try {
+    const stale = store.db.prepare(`
+      SELECT video_id AS videoId
+      FROM video_jobs
+      WHERE status='processing'
+        AND locked_at IS NOT NULL
+        AND locked_at < datetime('now','-30 minutes')
+      LIMIT 100
+    `).all();
+    if (!stale.length) {
+      store.db.exec('COMMIT');
+      return 0;
+    }
+    const recover = store.db.prepare(`
+      UPDATE video_jobs
+      SET status='retry', next_attempt_at=?, locked_at=NULL, claimed_by=NULL,
+          last_error=COALESCE(last_error,'Worker lease expired; job requeued'), updated_at=?
+      WHERE video_id=? AND status='processing'
+    `);
+    const requeueVideo = store.db.prepare(`
+      UPDATE videos
+      SET processing_status='queued', processing_stage='queued', processing_error=?
+      WHERE id=? AND status <> 'deleted' AND processing_status <> 'completed'
+    `);
+    for (const row of stale) {
+      recover.run(now, now, row.videoId);
+      requeueVideo.run('Worker lease expired; processing job requeued', row.videoId);
+    }
+    store.db.exec('COMMIT');
+    console.warn(`[Worker recovery] Requeued ${stale.length} stale processing job(s).`);
+    return stale.length;
+  } catch (error) {
+    try { store.db.exec('ROLLBACK'); } catch (_) { /* no-op */ }
+    console.error('[Worker recovery] Failed:', error.message);
+    return 0;
+  }
+}
+
 app.post('/internal/workers/claim', requireWorker, (req, res) => {
   const workerId = String(req.body?.workerId || '').trim().slice(0, 120);
   if (!workerId) return res.status(400).json({ error: 'workerId is required' });
@@ -400,38 +441,10 @@ app.post('/internal/workers/claim', requireWorker, (req, res) => {
   };
   if (!workerLoadAllowsClaim(worker)) return res.status(204).end();
 
+  recoverStaleProcessingJobs();
   const now = store.now();
   store.db.exec('BEGIN IMMEDIATE');
   try {
-    // Recover jobs whose worker lease expired. Without this pass, a crashed
-    // worker leaves the row in `processing` forever because the claim query
-    // intentionally selects only queued/retry jobs.
-    const stale = store.db.prepare(`
-      SELECT video_id AS videoId
-      FROM video_jobs
-      WHERE status='processing'
-        AND locked_at IS NOT NULL
-        AND locked_at < datetime('now','-30 minutes')
-      LIMIT 100
-    `).all();
-    if (stale.length) {
-      const recover = store.db.prepare(`
-        UPDATE video_jobs
-        SET status='retry', next_attempt_at=?, locked_at=NULL, claimed_by=NULL,
-            last_error=COALESCE(last_error,'Worker lease expired; job requeued'), updated_at=?
-        WHERE video_id=? AND status='processing'
-      `);
-      const requeueVideo = store.db.prepare(`
-        UPDATE videos
-        SET processing_status='queued', processing_stage='queued', processing_error=?
-        WHERE id=? AND status <> 'deleted' AND processing_status <> 'completed'
-      `);
-      for (const row of stale) {
-        recover.run(now, now, row.videoId);
-        requeueVideo.run('Worker lease expired; processing job requeued', row.videoId);
-      }
-      console.warn(`[Worker claim] Requeued ${stale.length} stale processing job(s).`);
-    }
     // Fairness is based first on active jobs per creator, then on the last
     // assignment timestamp. This gives every creator a turn during bursts.
     const job = store.db.prepare(`
@@ -3507,6 +3520,7 @@ async function cleanupRepeatedlyFailedVideos() {
 // queue bounded so historical HLS/failed notices cannot grow forever.
 const NOTIFICATION_RETENTION_MS = Math.max(60 * 60 * 1000, Number(process.env.VIDEO_NOTIFICATION_RETENTION_HOURS || 48) * 60 * 60 * 1000);
 const NOTIFICATION_CLEANUP_INTERVAL_MS = Math.max(15 * 60 * 1000, Number(process.env.VIDEO_NOTIFICATION_CLEANUP_INTERVAL_MINUTES || 60) * 60 * 1000);
+const STALE_JOB_RECOVERY_INTERVAL_MS = Math.max(60 * 1000, Number(process.env.STALE_JOB_RECOVERY_INTERVAL_MINUTES || 5) * 60 * 1000);
 
 function cleanupStaleVideoNotifications() {
   const cutoff = new Date(Date.now() - NOTIFICATION_RETENTION_MS).toISOString();
@@ -3526,6 +3540,9 @@ failedVideoCleanupTimer.unref();
 setTimeout(() => { void cleanupRepeatedlyFailedVideos(); }, 10000).unref();
 const notificationCleanupTimer = setInterval(cleanupStaleVideoNotifications, NOTIFICATION_CLEANUP_INTERVAL_MS);
 notificationCleanupTimer.unref();
+const staleJobRecoveryTimer = setInterval(recoverStaleProcessingJobs, STALE_JOB_RECOVERY_INTERVAL_MS);
+staleJobRecoveryTimer.unref();
+setTimeout(recoverStaleProcessingJobs, 15000).unref();
 setTimeout(cleanupStaleVideoNotifications, 12000).unref();
 
 const server = app.listen(PORT, '0.0.0.0', () => {
