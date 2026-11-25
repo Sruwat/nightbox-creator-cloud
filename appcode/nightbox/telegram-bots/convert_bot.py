@@ -710,6 +710,16 @@ async def handle(c, m):
     urls = URL_PATTERN.findall(text)
     tmp = tempfile.mkdtemp()
     has_video_media = bool(m.video or m.document or m.animation)
+    # Nightheast share posts often include a tiny Telegram preview alongside
+    # the real share URL. Prefer the authenticated resolver whenever the URL
+    # is present; validating the preview as the source causes false
+    # "too small" upload failures.
+    nightheast_url = next(
+        (candidate for candidate in urls if extract_nightheast_video_id(candidate)),
+        None,
+    ) if BOT_KIND == "NIGHTHEAST_TO_NIGHTBOX" else None
+    if nightheast_url:
+        has_video_media = False
     if not urls and not has_video_media:
         if BOT_KIND == "NIGHTHEAST_TO_NIGHTBOX":
             await m.reply_text(
@@ -784,7 +794,7 @@ async def handle(c, m):
                 await m.reply_text(converted_text)
             return
         else:
-            url = urls[0]
+            url = nightheast_url or urls[0]
             async with download_semaphore:
                 if BOT_KIND == "NIGHTHEAST_TO_NIGHTBOX" and extract_nightheast_video_id(url):
                     await status.edit_text("⏳ Contacting Nightheast resolver and downloading media...")
@@ -814,7 +824,7 @@ async def handle(c, m):
         preferences = get_text_preferences(m.chat.id)
         header = preferences.get("header", "").strip()
         footer = preferences.get("footer", "").strip()
-        body = source_text.replace(urls[0], watch) if urls else source_text
+        body = source_text.replace(url, watch) if urls else source_text
         if preferences.get("link_only"):
             converted_text = "\n".join(part for part in [header, watch, footer] if part)
         else:
