@@ -37,7 +37,7 @@ LABEL = os.getenv("BOT_LABEL", KIND.title())
 TOKEN = os.getenv(f"TELEGRAM_BOT_TOKEN_{KIND}") or os.getenv("TELEGRAM_BOT_TOKEN_SERVICE")
 API_ID = os.getenv("TELEGRAM_API_ID")
 API_HASH = os.getenv("TELEGRAM_API_HASH")
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:3000").rstrip("/")
+BACKEND_URL = os.getenv("BACKEND_URL", "https://api.nightbox.in").rstrip("/")
 PUBLIC_WATCH_URL = os.getenv("PUBLIC_WATCH_URL", "https://nightbox.in").rstrip("/")
 CREATOR_API_KEY = os.getenv("CREATOR_API_KEY", "")
 REQUIRE_CONNECT = os.getenv("TELEGRAM_REQUIRE_CONNECT", "true").lower() == "true"

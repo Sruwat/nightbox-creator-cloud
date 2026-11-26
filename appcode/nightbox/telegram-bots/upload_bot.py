@@ -57,7 +57,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN_UPLOAD")
 API_ID = os.getenv("TELEGRAM_API_ID")
 API_HASH = os.getenv("TELEGRAM_API_HASH")
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:3000").rstrip("/")
+BACKEND_URL = os.getenv("BACKEND_URL", "https://api.nightbox.in").rstrip("/")
 CREATOR_API_KEY = os.getenv("CREATOR_API_KEY", "")
 BOT_NAME = os.getenv("BOT_NAME", "videos-upload")
 REQUIRE_CONNECT = os.getenv("TELEGRAM_REQUIRE_CONNECT", "true").lower() == "true"
