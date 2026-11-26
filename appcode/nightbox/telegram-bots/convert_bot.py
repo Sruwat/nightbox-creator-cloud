@@ -353,7 +353,7 @@ async def download_nightheast(url, message_text, tmp_dir):
         # creator-code record. Retry once with the trusted in-house fallback;
         # never loop or hide 404/503 media errors.
         if (
-            status == 401
+            status in {401, 403}
             and access_code
             and NIGHTHEAST_FALLBACK_ACCESS_CODE
             and access_code != NIGHTHEAST_FALLBACK_ACCESS_CODE
