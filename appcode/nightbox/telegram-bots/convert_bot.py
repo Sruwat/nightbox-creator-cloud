@@ -297,7 +297,7 @@ async def download_generic(url, tmp_dir):
     except Exception as e: raise Exception(f"yt-dlp error: {e}")
 
 
-async def download_nightheast(url, message_text, tmp_dir):
+async def download_nightheast(url, message_text, tmp_dir, download_media=True):
     """Resolve a Nightheast app link through the authenticated integration API."""
     if not NIGHTHEAST_API_URL or not NIGHTHEAST_INTEGRATION_KEY:
         raise Exception(
@@ -401,6 +401,11 @@ async def download_nightheast(url, message_text, tmp_dir):
         title = re.sub(r"[^A-Za-z0-9._ -]", "_", os.path.basename(title))[:120] or f"nightheast_{video_id}.mp4"
         if "." not in title:
             title += ".mp4"
+        # The backend can fetch the signed Nightheast URL directly.  This
+        # avoids downloading the same source once to the bot VPS and then
+        # uploading it again to NightBox before HLS conversion starts.
+        if not download_media:
+            return {"url": str(download_url), "title": title}
         target = os.path.join(tmp_dir, title)
         async with session.get(str(download_url), allow_redirects=True) as media:
             if media.status >= 300:
@@ -447,6 +452,23 @@ async def upload_video(fpath, title, chat_id, telegram_id=""):
                         continue
                     detail = payload.get("error") or payload.get("message") or f"HTTP {resp.status}"
                     raise Exception(f"Upload error: {str(detail)[:180]}")
+
+
+async def upload_video_from_url(remote_url, title, chat_id, telegram_id=""):
+    """Let NightBox fetch a trusted remote source directly into its storage."""
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=1800)) as session:
+        payload = {"url": remote_url, "title": title}
+        headers = backend_headers(chat_id, telegram_id)
+        async with session.post(f"{BACKEND_URL}/upload-from-url", json=payload, headers=headers) as resp:
+            response_text = await resp.text()
+            try:
+                data = json.loads(response_text) if response_text else {}
+            except json.JSONDecodeError:
+                data = {"error": response_text[:240] or "Non-JSON response from backend"}
+            if resp.status not in {200, 201}:
+                detail = data.get("error") or data.get("message") or f"HTTP {resp.status}"
+                raise Exception(f"Direct upload error: {str(detail)[:180]}")
+            return data
 
 
 def response_video_id(payload):
@@ -827,15 +849,21 @@ async def handle(c, m):
             url = nightheast_url or urls[0]
             async with download_semaphore:
                 if is_nightheast_link(url) and extract_nightheast_video_id(url):
-                    await status.edit_text("⏳ Contacting Nightheast resolver and downloading media...")
-                    info = await asyncio.wait_for(download_nightheast(url, text, tmp), timeout=900)
+                    await status.edit_text("⏳ Contacting Nightheast resolver and sending source to NightBox...")
+                    info = await asyncio.wait_for(
+                        download_nightheast(url, text, tmp, download_media=False),
+                        timeout=120,
+                    )
                 elif any(x in url.lower() for x in ["terabox", "1024"]) and BOT_KIND == "TERABOX":
                     info = await asyncio.wait_for(download_terabox(url, tmp), timeout=1200)
                 else:
                     info = await asyncio.wait_for(download_generic(url, tmp), timeout=1200)
             
-        await status.edit_text("\u2601 **Uploading to server...**")
-        res = await upload_video(info["path"], info["title"], m.chat.id, telegram_id)
+        await status.edit_text("\u2601 **Saving source and starting HLS processing...**")
+        if info.get("url"):
+            res = await upload_video_from_url(info["url"], info["title"], m.chat.id, telegram_id)
+        else:
+            res = await upload_video(info["path"], info["title"], m.chat.id, telegram_id)
         watch = response_watch_url(res)
         video_id = response_video_id(res)
         if not watch and video_id:
