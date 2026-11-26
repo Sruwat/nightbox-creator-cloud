@@ -863,7 +863,21 @@ async def handle(c, m):
             await m.reply_text(converted_text or watch)
     except Exception as e:
         logger.error(e)
-        await status.edit_text("❌ We could not prepare this video. Please try again with a valid link or video.")
+        detail = str(e)
+        if BOT_KIND == "NIGHTHEAST_TO_NIGHTBOX" and "access code" in detail.lower():
+            await status.edit_text(
+                "❌ Nightheast access code is invalid or expired.\n"
+                "Please send the latest Nightheast post with its current access code."
+            )
+        elif BOT_KIND == "NIGHTHEAST_TO_NIGHTBOX" and "video not found" in detail.lower():
+            await status.edit_text(
+                "❌ This Nightheast video is unavailable or not eligible.\n"
+                "Please send a fresh video link and access code."
+            )
+        else:
+            await status.edit_text(
+                "❌ We could not prepare this video. Please try again with a valid link or video."
+            )
     finally:
         if os.path.exists(tmp): shutil.rmtree(tmp)
 
