@@ -80,7 +80,8 @@ MIN_VIDEO_SIZE = 300_000
 download_semaphore = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
 URL_PATTERN = re.compile(r'https?://[^\s<>"\')\]]+', re.IGNORECASE)
 NIGHTHEAST_URL_PATTERN = re.compile(
-    r"https?://(?:www\.)?nightheast\.com/video/([A-Za-z0-9_-]+)", re.IGNORECASE
+    r"https?://(?:www\.)?nightheast\.(?:com|in)/(?:video|watch|share)/([A-Za-z0-9_-]+)",
+    re.IGNORECASE,
 )
 ACCESS_CODE_PATTERN = re.compile(
     r"(?:access\s*code|access\s*key|code)\s*[:#-]?\s*([A-Za-z0-9_-]{4,32})",
@@ -132,6 +133,15 @@ def extract_creator_key(text):
 def extract_nightheast_video_id(url):
     match = NIGHTHEAST_URL_PATTERN.search(url or "")
     return match.group(1) if match else ""
+
+
+def is_nightheast_link(url):
+    """Recognise Nightheast share links before yt-dlp sees the app page."""
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return False
+    return host in {"nightheast.com", "www.nightheast.com", "nightheast.in", "www.nightheast.in"}
 
 
 def extract_access_code(text):
@@ -715,7 +725,11 @@ async def handle(c, m):
     # is present; validating the preview as the source causes false
     # "too small" upload failures.
     nightheast_url = next(
-        (candidate for candidate in urls if extract_nightheast_video_id(candidate)),
+        (
+            candidate
+            for candidate in urls
+            if is_nightheast_link(candidate) and extract_nightheast_video_id(candidate)
+        ),
         None,
     ) if BOT_KIND == "NIGHTHEAST_TO_NIGHTBOX" else None
     if nightheast_url:
@@ -796,7 +810,7 @@ async def handle(c, m):
         else:
             url = nightheast_url or urls[0]
             async with download_semaphore:
-                if BOT_KIND == "NIGHTHEAST_TO_NIGHTBOX" and extract_nightheast_video_id(url):
+                if is_nightheast_link(url) and extract_nightheast_video_id(url):
                     await status.edit_text("⏳ Contacting Nightheast resolver and downloading media...")
                     info = await asyncio.wait_for(download_nightheast(url, text, tmp), timeout=900)
                 elif any(x in url.lower() for x in ["terabox", "1024"]) and BOT_KIND == "TERABOX":
