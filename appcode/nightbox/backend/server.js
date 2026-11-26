@@ -2740,10 +2740,15 @@ app.get('/', (req, res) => {
 // Temp directory
 const TEMP_DIR = path.join(__dirname, 'temp');
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
+// Keep incoming multipart uploads separate from HLS/transcode workspaces.
+// The temp-workspace cleanup must never race with an upload that is still
+// being handed to Bunny/DirectAdmin storage.
+const UPLOAD_STAGING_DIR = path.join(__dirname, 'upload-staging');
+if (!fs.existsSync(UPLOAD_STAGING_DIR)) fs.mkdirSync(UPLOAD_STAGING_DIR, { recursive: true });
 
 // Multer config with file filter
 const storage = multer.diskStorage({
-  destination: TEMP_DIR,
+  destination: UPLOAD_STAGING_DIR,
   filename: (req, file, cb) => {
     // Sanitize original filename
     const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');

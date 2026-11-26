@@ -434,7 +434,11 @@ async def upload_video(fpath, title, chat_id, telegram_id=""):
                 data.add_field('title', title)
                 headers = backend_headers(chat_id, telegram_id)
                 async with session.post(f"{BACKEND_URL}/upload-file", data=data, headers=headers) as resp:
-                    payload = await resp.json(content_type=None)
+                    response_text = await resp.text()
+                    try:
+                        payload = json.loads(response_text) if response_text else {}
+                    except json.JSONDecodeError:
+                        payload = {"error": response_text[:240] or "Non-JSON response from backend"}
                     if resp.status in {200, 201}:
                         return payload
                     if resp.status == 429 and attempt < 3:
