@@ -132,7 +132,19 @@ def extract_creator_key(text):
 
 def extract_nightheast_video_id(url):
     match = NIGHTHEAST_URL_PATTERN.search(url or "")
-    return match.group(1) if match else ""
+    if match:
+        return match.group(1)
+    try:
+        parsed = urlparse(url or "")
+        host = (parsed.hostname or "").lower()
+        if host not in {"nightheast.com", "www.nightheast.com", "nightheast.in", "www.nightheast.in"}:
+            return ""
+        for part in reversed((parsed.path or "").strip("/").split("/")):
+            if re.fullmatch(r"[A-Za-z0-9_-]{8,}", part):
+                return part
+    except Exception:
+        pass
+    return ""
 
 
 def is_nightheast_link(url):
